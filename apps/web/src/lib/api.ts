@@ -58,7 +58,8 @@ export function assetUrl(url: string | null | undefined): string {
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const staffToken = typeof window !== 'undefined' ? localStorage.getItem('kalpana_session_token') : null;
   const customerToken = typeof window !== 'undefined' ? localStorage.getItem('kalpana_customer_token') : null;
-  const token = path.includes('/customers/') ? (customerToken || staffToken) : (staffToken || customerToken);
+  const isCustomerPath = path.includes('/customers') || path.includes('/customer');
+  const token = isCustomerPath ? (customerToken || staffToken) : (staffToken || customerToken);
 
   const headers = new Headers(init.headers || {});
   if (token && !headers.has('Authorization')) {
