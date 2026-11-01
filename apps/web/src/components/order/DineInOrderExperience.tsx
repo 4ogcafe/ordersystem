@@ -3,7 +3,7 @@ import { toast } from 'react-hot-toast';
 import {
   Search, Plus, ShoppingCart, History,
   ChefHat, X, ChevronDown, Bell, Heart,
-  Receipt, Flame
+  Receipt
 } from 'lucide-react';
 import { apiFetch, assetUrl, errorMessage, getPublic } from '../../lib/api';
 import { yen } from '../../lib/format';
@@ -77,6 +77,13 @@ interface DineInOrderExperienceProps {
   onSwitchToTakeout?: () => void;
 }
 
+export interface CustomOptionItem {
+  id: string;
+  nameJa: string;
+  nameEn: string;
+  price: number;
+}
+
 const SPICE_LABELS: Record<number, { ja: string; en: string }> = {
   0: { ja: '甘口 (Mild)', en: 'Mild' },
   1: { ja: '普通 (Medium)', en: 'Medium' },
@@ -85,11 +92,45 @@ const SPICE_LABELS: Record<number, { ja: string; en: string }> = {
   4: { ja: '激辛 (Super Hot)', en: 'Super Hot' },
 };
 
-const BREAD_OPTIONS = [
-  { id: 'plain_naan', nameJa: 'プレーンナン (セット込)', nameEn: 'Plain Naan (Included)', price: 0 },
-  { id: 'rice', nameJa: 'ライス (セット込)', nameEn: 'Rice (Included)', price: 0 },
-  { id: 'cheese_naan', nameJa: 'チーズナンに変更 (+¥250)', nameEn: 'Cheese Naan (+¥250)', price: 250 },
-  { id: 'garlic_naan', nameJa: 'ガーリックナンに変更 (+¥200)', nameEn: 'Garlic Naan (+¥200)', price: 200 },
+const SPICE_OPTIONS = [
+  { level: 0, nameJa: '甘口', nameEn: 'Mild' },
+  { level: 1, nameJa: '普通', nameEn: 'Medium' },
+  { level: 2, nameJa: '中辛', nameEn: 'Hot' },
+  { level: 3, nameJa: '辛口', nameEn: 'Very Hot' },
+  { level: 4, nameJa: '激辛', nameEn: 'Super Hot' },
+];
+
+const NAAN_OPTIONS: CustomOptionItem[] = [
+  { id: 'plain_naan', nameJa: 'プレーンナン', nameEn: 'Plain Naan', price: 0 },
+  { id: 'rice', nameJa: 'ライス', nameEn: 'Rice', price: 0 },
+  { id: 'cheese_naan', nameJa: 'チーズナン', nameEn: 'Cheese Naan', price: 439 },
+  { id: 'honey_cheese_naan', nameJa: 'はちみつチーズナン', nameEn: 'Honey Cheese Naan', price: 499 },
+  { id: 'garlic_cheese_naan', nameJa: 'ガーリックチーズナン', nameEn: 'Garlic Cheese Naan', price: 549 },
+  { id: 'coconut_naan', nameJa: 'ココナッツ・ナン', nameEn: 'Coconut Naan', price: 329 },
+  { id: 'choco_naan', nameJa: 'チョコレート・ナン', nameEn: 'Chocolate Naan', price: 399 },
+  { id: 'choco_coconut_naan', nameJa: 'チョコ&ココナッツナン', nameEn: 'Choco & Coconut Naan', price: 399 },
+  { id: 'sesame_coconut_naan', nameJa: 'ゴマ&ココナッツナン', nameEn: 'Sesame & Coconut Naan', price: 399 },
+];
+
+const CURRY_CHOICE_OPTIONS: CustomOptionItem[] = [
+  { id: 'spinach', nameJa: 'ほうれん草カレー', nameEn: 'Spinach Curry', price: 0 },
+  { id: 'butter_chicken', nameJa: 'バターチキンカレー', nameEn: 'Butter Chicken Curry', price: 150 },
+  { id: 'dal', nameJa: '豆カレー', nameEn: 'Dal Curry', price: 0 },
+  { id: 'chicken', nameJa: 'チキンカレー', nameEn: 'Chicken Curry', price: 0 },
+  { id: 'seafood', nameJa: 'シーフードカレー', nameEn: 'Seafood Curry', price: 0 },
+  { id: 'vegetable', nameJa: '野菜カレー', nameEn: 'Vegetable Curry', price: 0 },
+  { id: 'keema', nameJa: 'キーマカレー', nameEn: 'Keema Curry', price: 0 },
+  { id: 'mutton', nameJa: 'マトンカレー', nameEn: 'Mutton Curry', price: 0 },
+];
+
+const DRINK_OPTIONS: CustomOptionItem[] = [
+  { id: 'none', nameJa: 'なし', nameEn: 'None', price: 0 },
+  { id: 'lassi', nameJa: 'ラッシー', nameEn: 'Lassi', price: 109 },
+  { id: 'mango_lassi', nameJa: 'マンゴーラッシー', nameEn: 'Mango Lassi', price: 109 },
+  { id: 'oolong', nameJa: 'ウーロン茶', nameEn: 'Oolong Tea', price: 109 },
+  { id: 'jasmine', nameJa: 'ジャスミン茶', nameEn: 'Jasmine Tea', price: 109 },
+  { id: 'iced_coffee', nameJa: 'アイスコーヒー', nameEn: 'Iced Coffee', price: 109 },
+  { id: 'hot_coffee', nameJa: 'ホットコーヒー', nameEn: 'Hot Coffee', price: 109 },
 ];
 
 export default function DineInOrderExperience({
@@ -163,7 +204,9 @@ export default function DineInOrderExperience({
   // Item customization modal
   const [customizingItem, setCustomizingItem] = useState<QuickMenuItem | null>(null);
   const [customSpice, setCustomSpice] = useState<number>(1);
-  const [customOption, setCustomOption] = useState<string>('plain_naan');
+  const [customBread, setCustomBread] = useState<string>('plain_naan');
+  const [customCurry, setCustomCurry] = useState<string>('dal');
+  const [customDrink, setCustomDrink] = useState<string>('none');
   const [customNote, setCustomNote] = useState<string>('');
   const [customQty, setCustomQty] = useState<number>(1);
 
@@ -303,27 +346,13 @@ export default function DineInOrderExperience({
   };
 
   const handleItemCardClick = (item: QuickMenuItem) => {
-    const isCurry = (item.nameJa || '').includes('カレー') || (item.nameEn || '').toLowerCase().includes('curry');
-    const isSet = (item.nameJa || '').includes('セット') || (item.nameEn || '').toLowerCase().includes('set');
-
-    if (isCurry || isSet) {
-      setCustomizingItem(item);
-      setCustomSpice(item.spiceLevel || 1);
-      setCustomOption(isSet ? 'plain_naan' : '');
-      setCustomNote('');
-      setCustomQty(1);
-    } else {
-      addToTray({
-        id: `${item.id}_${Date.now()}`,
-        itemId: item.id,
-        nameJa: item.nameJa || item.nameEn,
-        nameEn: item.nameEn,
-        price: item.price,
-        quantity: 1,
-        imageUrl: item.imageUrl,
-      });
-      toast.success(lang === 'ja' ? `「${item.nameJa || item.nameEn}」を追加しました` : `${item.nameEn} added!`);
-    }
+    setCustomizingItem(item);
+    setCustomSpice(item.spiceLevel !== undefined ? item.spiceLevel : 1);
+    setCustomBread('plain_naan');
+    setCustomCurry('dal');
+    setCustomDrink('none');
+    setCustomNote('');
+    setCustomQty(1);
   };
 
   const updateTrayQty = (trayId: string, delta: number) => {
@@ -1077,144 +1106,352 @@ export default function DineInOrderExperience({
         </div>
       )}
 
-      {/* ── MODAL: ITEM CUSTOMIZATION (Spice & Options) ── */}
-      {customizingItem && (
-        <div className="dio-modal-overlay" onClick={() => setCustomizingItem(null)}>
-          <div className="dio-modal-sheet" onClick={e => e.stopPropagation()}>
-            <div className="dio-modal-header">
-              <h3 className="dio-modal-title">
-                {lang === 'ja' ? (customizingItem.nameJa || customizingItem.nameEn) : customizingItem.nameEn}
-              </h3>
-              <button type="button" className="dio-modal-close" onClick={() => setCustomizingItem(null)}>
-                <X size={18} />
-              </button>
-            </div>
+      {/* ── MODAL: DISH CUSTOMIZATION SHEET (Matches shop.sakuracto.com design & screenshots) ── */}
+      {customizingItem && (() => {
+        const isCurry = (customizingItem.nameJa || '').includes('カレー') || (customizingItem.nameEn || '').toLowerCase().includes('curry');
+        const isSet = (customizingItem.nameJa || '').includes('セット') || (customizingItem.nameEn || '').toLowerCase().includes('set');
 
-            <div className="dio-modal-body">
-              {/* Spice */}
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 800, fontSize: '0.9rem', marginBottom: 8 }}>
-                  <Flame size={16} color="#ea580c" />
-                  <span>{lang === 'en' ? 'Select Spice Level' : '辛さを選択してください'}</span>
-                </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8 }}>
-                  {[0, 1, 2, 3, 4].map(lvl => (
-                    <button
-                      key={lvl}
-                      type="button"
-                      style={{
-                        padding: '10px 12px',
-                        border: customSpice === lvl ? '2px solid var(--dio-primary)' : '1.5px solid #e5e7eb',
-                        borderRadius: 12,
-                        background: customSpice === lvl ? '#fff7ed' : '#fff',
-                        color: customSpice === lvl ? 'var(--dio-primary)' : '#111827',
-                        fontWeight: 700,
-                        fontSize: '0.85rem',
-                        cursor: 'pointer',
-                      }}
-                      onClick={() => setCustomSpice(lvl)}
-                    >
-                      {lang === 'en' ? SPICE_LABELS[lvl]?.en : SPICE_LABELS[lvl]?.ja}
-                    </button>
-                  ))}
+        const selectedBreadObj = NAAN_OPTIONS.find(b => b.id === customBread);
+        const selectedCurryObj = CURRY_CHOICE_OPTIONS.find(c => c.id === customCurry);
+        const selectedDrinkObj = DRINK_OPTIONS.find(d => d.id === customDrink);
+
+        const breadAddPrice = (isCurry || isSet) && selectedBreadObj ? selectedBreadObj.price : 0;
+        const curryAddPrice = isSet && selectedCurryObj ? selectedCurryObj.price : 0;
+        const drinkAddPrice = (isCurry || isSet) && selectedDrinkObj ? selectedDrinkObj.price : 0;
+
+        const basePrice = customizingItem.price || 0;
+        const unitCustomPrice = basePrice + breadAddPrice + curryAddPrice + drinkAddPrice;
+        const totalCustomPrice = unitCustomPrice * customQty;
+
+        const handleConfirmCustomization = () => {
+          const optionParts: string[] = [];
+          let totalAddPrice = 0;
+
+          if (isCurry || isSet) {
+            const spiceObj = SPICE_OPTIONS.find(s => s.level === customSpice);
+            if (spiceObj) {
+              optionParts.push(lang === 'ja' ? `辛さ: ${spiceObj.nameJa}` : `Spice: ${spiceObj.nameEn}`);
+            }
+
+            if (selectedBreadObj) {
+              optionParts.push(
+                `${lang === 'ja' ? selectedBreadObj.nameJa : selectedBreadObj.nameEn}${
+                  selectedBreadObj.price > 0 ? ` (+¥${selectedBreadObj.price})` : ''
+                }`
+              );
+              totalAddPrice += selectedBreadObj.price;
+            }
+
+            if (isSet && selectedCurryObj) {
+              optionParts.push(
+                `${lang === 'ja' ? selectedCurryObj.nameJa : selectedCurryObj.nameEn}${
+                  selectedCurryObj.price > 0 ? ` (+¥${selectedCurryObj.price})` : ''
+                }`
+              );
+              totalAddPrice += selectedCurryObj.price;
+            }
+
+            if (selectedDrinkObj && selectedDrinkObj.id !== 'none') {
+              optionParts.push(
+                `${lang === 'ja' ? selectedDrinkObj.nameJa : selectedDrinkObj.nameEn}${
+                  selectedDrinkObj.price > 0 ? ` (+¥${selectedDrinkObj.price})` : ''
+                }`
+              );
+              totalAddPrice += selectedDrinkObj.price;
+            }
+          }
+
+          addToTray({
+            id: `${customizingItem.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            itemId: customizingItem.id,
+            nameJa: customizingItem.nameJa || customizingItem.nameEn,
+            nameEn: customizingItem.nameEn,
+            price: customizingItem.price,
+            quantity: customQty,
+            spiceLevel: isCurry || isSet ? customSpice : undefined,
+            selectedOption: optionParts.length > 0 ? optionParts.join(' / ') : undefined,
+            optionPrice: totalAddPrice,
+            note: customNote.trim() || undefined,
+            imageUrl: customizingItem.imageUrl,
+          });
+
+          toast.success(
+            lang === 'ja'
+              ? `「${customizingItem.nameJa || customizingItem.nameEn}」をトレイに追加しました`
+              : `${customizingItem.nameEn} added to tray!`
+          );
+
+          setCustomizingItem(null);
+        };
+
+        const itemImage = customizingItem.imageUrl
+          ? (customizingItem.imageUrl.startsWith('http') || customizingItem.imageUrl.startsWith('/')
+              ? customizingItem.imageUrl
+              : assetUrl(customizingItem.imageUrl))
+          : null;
+
+        const categoryBadge = lang === 'ja'
+          ? (customizingItem.category?.nameJa || customizingItem.category?.nameEn || 'ディナーメニュー')
+          : (customizingItem.category?.nameEn || 'Dinner Menu');
+
+        return (
+          <div className="dio-modal-overlay" onClick={() => setCustomizingItem(null)}>
+            <div className="dio-cust-sheet" onClick={e => e.stopPropagation()}>
+              {/* 1. Header with title and circular close button */}
+              <div className="dio-cust-header">
+                <h3 className="dio-cust-header-title">
+                  {lang === 'ja' ? (customizingItem.nameJa || customizingItem.nameEn) : customizingItem.nameEn}
+                </h3>
+                <button
+                  type="button"
+                  className="dio-cust-close-btn"
+                  onClick={() => setCustomizingItem(null)}
+                  aria-label="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* 2. Hero photo & Dish Information */}
+              <div className="dio-cust-hero">
+                {itemImage && (
+                  <div className="dio-cust-hero-img-wrap">
+                    <img
+                      src={itemImage}
+                      alt={customizingItem.nameJa || customizingItem.nameEn}
+                      className="dio-cust-hero-img"
+                      onError={e => { (e.target as HTMLElement).style.display = 'none'; }}
+                    />
+                  </div>
+                )}
+
+                <div className="dio-cust-hero-info">
+                  <div className="dio-cust-hero-top">
+                    <h2 className="dio-cust-hero-title">
+                      {lang === 'ja' ? (customizingItem.nameJa || customizingItem.nameEn) : customizingItem.nameEn}
+                    </h2>
+                    <span className="dio-cust-hero-price">
+                      ¥ {customizingItem.price.toLocaleString()}
+                    </span>
+                  </div>
+
+                  <div className="dio-cust-badge">
+                    {categoryBadge}
+                  </div>
+
+                  {(customizingItem.descriptionJa || customizingItem.descriptionEn) && (
+                    <p className="dio-cust-hero-desc">
+                      {lang === 'ja'
+                        ? (customizingItem.descriptionJa || customizingItem.descriptionEn)
+                        : (customizingItem.descriptionEn || customizingItem.descriptionJa)}
+                    </p>
+                  )}
                 </div>
               </div>
 
-              {/* Bread choice if set */}
-              {(customizingItem.nameJa || '').includes('セット') && (
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ display: 'block', fontWeight: 800, fontSize: '0.9rem', marginBottom: 8 }}>
-                    {lang === 'en' ? 'Choice of Bread or Rice' : 'ナンまたはライスを選択'}
-                  </label>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
-                    {BREAD_OPTIONS.map(opt => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        style={{
-                          textAlign: 'left',
-                          padding: '10px 14px',
-                          border: customOption === opt.id ? '2px solid var(--dio-primary)' : '1.5px solid #e5e7eb',
-                          borderRadius: 12,
-                          background: customOption === opt.id ? '#fff7ed' : '#fff',
-                          color: customOption === opt.id ? 'var(--dio-primary)' : '#111827',
-                          fontWeight: 700,
-                          fontSize: '0.85rem',
-                          cursor: 'pointer',
-                        }}
-                        onClick={() => setCustomOption(opt.id)}
-                      >
-                        {lang === 'en' ? opt.nameEn : opt.nameJa}
-                      </button>
-                    ))}
+              {/* 3. Red Tab Row */}
+              <div className="dio-cust-tab-row">
+                <span className="dio-cust-tab-item">{lang === 'ja' ? '追加' : 'Options'}</span>
+              </div>
+
+              {/* 4. Options Cards Body */}
+              <div className="dio-cust-body">
+                {/* Card 1: 辛さ (Spice Level) - for curry and set */}
+                {(isCurry || isSet) && (
+                  <div className="dio-opt-card">
+                    <div className="dio-opt-card-head">
+                      <h4 className="dio-opt-card-title">{lang === 'ja' ? '辛さ' : 'Spice Level'}</h4>
+                      <div className="dio-opt-card-sub">
+                        <span className="dio-opt-card-num">{lang === 'ja' ? '選択 1' : 'Select 1'}</span>
+                        <span className="dio-badge-required">{lang === 'ja' ? '必須' : 'Required'}</span>
+                      </div>
+                    </div>
+                    <div>
+                      {SPICE_OPTIONS.map(opt => {
+                        const isSelected = customSpice === opt.level;
+                        return (
+                          <div
+                            key={opt.level}
+                            className={`dio-opt-row ${isSelected ? 'is-selected' : ''}`}
+                            onClick={() => setCustomSpice(opt.level)}
+                          >
+                            <span className="dio-opt-row-label">
+                              {lang === 'ja' ? opt.nameJa : opt.nameEn}
+                            </span>
+                            <div className="dio-opt-radio is-circle">
+                              {isSelected && <div className="dio-opt-radio-dot" />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Card 2: ナン変更 (Naan Options) - for curry and set */}
+                {(isCurry || isSet) && (
+                  <div className="dio-opt-card">
+                    <div className="dio-opt-card-head">
+                      <h4 className="dio-opt-card-title">{lang === 'ja' ? 'ナン変更' : 'Naan & Rice Options'}</h4>
+                      <div className="dio-opt-card-sub">
+                        <span className="dio-opt-card-num">{lang === 'ja' ? '選択 1' : 'Select 1'}</span>
+                        <span className="dio-badge-optional">{lang === 'ja' ? '選択' : 'Optional'}</span>
+                      </div>
+                    </div>
+                    <div>
+                      {NAAN_OPTIONS.map(opt => {
+                        const isSelected = customBread === opt.id;
+                        const label = `${lang === 'ja' ? opt.nameJa : opt.nameEn}${opt.price > 0 ? ` [+¥${opt.price}]` : ''}`;
+                        return (
+                          <div
+                            key={opt.id}
+                            className={`dio-opt-row ${isSelected ? 'is-selected' : ''}`}
+                            onClick={() => setCustomBread(opt.id)}
+                          >
+                            <span className="dio-opt-row-label">{label}</span>
+                            <div className="dio-opt-radio">
+                              {isSelected && <div className="dio-opt-radio-dot" />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Card 3: カレー選択 (Curry Choice) - for sets */}
+                {isSet && (
+                  <div className="dio-opt-card">
+                    <div className="dio-opt-card-head">
+                      <h4 className="dio-opt-card-title">{lang === 'ja' ? 'カレー選択' : 'Curry Choice'}</h4>
+                      <div className="dio-opt-card-sub">
+                        <span className="dio-opt-card-num">{lang === 'ja' ? '選択 1' : 'Select 1'}</span>
+                        <span className="dio-badge-required">{lang === 'ja' ? '必須' : 'Required'}</span>
+                      </div>
+                    </div>
+                    <div>
+                      {CURRY_CHOICE_OPTIONS.map(opt => {
+                        const isSelected = customCurry === opt.id;
+                        const label = `${lang === 'ja' ? opt.nameJa : opt.nameEn}${opt.price > 0 ? ` [+¥${opt.price}]` : ''}`;
+                        return (
+                          <div
+                            key={opt.id}
+                            className={`dio-opt-row ${isSelected ? 'is-selected' : ''}`}
+                            onClick={() => setCustomCurry(opt.id)}
+                          >
+                            <span className="dio-opt-row-label">{label}</span>
+                            <div className="dio-opt-radio">
+                              {isSelected && <div className="dio-opt-radio-dot" />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Card 4: ドリンク (Drink Choice) */}
+                {(isCurry || isSet) && (
+                  <div className="dio-opt-card">
+                    <div className="dio-opt-card-head">
+                      <h4 className="dio-opt-card-title">{lang === 'ja' ? 'ドリンク' : 'Drink Choice'}</h4>
+                      <div className="dio-opt-card-sub">
+                        <span className="dio-opt-card-num">{lang === 'ja' ? '選択 1' : 'Select 1'}</span>
+                        <span className="dio-badge-optional">{lang === 'ja' ? '選択' : 'Optional'}</span>
+                      </div>
+                    </div>
+                    <div>
+                      {DRINK_OPTIONS.map(opt => {
+                        const isSelected = customDrink === opt.id;
+                        const label = `${lang === 'ja' ? opt.nameJa : opt.nameEn}${opt.price > 0 ? ` [+¥${opt.price}]` : ''}`;
+                        return (
+                          <div
+                            key={opt.id}
+                            className={`dio-opt-row ${isSelected ? 'is-selected' : ''}`}
+                            onClick={() => setCustomDrink(opt.id)}
+                          >
+                            <span className="dio-opt-row-label">{label}</span>
+                            <div className="dio-opt-radio">
+                              {isSelected && <div className="dio-opt-radio-dot" />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Card 5: 特別なご要望 (Special Requests) */}
+                <div className="dio-opt-card">
+                  <div className="dio-opt-card-head">
+                    <h4 className="dio-opt-card-title">{lang === 'ja' ? '特別なご要望' : 'Special Requests'}</h4>
+                    <div className="dio-opt-card-sub">
+                      <span className="dio-opt-card-num">{lang === 'ja' ? 'アレルギー・備考' : 'Allergies & Requests'}</span>
+                      <span className="dio-badge-optional">{lang === 'ja' ? '任意' : 'Optional'}</span>
+                    </div>
+                  </div>
+                  <div style={{ padding: '12px 16px' }}>
+                    <input
+                      type="text"
+                      placeholder={lang === 'ja' ? '例: パクチー抜き、氷少なめ、辛さ控えめなど' : 'e.g. less ice, no cilantro, allergy notes...'}
+                      value={customNote}
+                      onChange={e => setCustomNote(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '11px 14px',
+                        border: '1.5px solid #e5e7eb',
+                        borderRadius: 12,
+                        fontSize: '0.9rem',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                      }}
+                    />
                   </div>
                 </div>
-              )}
 
-              {/* Special Note */}
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontWeight: 800, fontSize: '0.9rem', marginBottom: 6 }}>
-                  {lang === 'en' ? 'Special Requests (Optional)' : 'ご要望・備考 (任意)'}
-                </label>
-                <input
-                  type="text"
-                  placeholder={lang === 'en' ? 'e.g. less ice, no cilantro...' : '例: パクチー抜き、氷少なめなど'}
-                  value={customNote}
-                  onChange={e => setCustomNote(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    border: '1.5px solid #e5e7eb',
-                    borderRadius: 12,
-                    fontSize: '0.9rem',
-                    outline: 'none',
-                  }}
-                />
-              </div>
-
-              {/* Quantity */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '16px 0 10px' }}>
-                <span style={{ fontWeight: 800, fontSize: '0.92rem' }}>{lang === 'en' ? 'Quantity' : '数量'}</span>
-                <div className="dio-in-tray-control">
-                  <button type="button" className="dio-in-tray-btn" onClick={() => setCustomQty(q => Math.max(1, q - 1))}>
-                    -
-                  </button>
-                  <span className="dio-in-tray-num">{customQty}</span>
-                  <button type="button" className="dio-in-tray-btn" onClick={() => setCustomQty(q => q + 1)}>
-                    +
-                  </button>
+                {/* Card 6: 数量 (Quantity Card matching screenshot 3) */}
+                <div className="dio-qty-card">
+                  <span className="dio-qty-label">{lang === 'ja' ? '数量' : 'Quantity'}</span>
+                  <div className="dio-qty-control">
+                    <button
+                      type="button"
+                      className="dio-qty-btn-minus"
+                      onClick={() => setCustomQty(q => Math.max(1, q - 1))}
+                      aria-label="Decrease quantity"
+                    >
+                      -
+                    </button>
+                    <span className="dio-qty-number">{customQty}</span>
+                    <button
+                      type="button"
+                      className="dio-qty-btn-plus"
+                      onClick={() => setCustomQty(q => q + 1)}
+                      aria-label="Increase quantity"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <button
-                type="button"
-                className="dio-send-order-btn"
-                onClick={() => {
-                  const selectedBread = BREAD_OPTIONS.find(b => b.id === customOption);
-                  const optionPrice = selectedBread?.price || 0;
-                  addToTray({
-                    id: `${customizingItem.id}_${Date.now()}`,
-                    itemId: customizingItem.id,
-                    nameJa: customizingItem.nameJa || customizingItem.nameEn,
-                    nameEn: customizingItem.nameEn,
-                    price: customizingItem.price,
-                    quantity: customQty,
-                    spiceLevel: customSpice,
-                    selectedOption: lang === 'en' ? selectedBread?.nameEn : selectedBread?.nameJa,
-                    optionPrice,
-                    note: customNote.trim() || undefined,
-                    imageUrl: customizingItem.imageUrl,
-                  });
-                  toast.success(lang === 'ja' ? `「${customizingItem.nameJa || customizingItem.nameEn}」を追加しました` : `${customizingItem.nameEn} added!`);
-                  setCustomizingItem(null);
-                }}
-              >
-                <span>{lang === 'ja' ? '注文トレイに追加' : 'Add to Cart'} ({yen((customizingItem.price + (BREAD_OPTIONS.find(b => b.id === customOption)?.price || 0)) * customQty)})</span>
-              </button>
+              {/* 5. Sticky Bottom Red Button matching screenshot */}
+              <div className="dio-cust-bottom-bar">
+                <button
+                  type="button"
+                  className="dio-cust-add-btn"
+                  onClick={handleConfirmCustomization}
+                >
+                  <span>
+                    {lang === 'ja'
+                      ? `カートに追加(¥${totalCustomPrice.toLocaleString()} )`
+                      : `Add to Cart (¥${totalCustomPrice.toLocaleString()} )`}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── MODAL: TABLE NUMBER EDIT ── */}
       {showTableEditModal && (
