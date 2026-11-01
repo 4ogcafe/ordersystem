@@ -86,8 +86,8 @@ const SPICE_LABELS: Record<number, { ja: string; en: string }> = {
 };
 
 const BREAD_OPTIONS = [
-  { id: 'plain_naan', nameJa: 'プレーンナン (セット込)', nameEn: 'Plain Naan', price: 0 },
-  { id: 'rice', nameJa: 'ライス (セット込)', nameEn: 'Rice', price: 0 },
+  { id: 'plain_naan', nameJa: 'プレーンナン (セット込)', nameEn: 'Plain Naan (Included)', price: 0 },
+  { id: 'rice', nameJa: 'ライス (セット込)', nameEn: 'Rice (Included)', price: 0 },
   { id: 'cheese_naan', nameJa: 'チーズナンに変更 (+¥250)', nameEn: 'Cheese Naan (+¥250)', price: 250 },
   { id: 'garlic_naan', nameJa: 'ガーリックナンに変更 (+¥200)', nameEn: 'Garlic Naan (+¥200)', price: 200 },
 ];
@@ -99,9 +99,25 @@ export default function DineInOrderExperience({
 }: DineInOrderExperienceProps) {
   const { customer } = useCustomer();
 
-  // Settings & state
+  // Settings & state - Japanese is default
   const [tableNumber, setTableNumber] = useState<string>(() => initialTableNumber || '1');
-  const [lang, setLang] = useState<'en' | 'ja'>('en');
+  const [lang, setLang] = useState<'ja' | 'en'>(() => {
+    try {
+      const saved = localStorage.getItem('adarsha_dine_lang');
+      if (saved === 'en' || saved === 'ja') return saved;
+    } catch {}
+    return 'ja';
+  });
+
+  const toggleLang = () => {
+    setLang(cur => {
+      const next = cur === 'ja' ? 'en' : 'ja';
+      try {
+        localStorage.setItem('adarsha_dine_lang', next);
+      } catch {}
+      return next;
+    });
+  };
 
   // Menu data
   const [menuItems, setMenuItems] = useState<QuickMenuItem[]>([]);
@@ -260,11 +276,11 @@ export default function DineInOrderExperience({
   // Active category display title
   const activeCategoryTitle = useMemo(() => {
     if (selectedCategoryId === 'all') {
-      return lang === 'en' ? 'Indian Dinner' : 'インド料理ディナー';
+      return lang === 'ja' ? '全メニュー (ディナー)' : 'All Dishes (Dinner)';
     }
     const cat = categories.find(c => c.id === selectedCategoryId);
-    if (!cat) return lang === 'en' ? 'Indian Menu' : 'メニュー';
-    return lang === 'en' ? cat.nameEn : (cat.nameJa || cat.nameEn);
+    if (!cat) return lang === 'ja' ? 'おすすめ料理' : 'Featured Dishes';
+    return lang === 'ja' ? (cat.nameJa || cat.nameEn) : cat.nameEn;
   }, [selectedCategoryId, categories, lang]);
 
   // Add item to tray
@@ -306,7 +322,7 @@ export default function DineInOrderExperience({
         quantity: 1,
         imageUrl: item.imageUrl,
       });
-      toast.success(`${lang === 'en' ? item.nameEn : (item.nameJa || item.nameEn)} added!`);
+      toast.success(lang === 'ja' ? `「${item.nameJa || item.nameEn}」を追加しました` : `${item.nameEn} added!`);
     }
   };
 
@@ -459,7 +475,7 @@ export default function DineInOrderExperience({
           </div>
 
           <div className="dio-header-center">
-            <span className="dio-header-brand">Adarsha</span>
+            <span className="dio-header-brand">{lang === 'ja' ? 'アダルサ' : 'Adarsha'}</span>
             <span className="dio-header-branch">{branchDisplayName}</span>
             <button
               type="button"
@@ -468,9 +484,9 @@ export default function DineInOrderExperience({
                 setNewTableInput(tableNumber);
                 setShowTableEditModal(true);
               }}
-              title="Change table number"
+              title={lang === 'ja' ? 'お席番号の変更' : 'Change table number'}
             >
-              <span>Table {tableNumber}</span>
+              <span>{lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}</span>
               <ChevronDown size={11} />
             </button>
           </div>
@@ -478,10 +494,10 @@ export default function DineInOrderExperience({
           <button
             type="button"
             className="dio-flag-pill"
-            onClick={() => setLang(l => (l === 'en' ? 'ja' : 'en'))}
-            title={lang === 'en' ? 'Switch to Japanese' : 'Switch to English'}
+            onClick={toggleLang}
+            title={lang === 'ja' ? 'Switch to English' : '日本語に切り替え'}
           >
-            <span>{lang === 'en' ? '🇬🇧' : '🇯🇵'}</span>
+            <span>{lang === 'ja' ? '🇯🇵 日本語' : '🇬🇧 EN'}</span>
             <ChevronDown size={13} color="#4b5563" />
           </button>
         </div>
@@ -494,7 +510,7 @@ export default function DineInOrderExperience({
           className={`dio-cat-chip ${selectedCategoryId === 'all' ? 'is-active' : ''}`}
           onClick={() => setSelectedCategoryId('all')}
         >
-          {lang === 'en' ? 'All Dishes' : '全料理'}
+          {lang === 'ja' ? '全メニュー' : 'All Dishes'}
         </button>
         {categories.map(cat => (
           <button
@@ -503,7 +519,7 @@ export default function DineInOrderExperience({
             className={`dio-cat-chip ${selectedCategoryId === cat.id ? 'is-active' : ''}`}
             onClick={() => setSelectedCategoryId(cat.id)}
           >
-            {lang === 'en' ? cat.nameEn : (cat.nameJa || cat.nameEn)}
+            {lang === 'ja' ? (cat.nameJa || cat.nameEn) : cat.nameEn}
           </button>
         ))}
       </div>
@@ -515,7 +531,7 @@ export default function DineInOrderExperience({
           <input
             type="text"
             className="dio-search-input"
-            placeholder={lang === 'en' ? 'Search menu items...' : 'メニューを検索...'}
+            placeholder={lang === 'ja' ? 'メニュー・料理名を検索...' : 'Search menu items...'}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
           />
@@ -537,7 +553,7 @@ export default function DineInOrderExperience({
             onClick={() => setShowCategoryDropdown(v => !v)}
           >
             <span style={{ fontSize: '1.1rem' }}>≡</span>
-            <span>{activeCategoryTitle.length > 10 ? `${activeCategoryTitle.substring(0, 9)}...` : activeCategoryTitle}</span>
+            <span>{activeCategoryTitle.length > 8 ? `${activeCategoryTitle.substring(0, 7)}...` : activeCategoryTitle}</span>
             <ChevronDown size={14} color="#6b7280" />
           </button>
 
@@ -575,7 +591,7 @@ export default function DineInOrderExperience({
                   setShowCategoryDropdown(false);
                 }}
               >
-                {lang === 'en' ? 'All Dishes' : '全料理'}
+                {lang === 'ja' ? '全メニュー' : 'All Dishes'}
               </button>
               {categories.map(cat => (
                 <button
@@ -660,12 +676,12 @@ export default function DineInOrderExperience({
                 {/* Content Center */}
                 <div className="dio-item-content">
                   <h3 className="dio-item-title">
-                    {lang === 'en' ? item.nameEn : (item.nameJa || item.nameEn)}
+                    {lang === 'ja' ? (item.nameJa || item.nameEn) : item.nameEn}
                   </h3>
                   <p className="dio-item-desc">
-                    {lang === 'en'
-                      ? item.descriptionEn || item.descriptionJa || 'Authentic dish freshly prepared.'
-                      : item.descriptionJa || item.descriptionEn}
+                    {lang === 'ja'
+                      ? (item.descriptionJa || item.descriptionEn || '本格スパイスで仕上げた当店自慢の一品。')
+                      : (item.descriptionEn || item.descriptionJa || 'Authentic dish freshly prepared with spices.')}
                   </p>
                   <div className="dio-item-price">
                     {yen(item.price)}
@@ -761,7 +777,7 @@ export default function DineInOrderExperience({
           <div className="dio-modal-sheet" onClick={e => e.stopPropagation()}>
             <div className="dio-modal-header">
               <h3 className="dio-modal-title">
-                🛒 {lang === 'en' ? 'Your Order' : '今回のご注文'} ({trayCount})
+                🛒 {lang === 'ja' ? '今回のご注文' : 'Your Order'} ({trayCount})
               </h3>
               <button type="button" className="dio-modal-close" onClick={() => setShowCartModal(false)}>
                 <X size={18} />
@@ -773,24 +789,26 @@ export default function DineInOrderExperience({
                 <div style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--dio-gray)' }}>
                   <ShoppingCart size={48} color="#d1d5db" style={{ margin: '0 auto 12px' }} />
                   <p style={{ fontSize: '1.05rem', fontWeight: 800 }}>
-                    {lang === 'en' ? 'Your tray is empty' : '注文トレイは空です'}
+                    {lang === 'ja' ? '注文トレイは空です' : 'Your tray is empty'}
                   </p>
                   <p style={{ fontSize: '0.82rem' }}>
-                    {lang === 'en' ? 'Select dishes from the menu to add them here' : 'メニューからお好きな料理をお選びください'}
+                    {lang === 'ja' ? 'メニューからお好きな料理をお選びください' : 'Select dishes from the menu to add them here'}
                   </p>
                 </div>
               ) : (
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid #e5e7eb', marginBottom: 12 }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>Table {tableNumber}</span>
+                    <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
+                      {lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}
+                    </span>
                     <button
                       type="button"
                       style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 600 }}
                       onClick={() => {
-                        if (window.confirm(lang === 'en' ? 'Clear all items in tray?' : 'トレイを空にしますか？')) setTray([]);
+                        if (window.confirm(lang === 'ja' ? 'トレイを空にしますか？' : 'Clear all items in tray?')) setTray([]);
                       }}
                     >
-                      {lang === 'en' ? 'Clear Tray' : 'トレイを空にする'}
+                      {lang === 'ja' ? 'トレイを空にする' : 'Clear Tray'}
                     </button>
                   </div>
 
@@ -798,11 +816,11 @@ export default function DineInOrderExperience({
                     <div key={item.id} className="dio-tray-item">
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 800, fontSize: '0.98rem' }}>
-                          {lang === 'en' ? item.nameEn : item.nameJa}
+                          {lang === 'ja' ? item.nameJa : item.nameEn}
                         </div>
                         <div style={{ fontSize: '0.78rem', color: 'var(--dio-gray)' }}>
                           {item.spiceLevel !== undefined && (
-                            <span style={{ marginRight: 6 }}>🌶️ {SPICE_LABELS[item.spiceLevel]?.en}</span>
+                            <span style={{ marginRight: 6 }}>🌶️ {lang === 'ja' ? SPICE_LABELS[item.spiceLevel]?.ja : SPICE_LABELS[item.spiceLevel]?.en}</span>
                           )}
                           {item.selectedOption && <span>· {item.selectedOption}</span>}
                           {item.note && <span style={{ color: 'var(--dio-primary)', marginLeft: 4 }}>({item.note})</span>}
@@ -827,15 +845,15 @@ export default function DineInOrderExperience({
 
                   <div style={{ background: '#f9fafb', borderRadius: 14, padding: '14px 16px', marginTop: 16, border: '1px solid #e5e7eb' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', color: 'var(--dio-gray)', marginBottom: 6 }}>
-                      <span>Subtotal</span>
+                      <span>{lang === 'ja' ? '小計' : 'Subtotal'}</span>
                       <span>{yen(traySubtotal)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', color: 'var(--dio-gray)', marginBottom: 6 }}>
-                      <span>Tax (10%)</span>
+                      <span>{lang === 'ja' ? '消費税 (10%)' : 'Tax (10%)'}</span>
                       <span>{yen(trayTax)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.2rem', fontWeight: 900, borderTop: '1.5px solid #e5e7eb', paddingTop: 8, marginTop: 8 }}>
-                      <span>Total Due</span>
+                      <span>{lang === 'ja' ? 'ご注文合計 (税込)' : 'Total Due'}</span>
                       <span style={{ color: 'var(--dio-primary)' }}>{yen(trayGrandTotal)}</span>
                     </div>
                   </div>
@@ -847,7 +865,11 @@ export default function DineInOrderExperience({
                     onClick={handleSendOrder}
                   >
                     <ChefHat size={20} />
-                    <span>{submittingOrder ? 'Sending to Kitchen…' : (lang === 'en' ? 'Send Order to Kitchen' : '厨房へ注文を送信する')}</span>
+                    <span>
+                      {submittingOrder
+                        ? (lang === 'ja' ? '厨房へ送信中…' : 'Sending to Kitchen…')
+                        : (lang === 'ja' ? '厨房へ注文を送信する' : 'Send Order to Kitchen')}
+                    </span>
                   </button>
                 </div>
               )}
@@ -862,7 +884,7 @@ export default function DineInOrderExperience({
           <div className="dio-modal-sheet" onClick={e => e.stopPropagation()}>
             <div className="dio-modal-header">
               <h3 className="dio-modal-title">
-                📜 {lang === 'en' ? 'Orders & Table Bill' : '注文履歴とお会計'}
+                📜 {lang === 'ja' ? '注文履歴とお会計' : 'Orders & Table Bill'}
               </h3>
               <button type="button" className="dio-modal-close" onClick={() => setShowHistoryModal(false)}>
                 <X size={18} />
@@ -873,15 +895,15 @@ export default function DineInOrderExperience({
               {/* Running bill card */}
               <div style={{ background: '#111827', color: '#fff', borderRadius: 16, padding: '16px 20px', marginBottom: 16 }}>
                 <div style={{ fontSize: '0.85rem', color: '#9ca3af', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Table {tableNumber} · Total Bill</span>
-                  <span>{tableOrders.length} rounds ordered</span>
+                  <span>{lang === 'ja' ? `お席 ${tableNumber} · お会計合計` : `Table ${tableNumber} · Total Bill`}</span>
+                  <span>{lang === 'ja' ? `ご注文: ${tableOrders.length}回` : `${tableOrders.length} rounds ordered`}</span>
                 </div>
                 <div style={{ fontSize: '2rem', fontWeight: 900, color: '#fbbf24', margin: '6px 0' }}>
                   {yen(tableGrandTotal)}
                 </div>
                 <div style={{ display: 'flex', gap: 16, fontSize: '0.82rem', color: '#9ca3af', marginBottom: 14 }}>
-                  <span>Subtotal: {yen(tableSubtotal)}</span>
-                  <span>Tax (10%): {yen(tableTax)}</span>
+                  <span>{lang === 'ja' ? '小計' : 'Subtotal'}: {yen(tableSubtotal)}</span>
+                  <span>{lang === 'ja' ? '消費税 (10%)' : 'Tax (10%)'}: {yen(tableTax)}</span>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -891,7 +913,7 @@ export default function DineInOrderExperience({
                     onClick={() => setShowHistoryModal(false)}
                   >
                     <Plus size={16} />
-                    <span>{lang === 'en' ? 'Order More' : '追加注文'}</span>
+                    <span>{lang === 'ja' ? '追加注文' : 'Order More'}</span>
                   </button>
 
                   <button
@@ -903,7 +925,7 @@ export default function DineInOrderExperience({
                     }}
                   >
                     <Receipt size={16} />
-                    <span>{lang === 'en' ? 'Pay Bill' : 'お会計'}</span>
+                    <span>{lang === 'ja' ? 'お会計' : 'Pay Bill'}</span>
                   </button>
                 </div>
               </div>
@@ -911,7 +933,7 @@ export default function DineInOrderExperience({
               {/* Order history items */}
               {tableOrders.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '30px 16px', color: 'var(--dio-gray)' }}>
-                  <p>{lang === 'en' ? 'No orders placed yet for this table' : 'このテーブルの注文はまだありません'}</p>
+                  <p>{lang === 'ja' ? 'このテーブルの注文はまだありません' : 'No orders placed yet for this table'}</p>
                 </div>
               ) : (
                 tableOrders.map((ord, idx) => (
@@ -921,7 +943,7 @@ export default function DineInOrderExperience({
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f3f4f6', paddingBottom: 8, marginBottom: 8 }}>
                       <span style={{ fontWeight: 800, fontSize: '0.95rem' }}>
-                        Round {tableOrders.length - idx}
+                        {lang === 'ja' ? `第${tableOrders.length - idx}回 注文` : `Round ${tableOrders.length - idx}`}
                       </span>
                       <span
                         style={{
@@ -933,7 +955,9 @@ export default function DineInOrderExperience({
                           color: ord.status === 'COMPLETED' ? '#059669' : '#c2410c',
                         }}
                       >
-                        {ord.status === 'COMPLETED' ? 'Served' : 'Cooking in Kitchen'}
+                        {ord.status === 'COMPLETED'
+                          ? (lang === 'ja' ? '配膳済' : 'Served')
+                          : (lang === 'ja' ? '厨房で調理中' : 'Cooking in Kitchen')}
                       </span>
                     </div>
 
@@ -1016,11 +1040,15 @@ export default function DineInOrderExperience({
 
             <div className="dio-modal-body">
               <div style={{ textAlign: 'center', padding: '16px 0', borderBottom: '1px solid #e5e7eb', marginBottom: 16 }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--dio-gray)' }}>Table {tableNumber} · Total Bill</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--dio-gray)' }}>
+                  {lang === 'ja' ? `お席 ${tableNumber} · お会計合計` : `Table ${tableNumber} · Total Bill`}
+                </span>
                 <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--dio-primary)', margin: '4px 0' }}>
                   {yen(tableGrandTotal)}
                 </div>
-                <span style={{ fontSize: '0.75rem', color: 'var(--dio-gray)' }}>Includes 10% tax</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--dio-gray)' }}>
+                  {lang === 'ja' ? '消費税10%込' : 'Includes 10% tax'}
+                </span>
               </div>
 
               <div
@@ -1054,7 +1082,9 @@ export default function DineInOrderExperience({
         <div className="dio-modal-overlay" onClick={() => setCustomizingItem(null)}>
           <div className="dio-modal-sheet" onClick={e => e.stopPropagation()}>
             <div className="dio-modal-header">
-              <h3 className="dio-modal-title">{lang === 'en' ? customizingItem.nameEn : (customizingItem.nameJa || customizingItem.nameEn)}</h3>
+              <h3 className="dio-modal-title">
+                {lang === 'ja' ? (customizingItem.nameJa || customizingItem.nameEn) : customizingItem.nameEn}
+              </h3>
               <button type="button" className="dio-modal-close" onClick={() => setCustomizingItem(null)}>
                 <X size={18} />
               </button>
@@ -1175,11 +1205,11 @@ export default function DineInOrderExperience({
                     note: customNote.trim() || undefined,
                     imageUrl: customizingItem.imageUrl,
                   });
-                  toast.success(`${lang === 'en' ? customizingItem.nameEn : (customizingItem.nameJa || customizingItem.nameEn)} added!`);
+                  toast.success(lang === 'ja' ? `「${customizingItem.nameJa || customizingItem.nameEn}」を追加しました` : `${customizingItem.nameEn} added!`);
                   setCustomizingItem(null);
                 }}
               >
-                <span>{lang === 'en' ? 'Add to Cart' : '注文トレイに追加'} ({yen((customizingItem.price + (BREAD_OPTIONS.find(b => b.id === customOption)?.price || 0)) * customQty)})</span>
+                <span>{lang === 'ja' ? '注文トレイに追加' : 'Add to Cart'} ({yen((customizingItem.price + (BREAD_OPTIONS.find(b => b.id === customOption)?.price || 0)) * customQty)})</span>
               </button>
             </div>
           </div>
@@ -1191,7 +1221,7 @@ export default function DineInOrderExperience({
         <div className="dio-modal-overlay" onClick={() => setShowTableEditModal(false)}>
           <div className="dio-modal-sheet" onClick={e => e.stopPropagation()}>
             <div className="dio-modal-header">
-              <h3 className="dio-modal-title">🪑 {lang === 'en' ? 'Change Table' : 'テーブル番号の変更'}</h3>
+              <h3 className="dio-modal-title">🪑 {lang === 'ja' ? 'テーブル番号の変更' : 'Change Table'}</h3>
               <button type="button" className="dio-modal-close" onClick={() => setShowTableEditModal(false)}>
                 <X size={18} />
               </button>
@@ -1199,7 +1229,7 @@ export default function DineInOrderExperience({
 
             <div className="dio-modal-body">
               <p style={{ fontSize: '0.85rem', color: 'var(--dio-gray)', margin: '0 0 12px' }}>
-                {lang === 'en' ? 'Enter the number on your table sticker:' : 'お席のテーブル番号をご入力ください:'}
+                {lang === 'ja' ? 'お席のステッカーに記載された番号をご入力ください:' : 'Enter the number on your table sticker:'}
               </p>
 
               <input
@@ -1225,10 +1255,10 @@ export default function DineInOrderExperience({
                   if (!newTableInput.trim()) return;
                   setTableNumber(newTableInput.trim());
                   setShowTableEditModal(false);
-                  toast.success(`Table updated to ${newTableInput.trim()}`);
+                  toast.success(lang === 'ja' ? `お席番号を ${newTableInput.trim()} に変更しました` : `Table updated to ${newTableInput.trim()}`);
                 }}
               >
-                {lang === 'en' ? 'Save Table Number' : 'テーブル番号を保存'}
+                {lang === 'ja' ? 'テーブル番号を保存' : 'Save Table Number'}
               </button>
 
               {onSwitchToTakeout && (

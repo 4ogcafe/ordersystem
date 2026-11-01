@@ -56,9 +56,13 @@
 }
 
 .dio-header-logo {
-  height: 42px;
-  width: auto;
-  object-fit: contain;
+  height: 44px;
+  width: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid #fed7aa;
+  box-shadow: 0 2px 6px rgba(184, 46, 31, 0.12);
+  background: #ffffff;
 }
 
 .dio-header-center {
