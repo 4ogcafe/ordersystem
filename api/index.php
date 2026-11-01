@@ -125,6 +125,7 @@ if (!$pdo) {
         'error' => [
             'code' => 'DB_CONNECTION_FAILED',
             'message' => 'Service temporarily unavailable. Database connection could not be established.',
+            'debug' => $dbErrors,
         ],
     ]);
     exit;
