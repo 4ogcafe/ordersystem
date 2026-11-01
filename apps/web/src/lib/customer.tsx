@@ -31,6 +31,7 @@ export function CustomerProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const signOut = useCallback(async () => {
+    localStorage.removeItem('kalpana_customer_token');
     await apiFetch('/api/v1/customers/logout', { method: 'POST' }).catch(() => undefined);
     setCustomer(null);
   }, []);

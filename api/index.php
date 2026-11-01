@@ -18,6 +18,9 @@ set_exception_handler(function (Throwable $e) {
 
 // 1. CORS & Response Headers
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0');
+header('Pragma: no-cache');
+header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $allowedOrigins = ['https://pnglike.com', 'https://www.pnglike.com', 'http://localhost:5173', 'http://localhost:4000', 'http://localhost:3000'];
 $isPnglike = ($origin !== '' && (substr($origin, -11) === 'pnglike.com' || strpos($origin, 'pnglike.com') !== false));
@@ -4785,7 +4788,11 @@ function getBearerOrCookie($cookieName) {
     if (!empty($_COOKIE[$cookieName])) {
         return $_COOKIE[$cookieName];
     }
-    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
+    if (!$authHeader && function_exists('getallheaders')) {
+        $headers = getallheaders();
+        $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    }
     if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
         return trim($matches[1]);
     }
@@ -4943,7 +4950,7 @@ if ($method === 'POST' && ($subPath === '/auth/login' || $subPath === '/auth/log
         'domain' => '',
         'secure' => true,
         'httponly' => true,
-        'samesite' => 'Strict',
+        'samesite' => 'Lax',
     ]);
 
     echo json_encode(['user' => $sessionUser, 'token' => $token]);
@@ -4960,7 +4967,7 @@ if ($method === 'POST' && ($subPath === '/auth/logout' || $subPath === '/auth/lo
         'domain' => '',
         'secure' => true,
         'httponly' => true,
-        'samesite' => 'Strict',
+        'samesite' => 'Lax',
     ]);
     http_response_code(204);
     exit;
@@ -5045,7 +5052,7 @@ if ($method === 'POST' && ($subPath === '/customers/login' || $subPath === '/cus
         'domain' => '',
         'secure' => true,
         'httponly' => true,
-        'samesite' => 'Strict',
+        'samesite' => 'Lax',
     ]);
 
     unset($customer['passwordHash']);
@@ -5093,7 +5100,7 @@ if ($method === 'POST' && ($subPath === '/customers/logout' || $subPath === '/cu
         'domain' => '',
         'secure' => true,
         'httponly' => true,
-        'samesite' => 'Strict',
+        'samesite' => 'Lax',
     ]);
     http_response_code(204);
     exit;

@@ -136,8 +136,10 @@ export default function AdminDashboard() {
   };
 
   const handleLogout = async () => {
+    localStorage.removeItem('kalpana_session_token');
+    localStorage.removeItem('kalpana_session_user');
     await apiFetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
-    navigate('/login');
+    window.location.assign('/login');
   };
 
   const tabs = [

@@ -32,6 +32,8 @@ export default function Login() {
   }, []);
 
   const signOut = async () => {
+    localStorage.removeItem('kalpana_session_token');
+    localStorage.removeItem('kalpana_session_user');
     await apiFetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
     setCurrent(null);
   };
@@ -56,9 +58,14 @@ export default function Login() {
         );
         return;
       }
-      // The API sets an httpOnly session cookie; nothing is stored in the browser's storage.
-      const { user } = (await res.json()) as { user: SessionUser };
-      navigate(homeFor(user.role), { replace: true });
+      const data = await res.json();
+      const user = data.user as SessionUser;
+      if (data.token) {
+        localStorage.setItem('kalpana_session_token', data.token);
+        localStorage.setItem('kalpana_session_user', JSON.stringify(user));
+      }
+      const destination = homeFor(user.role);
+      window.location.assign(destination);
     } catch {
       setError('Could not reach the server. Check the connection and try again.');
     } finally {

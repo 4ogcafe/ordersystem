@@ -88,7 +88,11 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' }) {
         setError(await errorMessage(res, isRegister ? '登録できませんでした。入力内容をご確認ください。' : 'ログインできませんでした。'));
         return;
       }
-      signIn((await res.json()).customer);
+      const data = await res.json();
+      if (data.token) {
+        localStorage.setItem('kalpana_customer_token', data.token);
+      }
+      signIn(data.customer);
       navigate(next, { replace: true });
     } catch {
       setError('通信エラーが発生しました。もう一度お試しください。');

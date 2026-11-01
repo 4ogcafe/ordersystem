@@ -54,10 +54,27 @@ export function assetUrl(url: string | null | undefined): string {
   return path;
 }
 
-/** Authenticated request for the admin area: sends the session cookie and never uses the HTTP cache. */
+/** Authenticated request: sends session cookies and Authorization Bearer header, never using HTTP cache. */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const res = await fetch(`${API_BASE}${path}`, { cache: 'no-store', credentials: 'include', ...init });
+  const staffToken = typeof window !== 'undefined' ? localStorage.getItem('kalpana_session_token') : null;
+  const customerToken = typeof window !== 'undefined' ? localStorage.getItem('kalpana_customer_token') : null;
+  const token = path.includes('/customers/') ? (customerToken || staffToken) : (staffToken || customerToken);
+
+  const headers = new Headers(init.headers || {});
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    cache: 'no-store',
+    credentials: 'include',
+    ...init,
+    headers,
+  });
+
   if (res.status === 401 && window.location.pathname.startsWith('/admin')) {
+    localStorage.removeItem('kalpana_session_token');
+    localStorage.removeItem('kalpana_session_user');
     window.location.assign('/login');
   }
   return res;
