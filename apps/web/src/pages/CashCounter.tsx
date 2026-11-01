@@ -164,6 +164,7 @@ export default function CashCounter() {
   // Checkout Modal State
   const [activeCheckoutOrder, setActiveCheckoutOrder] = useState<any | null>(null);
   const [settlementMethod, setSettlementMethod] = useState<PaymentMethod>('CASH');
+  const [billAmountOverride, setBillAmountOverride] = useState<string>('');
   const [amountTenderedStr, setAmountTenderedStr] = useState('');
   const [settling, setSettling] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<'CALC' | 'CONFIRM' | 'SUCCESS'>('CALC');
@@ -281,14 +282,24 @@ export default function CashCounter() {
   // ── Helper: Check if order is paid ─────────────────────────────────────────
   const getOrderTransaction = useCallback((order: any) => {
     if (order.transaction && !order.transaction.isVoided) return order.transaction;
-    return transactions.find(t => (t.orderId === order.id || (t.orderNumber && Number(t.orderNumber) === Number(order.number))) && !t.isVoided);
+    return transactions.find(t => {
+      if (t.isVoided) return false;
+      if (t.orderId === order.id) return true;
+      if (t.orderNumber && Number(t.orderNumber) === Number(order.number)) return true;
+      if (Array.isArray(t.orderIds) && t.orderIds.includes(order.id)) return true;
+      if (order.orderIds && Array.isArray(order.orderIds)) {
+        if (order.orderIds.includes(t.orderId)) return true;
+        if (Array.isArray(t.orderIds) && t.orderIds.some((id: string) => order.orderIds.includes(id))) return true;
+      }
+      return false;
+    });
   }, [transactions]);
 
   const isOrderPaid = useCallback((order: any) => {
-    if (order.paymentStatus === 'PAID') return true;
-    if (Boolean(getOrderTransaction(order))) return true;
-    if (order.status === 'COMPLETED') return true;
-    return false;
+    // STRICT: Only manually confirmed cashier transactions count as paid!
+    // Never automatically show "精算済" without an actual non-voided transaction.
+    const tx = getOrderTransaction(order);
+    return Boolean(tx && !tx.isVoided);
   }, [getOrderTransaction]);
 
   const createReceiptOrderFromOrder = useCallback((
@@ -413,8 +424,11 @@ export default function CashCounter() {
   // Base total and live discount calculations for active checkout
   const baseTotal = useMemo(() => {
     if (!activeCheckoutOrder) return 0;
+    if (billAmountOverride.trim() !== '' && !isNaN(parseInt(billAmountOverride, 10))) {
+      return Math.max(0, parseInt(billAmountOverride, 10));
+    }
     return activeCheckoutOrder.grandTotal ?? activeCheckoutOrder.total ?? 0;
-  }, [activeCheckoutOrder]);
+  }, [activeCheckoutOrder, billAmountOverride]);
 
   const computedDiscountAmount = useMemo(() => {
     if (!activeCheckoutOrder || discountType === 'NONE') return 0;
@@ -438,9 +452,11 @@ export default function CashCounter() {
     return Math.max(0, baseTotal - computedDiscountAmount);
   }, [baseTotal, computedDiscountAmount]);
 
-  // Initialize checkout modal inputs (amount tendered starts blank for manual entry)
+  // Initialize checkout modal inputs
   useEffect(() => {
     if (activeCheckoutOrder) {
+      const calcTot = activeCheckoutOrder.grandTotal ?? activeCheckoutOrder.total ?? 0;
+      setBillAmountOverride(String(calcTot));
       setAmountTenderedStr('');
       setNonCashConfirmed(false);
       setDiscountType('NONE');
@@ -449,6 +465,26 @@ export default function CashCounter() {
       setCheckoutStep('CALC');
     }
   }, [activeCheckoutOrder]);
+
+  // Void a transaction and revert order to unpaid
+  const handleVoidTransaction = async (txId: string) => {
+    if (!window.confirm('この精算取引を取り消し、未精算の状態に戻しますか？')) {
+      return;
+    }
+    try {
+      const res = await apiFetch(`/api/v1/cash-register/transaction/${encodeURIComponent(txId)}/void`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        toast.success('精算を取り消し、未精算に戻しました');
+        await loadData();
+      } else {
+        toast.error('精算取消に失敗しました');
+      }
+    } catch {
+      toast.error('通信エラーが発生しました');
+    }
+  };
 
   // ── Settle Order ──────────────────────────────────────────────────────────
 
@@ -1426,10 +1462,38 @@ export default function CashCounter() {
                         style={{ padding: '10px 8px', fontSize: '0.95rem' }}
                       >
                         <Receipt size={16} />
-                        <span>お会計へ進む</span>
+                        <span>💳 精算する ({yen(grandTotal)})</span>
                       </button>
                     )}
                   </div>
+
+                  {/* Void Transaction Button if accidentally settled */}
+                  {paid && tx && (
+                    <button
+                      type="button"
+                      onClick={() => handleVoidTransaction(tx.id)}
+                      style={{
+                        marginTop: '6px',
+                        padding: '5px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid #475569',
+                        background: 'transparent',
+                        color: '#94a3b8',
+                        fontSize: '0.74rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '4px',
+                        width: '100%',
+                      }}
+                      title="この精算を取り消して未精算に戻します"
+                    >
+                      <RotateCcw size={12} />
+                      <span>↩️ 精算取消・未精算に戻す (Void)</span>
+                    </button>
+                  )}
 
                   {/* Free Table / Reset Table Button */}
                   {tableNum && (
@@ -1533,23 +1597,78 @@ export default function CashCounter() {
               {/* STEP 1: CALC & PAYMENT METHOD SELECTION */}
               {checkoutStep === 'CALC' && (
                 <>
-                  {/* Total Due Banner */}
-                  <div style={{ backgroundColor: '#1e293b', padding: '14px 18px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                    <div>
-                      <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#94a3b8' }}>お支払い合計金額 (税込)</span>
-                      <div style={{ fontSize: '0.8rem', color: '#60a5fa', marginTop: '2px' }}>
-                        🏪 {orderBranch?.name || 'アダルサ 本店'}
+                  {/* Total Due Banner & Editable Bill Amount Input */}
+                  <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', padding: '16px 18px', borderRadius: '12px', marginBottom: '14px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+                      <div>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#94a3b8' }}>
+                          伝票請求金額 (Bill Amount)
+                        </span>
+                        <div style={{ fontSize: '0.78rem', color: '#60a5fa', marginTop: '2px' }}>
+                          🏪 {orderBranch?.name || 'アダルサ 本店'}
+                          {activeCheckoutOrder.orderCount > 1 ? ` · ${activeCheckoutOrder.orderCount}回 注文合算` : ''}
+                        </div>
+                      </div>
+
+                      {/* Cashier Direct Bill Amount Enter / Edit */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '0.85rem', color: '#cbd5e1', fontWeight: 700 }}>請求額入力:</span>
+                        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                          <span style={{ position: 'absolute', left: '10px', fontSize: '1rem', fontWeight: 800, color: '#94a3b8' }}>¥</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={billAmountOverride}
+                            onChange={e => setBillAmountOverride(e.target.value)}
+                            placeholder="請求金額"
+                            style={{
+                              width: '140px',
+                              padding: '6px 10px 6px 26px',
+                              fontSize: '1.2rem',
+                              fontWeight: 900,
+                              textAlign: 'right',
+                              borderRadius: '8px',
+                              border: '2px solid #3b82f6',
+                              backgroundColor: '#0f172a',
+                              color: '#86efac',
+                              outline: 'none',
+                            }}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setBillAmountOverride(String(activeCheckoutOrder.grandTotal ?? activeCheckoutOrder.total ?? 0))}
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: '0.75rem',
+                            borderRadius: '6px',
+                            border: '1px solid #475569',
+                            background: '#334155',
+                            color: '#f1f5f9',
+                            cursor: 'pointer',
+                            fontWeight: 700,
+                          }}
+                          title="自動計算額に戻す"
+                        >
+                          リセット
+                        </button>
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      {discountAmt > 0 && (
-                        <div style={{ fontSize: '0.85rem', color: '#94a3b8', textDecoration: 'line-through', marginBottom: '2px' }}>
-                          {yen(baseTot)}
-                        </div>
-                      )}
-                      <span style={{ fontSize: '1.8rem', fontWeight: 900, color: '#86efac' }}>
-                        {yen(tot)}
-                      </span>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderTop: '1px solid #334155', paddingTop: '10px' }}>
+                      <div>
+                        <span style={{ fontSize: '1rem', fontWeight: 900, color: '#fff' }}>お支払い確定総額 (税込)</span>
+                        {discountAmt > 0 && (
+                          <span style={{ fontSize: '0.85rem', color: '#f87171', marginLeft: '8px', fontWeight: 700 }}>
+                            ({discountReason || (discountType === 'PERCENT' ? `${discountValue}%割引` : '値引き')} -{yen(discountAmt)})
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ fontSize: '2rem', fontWeight: 900, color: '#22c55e' }}>
+                          {yen(tot)}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -1656,6 +1775,59 @@ export default function CashCounter() {
                           </button>
                         );
                       })}
+                    </div>
+
+                    {/* Quick % and ¥ buttons */}
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', margin: '8px 0 12px' }}>
+                      <span style={{ fontSize: '0.78rem', color: '#94a3b8', alignSelf: 'center', marginRight: '4px', fontWeight: 700 }}>
+                        クイック値引:
+                      </span>
+                      {[5, 10, 15, 20].map(pct => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => {
+                            setDiscountType('PERCENT');
+                            setDiscountValue(pct);
+                            setDiscountReason(`${pct}%割引`);
+                          }}
+                          style={{
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            border: discountType === 'PERCENT' && discountValue === pct ? '1px solid #3b82f6' : '1px solid #475569',
+                            background: discountType === 'PERCENT' && discountValue === pct ? '#1e3a8a' : '#1e293b',
+                            color: '#93c5fd',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {pct}% OFF
+                        </button>
+                      ))}
+                      {[100, 200, 500, 1000].map(yenVal => (
+                        <button
+                          key={yenVal}
+                          type="button"
+                          onClick={() => {
+                            setDiscountType('FIXED');
+                            setDiscountValue(yenVal);
+                            setDiscountReason(`-¥${yenVal}値引`);
+                          }}
+                          style={{
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            border: discountType === 'FIXED' && discountValue === yenVal ? '1px solid #f59e0b' : '1px solid #475569',
+                            background: discountType === 'FIXED' && discountValue === yenVal ? '#78350f' : '#1e293b',
+                            color: '#fcd34d',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          -¥{yenVal}
+                        </button>
+                      ))}
                     </div>
 
                     {/* Custom Discount Input Controls */}

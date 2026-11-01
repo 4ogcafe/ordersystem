@@ -3284,7 +3284,7 @@ if ($method === 'GET' && ($subPath === '/orders' || $subPath === '/orders/')) {
             $o['store'] = $items[0]['store'];
         }
 
-        // Match payment transaction if available
+        // Match payment transaction if available (ONLY manual cashier settlement creates transactions!)
         $matchedTx = null;
         foreach ($transactions as $t) {
             if (empty($t['isVoided'])) {
@@ -3296,6 +3296,10 @@ if ($method === 'GET' && ($subPath === '/orders' || $subPath === '/orders/')) {
                     $matchedTx = $t;
                     break;
                 }
+                if (!empty($t['orderIds']) && is_array($t['orderIds']) && in_array($o['id'], $t['orderIds'], true)) {
+                    $matchedTx = $t;
+                    break;
+                }
             }
         }
 
@@ -3303,16 +3307,14 @@ if ($method === 'GET' && ($subPath === '/orders' || $subPath === '/orders/')) {
             $o['transaction'] = $matchedTx;
             $o['paymentMethod'] = $matchedTx['paymentMethod'] ?? 'CASH';
             $o['paymentStatus'] = 'PAID';
-            $o['paidAt'] = $matchedTx['timestamp'] ?? $o['completedAt'];
+            $o['paidAt'] = $matchedTx['timestamp'] ?? null;
             $o['amountTendered'] = $matchedTx['amountTendered'] ?? null;
             $o['changeAmount'] = $matchedTx['changeAmount'] ?? null;
             $o['paidTotal'] = $matchedTx['total'] ?? $o['grandTotal'];
         } else {
-            $isCompleted = ($o['status'] === 'COMPLETED');
-            $o['paymentStatus'] = $isCompleted ? 'PAID' : 'UNPAID';
-            if ($isCompleted) {
-                $o['paidAt'] = $o['completedAt'] ?? $o['updatedAt'];
-            }
+            // NEVER automatically mark paid without an actual manual transaction!
+            $o['paymentStatus'] = 'UNPAID';
+            $o['transaction'] = null;
         }
 
         return $o;
