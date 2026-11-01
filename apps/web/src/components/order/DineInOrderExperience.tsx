@@ -215,6 +215,33 @@ export default function DineInOrderExperience({
   const [callingStaff, setCallingStaff] = useState<boolean>(false);
   const [requestingBill, setRequestingBill] = useState<boolean>(false);
 
+  // Prevent background scrolling when any popup/modal is open
+  const isAnyModalOpen = Boolean(
+    customizingItem ||
+    showCartModal ||
+    showHistoryModal ||
+    showCallStaffModal ||
+    showCheckoutModal ||
+    showTableEditModal
+  );
+
+  useEffect(() => {
+    if (isAnyModalOpen) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
+      document.body.classList.add('dio-modal-open');
+      document.documentElement.classList.add('dio-modal-open');
+
+      return () => {
+        document.body.style.overflow = originalOverflow;
+        document.documentElement.style.overflow = '';
+        document.body.classList.remove('dio-modal-open');
+        document.documentElement.classList.remove('dio-modal-open');
+      };
+    }
+  }, [isAnyModalOpen]);
+
   // Session tokens tracker
   const getSessionTokens = (): string[] => {
     try {
@@ -495,7 +522,7 @@ export default function DineInOrderExperience({
   }, [selectedStore, lang]);
 
   return (
-    <div className="dio-wrapper">
+    <div className="dio-wrapper notranslate" translate="no">
       {/* ── TOP HEADER (Logo, Brand & Branch, Flag Pill) ── */}
       <header className="dio-header">
         <div className="dio-header-inner">
@@ -802,8 +829,16 @@ export default function DineInOrderExperience({
 
       {/* ── MODAL: CART TRAY (Send Order to Kitchen) ── */}
       {showCartModal && (
-        <div className="dio-modal-overlay" onClick={() => setShowCartModal(false)}>
-          <div className="dio-modal-sheet" onClick={e => e.stopPropagation()}>
+        <div
+          className="dio-modal-overlay"
+          onClick={() => setShowCartModal(false)}
+          onTouchMove={e => { if (e.target === e.currentTarget) e.preventDefault(); }}
+        >
+          <div
+            className="dio-modal-sheet"
+            onClick={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+          >
             <div className="dio-modal-header">
               <h3 className="dio-modal-title">
                 🛒 {lang === 'ja' ? '今回のご注文' : 'Your Order'} ({trayCount})
@@ -909,8 +944,16 @@ export default function DineInOrderExperience({
 
       {/* ── MODAL: TABLE ORDERS & BILL (History & More Order) ── */}
       {showHistoryModal && (
-        <div className="dio-modal-overlay" onClick={() => setShowHistoryModal(false)}>
-          <div className="dio-modal-sheet" onClick={e => e.stopPropagation()}>
+        <div
+          className="dio-modal-overlay"
+          onClick={() => setShowHistoryModal(false)}
+          onTouchMove={e => { if (e.target === e.currentTarget) e.preventDefault(); }}
+        >
+          <div
+            className="dio-modal-sheet"
+            onClick={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+          >
             <div className="dio-modal-header">
               <h3 className="dio-modal-title">
                 📜 {lang === 'ja' ? '注文履歴とお会計' : 'Orders & Table Bill'}
@@ -1006,8 +1049,16 @@ export default function DineInOrderExperience({
 
       {/* ── MODAL: CALL WAITER / STAFF ── */}
       {showCallStaffModal && (
-        <div className="dio-modal-overlay" onClick={() => setShowCallStaffModal(false)}>
-          <div className="dio-modal-sheet" onClick={e => e.stopPropagation()}>
+        <div
+          className="dio-modal-overlay"
+          onClick={() => setShowCallStaffModal(false)}
+          onTouchMove={e => { if (e.target === e.currentTarget) e.preventDefault(); }}
+        >
+          <div
+            className="dio-modal-sheet"
+            onClick={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+          >
             <div className="dio-modal-header">
               <h3 className="dio-modal-title">🔔 {lang === 'en' ? 'Call Staff' : '店員・スタッフ呼出'}</h3>
               <button type="button" className="dio-modal-close" onClick={() => setShowCallStaffModal(false)}>
@@ -1058,8 +1109,16 @@ export default function DineInOrderExperience({
 
       {/* ── MODAL: CHECKOUT / BILL ── */}
       {showCheckoutModal && (
-        <div className="dio-modal-overlay" onClick={() => setShowCheckoutModal(false)}>
-          <div className="dio-modal-sheet" onClick={e => e.stopPropagation()}>
+        <div
+          className="dio-modal-overlay"
+          onClick={() => setShowCheckoutModal(false)}
+          onTouchMove={e => { if (e.target === e.currentTarget) e.preventDefault(); }}
+        >
+          <div
+            className="dio-modal-sheet"
+            onClick={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+          >
             <div className="dio-modal-header">
               <h3 className="dio-modal-title">🧾 {lang === 'en' ? 'Table Checkout' : 'お会計手続き'}</h3>
               <button type="button" className="dio-modal-close" onClick={() => setShowCheckoutModal(false)}>
@@ -1195,8 +1254,16 @@ export default function DineInOrderExperience({
           : (customizingItem.category?.nameEn || 'Dinner Menu');
 
         return (
-          <div className="dio-modal-overlay" onClick={() => setCustomizingItem(null)}>
-            <div className="dio-cust-sheet" onClick={e => e.stopPropagation()}>
+          <div
+            className="dio-modal-overlay"
+            onClick={() => setCustomizingItem(null)}
+            onTouchMove={e => { if (e.target === e.currentTarget) e.preventDefault(); }}
+          >
+            <div
+              className="dio-cust-sheet"
+              onClick={e => e.stopPropagation()}
+              onTouchMove={e => e.stopPropagation()}
+            >
               {/* 1. Header with title and circular close button */}
               <div className="dio-cust-header">
                 <h3 className="dio-cust-header-title">
@@ -1455,8 +1522,16 @@ export default function DineInOrderExperience({
 
       {/* ── MODAL: TABLE NUMBER EDIT ── */}
       {showTableEditModal && (
-        <div className="dio-modal-overlay" onClick={() => setShowTableEditModal(false)}>
-          <div className="dio-modal-sheet" onClick={e => e.stopPropagation()}>
+        <div
+          className="dio-modal-overlay"
+          onClick={() => setShowTableEditModal(false)}
+          onTouchMove={e => { if (e.target === e.currentTarget) e.preventDefault(); }}
+        >
+          <div
+            className="dio-modal-sheet"
+            onClick={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+          >
             <div className="dio-modal-header">
               <h3 className="dio-modal-title">🪑 {lang === 'ja' ? 'テーブル番号の変更' : 'Change Table'}</h3>
               <button type="button" className="dio-modal-close" onClick={() => setShowTableEditModal(false)}>
