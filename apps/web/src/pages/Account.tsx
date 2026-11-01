@@ -248,7 +248,7 @@ export default function Account() {
                     {loyalty?.enabled && ` ・ ¥100ごとに${loyalty.pointsPer100Yen}pt貯まります`}
                   </div>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-start' }}>
+                <div className="acc-hero-actions">
                   <Link to="/menu/takeout" className="acc-btn"><ShoppingBag size={18} aria-hidden="true" />テイクアウトを注文</Link>
                   <button type="button" onClick={() => goTo('benefits', 'points')} className="acc-link" style={{ color: '#fff', fontSize: '0.84rem', opacity: 0.95 }}>
                     ポイント履歴を見る<ChevronRight size={14} aria-hidden="true" />
@@ -292,13 +292,14 @@ export default function Account() {
                 ) : pastOrders.length === 0 ? (
                   <EmptyOrders />
                 ) : (
-                  <div className="acc-card" style={{ padding: '6px 22px' }}>
+                  <div className="acc-card" style={{ padding: '4px 16px' }}>
                     {pastOrders.slice(0, 3).map((order, index) => (
                       <button
                         key={order.token}
                         type="button"
                         onClick={() => goTo('orders')}
-                        style={{ display: 'flex', width: '100%', alignItems: 'center', gap: '14px', padding: '14px 0', background: 'none', border: 'none', borderTop: index ? '1px solid var(--acc-border)' : 'none', font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}
+                        className="acc-order-row"
+                        style={{ borderTop: index ? '1px solid var(--acc-border)' : 'none' }}
                       >
                         <span className="acc-stat-icon" style={{ width: 40, height: 40 }}><Receipt size={18} aria-hidden="true" /></span>
                         <span style={{ flex: 1, minWidth: 0 }}>
@@ -309,8 +310,8 @@ export default function Account() {
                             {fulfillmentLabel(order.fulfillment)} ・ {formatDateTime(order.pickupAt)} ・ {statusLabel(order.status, order.fulfillment)}
                           </span>
                         </span>
-                        <span style={{ fontWeight: 700 }}>{yen(amountDue(order).amount)}</span>
-                        <ChevronRight size={18} aria-hidden="true" style={{ color: 'var(--acc-muted)' }} />
+                        <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{yen(amountDue(order).amount)}</span>
+                        <ChevronRight size={18} aria-hidden="true" style={{ color: 'var(--acc-muted)', flexShrink: 0 }} />
                       </button>
                     ))}
                   </div>

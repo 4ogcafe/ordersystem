@@ -54,11 +54,7 @@ export default function DailyGameBanner({ onRewardClaimed, compact = false }: Da
     <>
       <div
         onClick={() => setModalOpen(true)}
-        style={{
-          ...containerStyle,
-          padding: compact ? '16px 20px' : '20px 24px',
-          cursor: 'pointer',
-        }}
+        className={`daily-game-banner ${compact ? 'is-compact' : ''}`}
         role="button"
         tabIndex={0}
         onKeyDown={e => e.key === 'Enter' && setModalOpen(true)}
@@ -66,9 +62,9 @@ export default function DailyGameBanner({ onRewardClaimed, compact = false }: Da
         {/* Glow ambient background effect */}
         <div style={glowLayerStyle} />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: compact ? '14px' : '18px', zIndex: 1, minWidth: 0, flex: 1 }}>
+        <div className="daily-game-banner-body">
           {/* Game Visual Icon Badge */}
-          <div style={iconBadgeStyle}>
+          <div className="daily-game-banner-icon">
             <span style={{ fontSize: compact ? '1.8rem' : '2.2rem', lineHeight: 1 }}>{gameIcon}</span>
           </div>
 
@@ -150,7 +146,7 @@ export default function DailyGameBanner({ onRewardClaimed, compact = false }: Da
 
             {/* Spend progress bar if spend-gated and plays === 0 */}
             {isSpendRequired && availablePlays === 0 && spendStatus && (
-              <div style={{ marginTop: '8px', maxWidth: '360px' }}>
+              <div style={{ marginTop: '8px', maxWidth: '360px', width: '100%' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.73rem', color: '#fef08a', marginBottom: '3px' }}>
                   <span>進捗: ¥{spendStatus.currentCycleSpent.toLocaleString()} / ¥{spendStatus.cycleSpendAmount.toLocaleString()}</span>
                   <span style={{ fontWeight: 800 }}>{spendStatus.progressPercent}%</span>
@@ -167,7 +163,7 @@ export default function DailyGameBanner({ onRewardClaimed, compact = false }: Da
               </div>
             )}
 
-            <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#fde68a', opacity: 0.95, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#fde68a', opacity: 0.95, lineHeight: 1.45 }}>
               {isSpendRequired
                 ? availablePlays > 0
                   ? `おめでとうございます！運試しゲームに挑戦して、お得なポイントや割引クーポンをGETしよう！`
@@ -178,15 +174,15 @@ export default function DailyGameBanner({ onRewardClaimed, compact = false }: Da
         </div>
 
         {/* Action Button */}
-        <div style={{ zIndex: 1, flexShrink: 0 }}>
+        <div className="daily-game-banner-action">
           <button
             type="button"
+            className="daily-game-play-btn"
             onClick={e => {
               e.stopPropagation();
               setModalOpen(true);
             }}
             style={{
-              ...playButtonStyle,
               backgroundColor: canPlay ? '#fbbf24' : 'rgba(255, 255, 255, 0.15)',
               color: canPlay ? '#111827' : '#ffffff',
             }}
@@ -208,50 +204,9 @@ export default function DailyGameBanner({ onRewardClaimed, compact = false }: Da
   );
 }
 
-const containerStyle: CSSProperties = {
-  position: 'relative',
-  overflow: 'hidden',
-  borderRadius: '20px',
-  background: 'linear-gradient(135deg, #1e1b4b 0%, #311042 50%, #451a03 100%)',
-  border: '1.5px solid rgba(251, 191, 36, 0.4)',
-  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25), 0 0 16px rgba(251, 191, 36, 0.15)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: '16px',
-  flexWrap: 'wrap',
-  transition: 'transform 0.18s ease, box-shadow 0.18s ease',
-};
-
 const glowLayerStyle: CSSProperties = {
   position: 'absolute',
   inset: 0,
   background: 'radial-gradient(circle at 15% 50%, rgba(251, 191, 36, 0.2), transparent 45%), radial-gradient(circle at 85% 50%, rgba(236, 72, 153, 0.15), transparent 45%)',
   pointerEvents: 'none',
-};
-
-const iconBadgeStyle: CSSProperties = {
-  width: '56px',
-  height: '56px',
-  borderRadius: '16px',
-  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  border: '1px solid rgba(251, 191, 36, 0.3)',
-  display: 'grid',
-  placeItems: 'center',
-  flexShrink: 0,
-  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-};
-
-const playButtonStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '6px',
-  padding: '10px 20px',
-  borderRadius: '9999px',
-  fontWeight: 800,
-  fontSize: '0.9rem',
-  border: 'none',
-  cursor: 'pointer',
-  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.25)',
-  transition: 'transform 0.15s ease, opacity 0.15s ease',
 };

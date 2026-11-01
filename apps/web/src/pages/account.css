@@ -204,24 +204,112 @@
 
 .acc-empty { text-align: center; color: var(--acc-muted); padding: 32px 16px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 
-/* ---- Bottom tab bar (phones) ---- */
+/* ---- Hero Actions ---- */
+.acc-hero-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* ---- Order Item Row (Home tab) ---- */
+.acc-order-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.acc-order-row:hover { opacity: 0.85; }
+
+/* ---- Daily Game Banner Responsive Classes ---- */
+.daily-game-banner {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #1e1b4b 0%, #311042 50%, #451a03 100%);
+  border: 1.5px solid rgba(251, 191, 36, 0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 0 16px rgba(251, 191, 36, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.daily-game-banner:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3), 0 0 20px rgba(251, 191, 36, 0.25);
+}
+.daily-game-banner.is-compact {
+  padding: 16px 20px;
+}
+.daily-game-banner-body {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  z-index: 1;
+  min-width: 0;
+  flex: 1;
+}
+.daily-game-banner-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.daily-game-banner-action {
+  z-index: 1;
+  flex-shrink: 0;
+}
+.daily-game-play-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 20px;
+  border-radius: 9999px;
+  font-weight: 800;
+  font-size: 0.9rem;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+.daily-game-play-btn:active {
+  transform: scale(0.97);
+}
+
+/* ---- Bottom tab bar (phones & tablets) ---- */
 .acc-tabbar { display: none; }
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .acc { grid-template-columns: minmax(0, 1fr); }
   .acc-sidebar { display: none; }
   .acc-topbar { padding: 14px 16px; }
-  .acc-topbar h1 { font-size: 1.2rem; }
+  .acc-topbar h1 { font-size: clamp(1.1rem, 4.2vw, 1.35rem); }
   .acc-topbar p { display: none; }
   .acc-mobile-brand { display: block; }
   .acc-mobile-brand img { width: 32px; height: 32px; object-fit: contain; display: block; }
   .acc-hide-mobile { display: none !important; }
-  .acc-content { padding: 4px 16px calc(96px + env(safe-area-inset-bottom)); gap: 20px; }
-  .acc-hero { grid-template-columns: 1fr; padding: 22px; }
-  .acc-hero-points { font-size: 2.6rem; }
-  .acc-stats { gap: 10px; }
-  .acc-stat { flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px; }
-  .acc-stat-icon { width: 36px; height: 36px; }
+  .acc-content { padding: 8px 16px calc(96px + env(safe-area-inset-bottom)); gap: 20px; }
+  .acc-hero { grid-template-columns: 1fr; padding: 22px; gap: 16px; }
+  .acc-hero-points { font-size: clamp(2.4rem, 9vw, 3rem); }
+  .acc-hero-actions { width: 100%; align-items: stretch; }
+  .acc-hero-actions .acc-btn { width: 100%; justify-content: center; padding: 12px 16px; }
+  .acc-hero-actions .acc-link { justify-content: center; padding: 4px; }
   .acc-grid-2 { grid-template-columns: 1fr; }
 
   .acc-tabbar {
@@ -233,16 +321,18 @@
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
-    background: rgba(255, 255, 255, 0.94);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-top: 1px solid var(--acc-border);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.05);
   }
   .acc-tabbar button {
     position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 3px;
     border: none;
     background: none;
@@ -250,11 +340,117 @@
     font: inherit;
     font-size: 0.68rem;
     font-weight: 600;
-    padding: 4px 0;
+    padding: 6px 0;
+    min-height: 48px;
     cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
   .acc-tabbar button[aria-current='page'] { color: var(--acc-accent); }
-  .acc-tabbar .acc-badge { position: absolute; top: -2px; left: 54%; min-width: 16px; padding: 1px 5px; font-size: 0.62rem; }
+  .acc-tabbar .acc-badge { position: absolute; top: 1px; left: 54%; min-width: 16px; padding: 1px 5px; font-size: 0.62rem; }
+}
+
+@media (max-width: 640px) {
+  .acc-card {
+    padding: 16px 14px;
+    border-radius: 16px;
+  }
+  .acc-stats {
+    gap: 8px;
+  }
+  .acc-stat {
+    padding: 10px 4px;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    border-radius: 14px;
+    min-width: 0;
+  }
+  .acc-stat-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    margin-bottom: 2px;
+  }
+  .acc-stat-icon svg {
+    width: 17px;
+    height: 17px;
+  }
+  .acc-stat-value {
+    font-size: clamp(0.95rem, 3.8vw, 1.25rem);
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .acc-stat-label {
+    font-size: 0.72rem;
+    line-height: 1.2;
+    margin-top: 2px;
+  }
+  .daily-game-banner {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 16px 14px;
+    border-radius: 18px;
+    gap: 14px;
+  }
+  .daily-game-banner.is-compact {
+    padding: 14px 12px;
+  }
+  .daily-game-banner-body {
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .daily-game-banner-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+  .daily-game-banner-action {
+    width: 100%;
+  }
+  .daily-game-play-btn {
+    width: 100%;
+    padding: 12px 18px;
+    font-size: 0.95rem;
+  }
+  .stamp-card-foot {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .stamp-card-rules {
+    flex: 1 1 auto;
+    font-size: 0.78rem;
+  }
+  .stamp-qr-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 12px 16px;
+    font-size: 0.95rem;
+  }
+  .acc-order-row {
+    gap: 10px;
+    padding: 12px 0;
+  }
+  .acc-order-row .acc-stat-icon {
+    width: 34px !important;
+    height: 34px !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .acc-topbar { padding: 10px 12px; }
+  .acc-content { padding: 6px 12px calc(90px + env(safe-area-inset-bottom)); gap: 16px; }
+  .acc-hero { padding: 16px 12px; }
+  .acc-card { padding: 14px 10px; }
+  .acc-stats { gap: 6px; }
+  .acc-stat { padding: 8px 3px; }
+  .acc-stat-icon { width: 30px; height: 30px; }
+  .acc-stat-value { font-size: 0.9rem; }
+  .acc-stat-label { font-size: 0.68rem; }
+  .stamp-grid { gap: 10px 4px; }
 }
 
 /* ---- Profile ---- */
@@ -289,7 +485,7 @@
 .prof-save { position: sticky; bottom: 16px; display: flex; justify-content: flex-end; }
 .prof-save .acc-btn { box-shadow: 0 10px 24px -10px rgba(181, 69, 27, 0.6); }
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .prof-grid { grid-template-columns: 1fr; }
   /* Above the bottom tab bar. */
   .prof-save { bottom: calc(84px + env(safe-area-inset-bottom)); }

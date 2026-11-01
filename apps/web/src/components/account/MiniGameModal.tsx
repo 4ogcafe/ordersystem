@@ -696,7 +696,7 @@ function WheelGame({
         ref={canvasRef}
         width={320}
         height={320}
-        style={{ cursor: gameState === 'PLAYING' ? 'default' : 'pointer', maxWidth: '100%' }}
+        style={{ cursor: gameState === 'PLAYING' ? 'default' : 'pointer', maxWidth: '100%', width: 'min(100%, 300px)', height: 'auto', aspectRatio: '1 / 1' }}
         onClick={spin}
       />
 
@@ -706,7 +706,9 @@ function WheelGame({
         onClick={spin}
         style={{
           marginTop: '1.25rem',
-          padding: '10px 32px',
+          padding: '12px 28px',
+          width: 'min(100%, 280px)',
+          justifyContent: 'center',
           backgroundColor: '#fbbf24',
           color: '#111827',
           borderRadius: '9999px',
@@ -1042,11 +1044,12 @@ const backdropStyle: CSSProperties = {
   inset: 0,
   backgroundColor: 'rgba(0, 0, 0, 0.8)',
   backdropFilter: 'blur(6px)',
+  WebkitBackdropFilter: 'blur(6px)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   zIndex: 9999,
-  padding: '1rem',
+  padding: '12px',
 };
 
 const modalContainerStyle: CSSProperties = {
@@ -1056,9 +1059,11 @@ const modalContainerStyle: CSSProperties = {
   boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(251, 191, 36, 0.2)',
   width: '100%',
   maxWidth: '440px',
+  maxHeight: 'calc(100dvh - 24px)',
   overflow: 'hidden',
   display: 'flex',
   flexDirection: 'column',
+  boxSizing: 'border-box',
 };
 
 const modalHeaderStyle: CSSProperties = {
@@ -1068,6 +1073,7 @@ const modalHeaderStyle: CSSProperties = {
   padding: '14px 18px',
   borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
   backgroundColor: 'rgba(31, 41, 55, 0.7)',
+  flexShrink: 0,
 };
 
 const closeButtonStyle: CSSProperties = {
@@ -1083,7 +1089,10 @@ const closeButtonStyle: CSSProperties = {
 
 const modalBodyStyle: CSSProperties = {
   position: 'relative',
-  overflow: 'hidden',
+  overflowY: 'auto',
+  WebkitOverflowScrolling: 'touch',
+  flex: 1,
+  padding: '1rem',
 };
 
 const actionButtonStyle: CSSProperties = {

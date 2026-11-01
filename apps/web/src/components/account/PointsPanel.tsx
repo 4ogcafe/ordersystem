@@ -1,7 +1,7 @@
 import { Sparkles, Dices } from 'lucide-react';
 import type { Loyalty } from '../../lib/customer-context';
 import { formatDate, formatDateTime, formatOrderNumber, yen } from '../../lib/format';
-import { cardStyle, headingStyle, mutedStyle } from './styles';
+import { headingStyle, mutedStyle } from './styles';
 import type { PointEntry } from './types';
 
 const TYPE_LABEL: Record<PointEntry['type'], string> = {
@@ -18,7 +18,7 @@ const isGameEntry = (entry: PointEntry) =>
 function PointsCard({ balance, loyalty, gamePointsWon = 0, compact = false }: { balance: number; loyalty: Loyalty | null; gamePointsWon?: number; compact?: boolean }) {
   const value = balance * (loyalty?.pointValueYen ?? 1);
   return (
-    <div style={{ borderRadius: '24px', padding: compact ? '20px' : '28px', color: 'white', background: 'radial-gradient(circle at 85% 15%, rgba(242,168,59,0.55), transparent 45%), linear-gradient(135deg, #c4521f 0%, #8a3313 60%, #5e220c 100%)' }}>
+    <div style={{ borderRadius: '24px', padding: compact ? '18px 20px' : 'clamp(18px, 5vw, 28px)', color: 'white', background: 'radial-gradient(circle at 85% 15%, rgba(242,168,59,0.55), transparent 45%), linear-gradient(135deg, #c4521f 0%, #8a3313 60%, #5e220c 100%)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
         <div style={{ fontSize: '0.85rem', opacity: 0.9, letterSpacing: '1px' }}>ADARSHA POINTS</div>
         {gamePointsWon > 0 && (
@@ -28,7 +28,7 @@ function PointsCard({ balance, loyalty, gamePointsWon = 0, compact = false }: { 
           </div>
         )}
       </div>
-      <div style={{ fontSize: compact ? '2.2rem' : '2.8rem', fontWeight: 'bold', fontFamily: 'var(--font-display)', lineHeight: 1.2, margin: '6px 0 2px' }}>
+      <div style={{ fontSize: compact ? '2.2rem' : 'clamp(2.2rem, 8vw, 2.8rem)', fontWeight: 'bold', fontFamily: 'var(--font-display)', lineHeight: 1.2, margin: '6px 0 2px' }}>
         {balance.toLocaleString('ja-JP')}<span style={{ fontSize: '1rem', marginLeft: '4px' }}>pt</span>
       </div>
       <div style={{ fontSize: '0.9rem', opacity: 0.95 }}>{yen(value)}分としてご利用いただけます</div>
@@ -44,7 +44,7 @@ export default function PointsPanel({ balance, history, loyalty }: { balance: nu
       <PointsCard balance={balance} loyalty={loyalty} gamePointsWon={gamePointsWon} />
 
       {loyalty?.enabled ? (
-        <section style={cardStyle} aria-labelledby="how-heading">
+        <section className="acc-card" aria-labelledby="how-heading">
           <h2 id="how-heading" style={headingStyle}>ポイントのしくみ</h2>
           <ul style={{ margin: 0, paddingLeft: '1.2em', lineHeight: 1.9 }}>
             <li>毎日1回無料の「ミニゲーム（ルーレット・スクラッチ・スロット）」で遊ぶと、最大100pt以上のボーナスポイントが即時アダルサポイントに加算されます！</li>
@@ -54,10 +54,10 @@ export default function PointsPanel({ balance, history, loyalty }: { balance: nu
           </ul>
         </section>
       ) : (
-        <p style={{ ...cardStyle, margin: 0 }}>現在ポイントプログラムは休止中です。貯まっているポイントは保持されます。</p>
+        <p className="acc-card" style={{ margin: 0 }}>現在ポイントプログラムは休止中です。貯まっているポイントは保持されます。</p>
       )}
 
-      <section style={cardStyle} aria-labelledby="history-heading">
+      <section className="acc-card" aria-labelledby="history-heading">
         <h2 id="history-heading" style={headingStyle}>ポイント履歴</h2>
         {history.length === 0 ? (
           <p style={{ ...mutedStyle, margin: 0 }}>まだポイントの履歴はありません。</p>

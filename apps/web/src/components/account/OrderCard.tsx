@@ -6,7 +6,7 @@ import { useCart } from '../../lib/cart-context';
 import { fulfillmentLabel, statusLabel, timeWord } from '../order/fulfillment';
 import { amountDue, formatDateTime, formatOrderNumber, isActiveOrder, yen } from '../../lib/format';
 import { resolveOrderStore, saveOrderStoreId } from '../../lib/stores';
-import { cardStyle, mutedStyle } from './styles';
+import { mutedStyle } from './styles';
 import type { MemberOrder } from './types';
 
 const STATUS_COLORS: Record<string, { color: string; background: string }> = {
@@ -71,7 +71,7 @@ export default function OrderCard({ order }: { order: MemberOrder }) {
   };
 
   return (
-    <article style={{ ...cardStyle, padding: '20px' }}>
+    <article className="acc-card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', flexWrap: 'wrap' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
