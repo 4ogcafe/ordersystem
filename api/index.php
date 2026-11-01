@@ -988,7 +988,9 @@ function runDatabaseMigrations(PDO $pdo): array {
                 $pdo->exec("ALTER TABLE `{$table}` ADD `{$colName}` {$colDef}");
                 $columnsUpdated[] = "{$table}.{$colName}";
             }
-        } catch (Exception $e) {}
+        } catch (Exception $e) {
+            $columnsUpdated[] = "{$table}.{$colName} (error: " . $e->getMessage() . ")";
+        }
     }
 
     // Seed initial data
