@@ -203,6 +203,7 @@ export default function DineInOrderExperience({
 
   // Item customization modal
   const [customizingItem, setCustomizingItem] = useState<QuickMenuItem | null>(null);
+  const [custImgError, setCustImgError] = useState<boolean>(false);
   const [customSpice, setCustomSpice] = useState<number>(1);
   const [customBread, setCustomBread] = useState<string>('plain_naan');
   const [customCurry, setCustomCurry] = useState<string>('dal');
@@ -373,6 +374,7 @@ export default function DineInOrderExperience({
   };
 
   const handleItemCardClick = (item: QuickMenuItem) => {
+    setCustImgError(false);
     setCustomizingItem(item);
     setCustomSpice(item.spiceLevel !== undefined ? item.spiceLevel : 1);
     setCustomBread('plain_naan');
@@ -1264,7 +1266,7 @@ export default function DineInOrderExperience({
               onClick={e => e.stopPropagation()}
               onTouchMove={e => e.stopPropagation()}
             >
-              {/* 1. Header with title and circular close button */}
+              {/* 1. Fixed Header with Dish Title & Circular Close Button (ALWAYS PINNED) */}
               <div className="dio-cust-header">
                 <h3 className="dio-cust-header-title">
                   {lang === 'ja' ? (customizingItem.nameJa || customizingItem.nameEn) : customizingItem.nameEn}
@@ -1274,55 +1276,58 @@ export default function DineInOrderExperience({
                   className="dio-cust-close-btn"
                   onClick={() => setCustomizingItem(null)}
                   aria-label="Close"
+                  title={lang === 'ja' ? '閉じる' : 'Close'}
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              {/* 2. Hero photo & Dish Information */}
-              <div className="dio-cust-hero">
-                {itemImage && (
-                  <div className="dio-cust-hero-img-wrap">
-                    <img
-                      src={itemImage}
-                      alt={customizingItem.nameJa || customizingItem.nameEn}
-                      className="dio-cust-hero-img"
-                      onError={e => { (e.target as HTMLElement).style.display = 'none'; }}
-                    />
-                  </div>
-                )}
-
-                <div className="dio-cust-hero-info">
-                  <div className="dio-cust-hero-top">
-                    <h2 className="dio-cust-hero-title">
-                      {lang === 'ja' ? (customizingItem.nameJa || customizingItem.nameEn) : customizingItem.nameEn}
-                    </h2>
-                    <span className="dio-cust-hero-price">
-                      ¥ {customizingItem.price.toLocaleString()}
-                    </span>
-                  </div>
-
-                  <div className="dio-cust-badge">
-                    {categoryBadge}
-                  </div>
-
-                  {(customizingItem.descriptionJa || customizingItem.descriptionEn) && (
-                    <p className="dio-cust-hero-desc">
-                      {lang === 'ja'
-                        ? (customizingItem.descriptionJa || customizingItem.descriptionEn)
-                        : (customizingItem.descriptionEn || customizingItem.descriptionJa)}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* 3. Red Tab Row */}
+              {/* 2. Fixed Tab Row (ALWAYS PINNED) */}
               <div className="dio-cust-tab-row">
                 <span className="dio-cust-tab-item">{lang === 'ja' ? '追加' : 'Options'}</span>
               </div>
 
-              {/* 4. Options Cards Body */}
-              <div className="dio-cust-body">
+              {/* 3. Scrollable Content Area (Contains Hero and all Option Cards) */}
+              <div className="dio-cust-scrollable">
+                {/* Hero photo & Dish Information */}
+                <div className="dio-cust-hero">
+                  {itemImage && !custImgError && (
+                    <div className="dio-cust-hero-img-wrap">
+                      <img
+                        src={itemImage}
+                        alt={customizingItem.nameJa || customizingItem.nameEn}
+                        className="dio-cust-hero-img"
+                        onError={() => setCustImgError(true)}
+                      />
+                    </div>
+                  )}
+
+                  <div className="dio-cust-hero-info">
+                    <div className="dio-cust-hero-top">
+                      <h2 className="dio-cust-hero-title">
+                        {lang === 'ja' ? (customizingItem.nameJa || customizingItem.nameEn) : customizingItem.nameEn}
+                      </h2>
+                      <span className="dio-cust-hero-price">
+                        ¥ {customizingItem.price.toLocaleString()}
+                      </span>
+                    </div>
+
+                    <div className="dio-cust-badge">
+                      {categoryBadge}
+                    </div>
+
+                    {(customizingItem.descriptionJa || customizingItem.descriptionEn) && (
+                      <p className="dio-cust-hero-desc">
+                        {lang === 'ja'
+                          ? (customizingItem.descriptionJa || customizingItem.descriptionEn)
+                          : (customizingItem.descriptionEn || customizingItem.descriptionJa)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Options Cards Body */}
+                <div className="dio-cust-body">
                 {/* Card 1: 辛さ (Spice Level) - for curry and set */}
                 {(isCurry || isSet) && (
                   <div className="dio-opt-card">
@@ -1500,8 +1505,10 @@ export default function DineInOrderExperience({
                   </div>
                 </div>
               </div>
+              {/* end .dio-cust-scrollable */}
+            </div>
 
-              {/* 5. Sticky Bottom Red Button matching screenshot */}
+              {/* 4. Fixed Bottom Red Button matching screenshot */}
               <div className="dio-cust-bottom-bar">
                 <button
                   type="button"
