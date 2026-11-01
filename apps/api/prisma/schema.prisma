@@ -1,0 +1,534 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  STAFF
+  KITCHEN
+}
+
+enum MenuType {
+  LUNCH
+  TAKEOUT
+  GRAND
+}
+
+enum Placement {
+  HOME
+  CONTACT
+}
+
+enum OrderStatus {
+  NEW
+  CONFIRMED
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+enum EnquiryType {
+  GENERAL
+  RESERVATION
+  CATERING
+  FEEDBACK
+}
+
+enum DiscountType {
+  PERCENT
+  AMOUNT
+}
+
+enum PointType {
+  EARN
+  REDEEM
+  REFUND
+  BONUS
+  ADJUST
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role     @default(STAFF)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Menu {
+  id            String     @id @default(uuid())
+  type          MenuType   @unique
+  nameEn        String
+  nameJa        String?
+  descriptionEn String?    @db.Text
+  descriptionJa String?    @db.Text
+  servingHours  Json?
+  notesEn       String?    @db.Text
+  notesJa       String?    @db.Text
+  pdfUrl        String?
+  isActive      Boolean    @default(true)
+  categories    Category[]
+}
+
+model Category {
+  id            String      @id @default(uuid())
+  nameEn        String
+  nameJa        String?
+  sortOrder     Int         @default(0)
+  parentId      String?
+  parent        Category?   @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  subCategories Category[]  @relation("CategoryHierarchy")
+  menus         Menu[]
+  items         MenuItem[]
+}
+
+model MenuItem {
+  id            String        @id @default(uuid())
+  categoryId    String
+  category      Category      @relation(fields: [categoryId], references: [id])
+  menuTypes     Json          // MenuType[] stored as JSON array
+  nameEn        String
+  nameJa        String?
+  descriptionEn String?       @db.Text
+  descriptionJa String?       @db.Text
+  price         Int
+  variants      ItemVariant[]
+  imageUrl      String?
+  rating        Float?
+  spiceLevel    Int           @default(0)
+  isVegetarian  Boolean       @default(false)
+  isVegan       Boolean       @default(false)
+  isHalal       Boolean       @default(false)
+  isGlutenFree  Boolean       @default(false)
+  allergens     Json          // String[] stored as JSON array
+  isRecommended Boolean       @default(false)
+  isSoldOut     Boolean       @default(false)
+  isOrderable   Boolean       @default(true)
+  isActive      Boolean       @default(true)
+  sortOrder     Int           @default(0)
+  optionGroups  OptionGroup[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([categoryId, sortOrder])
+}
+
+model ItemVariant {
+  id        String   @id @default(uuid())
+  itemId    String
+  item      MenuItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  labelEn   String
+  labelJa   String?
+  price     Int
+  sortOrder Int      @default(0)
+}
+
+model OptionGroup {
+  id        String     @id @default(uuid())
+  nameJa    String
+  nameEn    String
+  type      String     @default("RADIO")
+  required  Boolean    @default(true)
+  options   Json       // OptionChoice[] stored as JSON array
+  sortOrder Int        @default(0)
+  items     MenuItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model CarouselSlide {
+  id         String    @id @default(uuid())
+  placement  Placement
+  imageUrl   String
+  altEn      String
+  altJa      String?
+  titleEn    String?
+  titleJa    String?
+  subtitleEn String?
+  subtitleJa String?
+  ctaLabelEn String?
+  ctaLabelJa String?
+  ctaLink    String?
+  sortOrder  Int       @default(0)
+  startAt    DateTime?
+  endAt      DateTime?
+  isActive   Boolean   @default(true)
+}
+
+// Singleton settings document for the restaurant
+model Settings {
+  id                     String    @id @default(uuid())
+  name                   String?
+  addressEn              String?
+  addressJa              String?
+  lat                    Float?
+  lng                    Float?
+  phone                  String?
+  email                  String?
+  timezone               String    @default("Asia/Tokyo")
+  currency               String    @default("JPY")
+  weeklyHours            Json?
+  holidays               Json?
+  socials                Json?
+  googlePlaceId          String?
+  mapUrl                 String?   @db.Text
+  googleMapsLink         String?   @db.Text
+  aboutEn                String?   @db.Text
+  aboutJa                String?   @db.Text
+  aboutHeroImage         String?
+  aboutHeroTag           String?
+  aboutHeroTitle         String?
+  aboutStoryJa           String?   @db.Text
+  aboutStoryLabelJa      String?
+  aboutStoryTitleJa      String?
+  aboutSpiceLabelJa      String?
+  aboutSpiceTitleJa      String?
+  aboutSpiceDescJa       String?   @db.Text
+  aboutSpiceImage        String?
+  aboutChefLabelJa       String?
+  aboutChefTitleJa       String?
+  aboutChefDescJa        String?   @db.Text
+  aboutChefImage         String?
+  contactHeroImage       String?
+  menuLunchHeroImage     String?
+  menuTakeoutHeroImage   String?
+  menuGrandHeroImage     String?
+  orderingEnabled        Boolean   @default(true)
+  pickupEnabled          Boolean   @default(false)
+  pickupHours            String?
+  pickupClosedDays       Json?     // Int[]
+  pickupClosedDates      Json?     // String[] YYYY-MM-DD
+  pickupLeadMinutes      Int?
+  pickupNoteJa           String?
+  publicSiteUrl          String?
+  footerLogo             String?
+  footerBrand            String?
+  footerTaglineJa        String?
+  footerCopyright        String?
+  footerLinks            Json?
+  footerShowHours        Boolean?
+  footerShowSocials      Boolean?
+  googleReviewsMinRating Int?
+  storeReviewCount       Int?
+  featuredReviews        Json?
+  storeReviewScore       String?
+  storeReviewText        String?
+  storeReviewLink        String?   @db.Text
+  orderingPausedUntil    DateTime?
+  pointsEnabled          Boolean?
+  pointsPer100Yen        Int?
+  pointValueYen          Int?
+  signupBonusPoints      Int?
+  taxRatePercent         Int?
+  // Delivery settings
+  deliveryEnabled        Boolean?
+  deliveryFee            Int?
+  deliveryMinOrder       Int?
+  deliveryAreas          Json?
+  deliveryLeadMinutes    Int?
+  // Stamp card settings
+  stampsEnabled          Boolean?
+  stampsPerCard          Int?
+  stampMinAmount         Int?
+  stampCooldownHours     Int?
+  stampRewardValidDays   Int?
+  stampRewards           Json?     // StampRewardConfig[]
+  // Welcome / store section
+  welcomeTitleEn         String?
+  welcomeTitleJa         String?
+  welcomeTextJa          String?   @db.Text
+  storeSectionLabelJa    String?
+  storeSectionTitleJa    String?
+  storeSectionSubJa      String?   @db.Text
+  storeLocationJa        String?
+  storeBadgeJa           String?
+  // Hero carousel section
+  heroTagJa              String?
+  heroSubJa              String?   @db.Text
+  // Menu explorer section
+  menuExplorerLabelJa    String?
+  menuExplorerTitleJa    String?
+  // Recommended menu section
+  recommendedLabelJa     String?
+  recommendedTitleJa     String?
+  recommendedSubJa       String?
+  // Newsletter section
+  newsletterTitleJa      String?
+  newsletterSubJa        String?   @db.Text
+  newsletterBgImage      String?
+  updatedAt              DateTime  @updatedAt
+}
+
+model ContactMessage {
+  id        String      @id @default(uuid())
+  name      String
+  email     String
+  phone     String?
+  type      EnquiryType @default(GENERAL)
+  date      DateTime?
+  guests    Int?
+  message   String      @db.Text
+  isRead    Boolean     @default(false)
+  ip        String?
+  createdAt DateTime    @default(now())
+}
+
+// Pickup and dine-in orders share this model
+model PickupOrder {
+  id             String      @id @default(uuid())
+  number         Int
+  dateKey        String
+  token          String      @unique
+  status         OrderStatus @default(NEW)
+  customerName   String
+  phone          String
+  email          String?
+  note           String?     @db.Text
+  pickupAt       DateTime
+  items          Json        // OrderLine[] (each: { itemId, nameEn, nameJa, unitPrice, quantity, lineTotal, options?, doneAt? })
+  customerId     String?
+  subtotal       Int?
+  offer          Json?       // { id, titleJa, discount }
+  pointsUsed     Int         @default(0)
+  pointsDiscount Int         @default(0)
+  total          Int
+  taxRate        Int?
+  tax            Int?
+  grandTotal     Int?
+  pointsEarned   Int         @default(0)
+  confirmedAt    DateTime?
+  readyAt        DateTime?
+  completedAt    DateTime?
+  cancelledAt    DateTime?
+  ip             String?
+  fulfillment    String      @default("PICKUP")   // PICKUP | DELIVERY | DINE_IN
+  deliveryFee    Int?
+  deliveryAddress Json?
+  reward         Json?       // { id, titleJa, kind, discount }
+  stampAwarded   Boolean?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([status, pickupAt])
+  @@index([customerId, createdAt])
+  @@index([dateKey])
+}
+
+model Customer {
+  id                  String         @id @default(uuid())
+  email               String         @unique
+  passwordHash        String
+  name                String
+  nameKana            String?
+  phone               String?
+  birthDate           String?
+  address             Json?          // { postalCode?, prefecture?, city?, line1?, building? }
+  preferences         Json?          // { allergens?, otherAllergies?, diets?, spiceLevel?, note? }
+  newsletterOptIn     Boolean        @default(false)
+  newsletterOptInAt   DateTime?
+  points              Int            @default(0)
+  isActive            Boolean        @default(true)
+  deletedAt           DateTime?
+  memberCode          String?        @unique
+  stampCount          Int            @default(0)
+  stampTotal          Int            @default(0)
+  stampCardsCompleted Int            @default(0)
+  lastStampAt         DateTime?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+}
+
+model PointTransaction {
+  id           String    @id @default(uuid())
+  customerId   String
+  type         PointType
+  points       Int
+  balanceAfter Int
+  orderId      String?
+  orderNumber  Int?
+  note         String?
+  userId       String?
+  createdAt    DateTime  @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+model Offer {
+  id              String       @id @default(uuid())
+  titleJa         String
+  descriptionJa   String?      @db.Text
+  imageUrl        String?
+  discountType    DiscountType
+  discountValue   Int
+  minSubtotal     Int          @default(0)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  oncePerCustomer Boolean      @default(false)
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+// Daily order sequence counter; id is the dateKey (YYYY-MM-DD)
+model OrderCounter {
+  id  String @id
+  seq Int
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String
+  entity    String
+  entityId  String
+  diff      Json?
+  createdAt DateTime @default(now())
+}
+
+// One stamp per qualifying purchase; orderId is unique when set (ORDER source)
+model Stamp {
+  id          String   @id @default(uuid())
+  customerId  String
+  card        Int
+  position    Int
+  source      String   // ORDER | STAFF
+  amount      Int?
+  orderId     String?  @unique
+  orderNumber Int?
+  userId      String?
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([customerId, createdAt])
+}
+
+// Rewards earned when a stamp card is completed
+model StampReward {
+  id         String    @id @default(uuid())
+  customerId String
+  titleJa    String
+  kind       String    // AMOUNT_OFF | FREE_ITEM | etc.
+  amount     Int?
+  at         Int?      // stamp position that triggered this reward
+  card       Int?
+  status     String    @default("AVAILABLE") // AVAILABLE | USED | EXPIRED
+  earnedAt   DateTime  @default(now())
+  usedAt     DateTime?
+  expiresAt  DateTime?
+  orderId    String?
+  orderNumber Int?
+  usedBy     String?
+
+  @@index([customerId, status, earnedAt])
+}
+
+// Key-value store for app secrets (VAPID keys, etc.)
+model AppSecret {
+  id         String @id
+  publicKey  String @db.Text
+  privateKey String @db.Text
+}
+
+// Browser push subscriptions for order-ready notifications
+model PushSubscription {
+  id         String   @id @default(uuid())
+  endpoint   String   @unique @db.VarChar(1000)
+  p256dh     String   @db.VarChar(500)
+  auth       String   @db.VarChar(200)
+  customerId String?
+  orderIds   Json?    // String[] — order IDs linked to this subscription
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([customerId])
+}
+
+// Square payment records (one per checkout attempt)
+model SquarePayment {
+  id               String   @id @default(uuid())
+  sessionId        String
+  tableNumber      String
+  channel          String   // online | terminal | qr
+  amount           Int
+  currency         String   @default("JPY")
+  status           String   @default("pending") // pending | completed | failed | canceled | refunded | partially_refunded
+  idempotencyKey   String   @unique
+  squarePaymentId  String?
+  squareCheckoutId String?
+  squareLinkId     String?
+  squareOrderId    String?
+  deviceId         String?
+  failureCode      String?
+  refundedAmount   Int      @default(0)
+  closedByUserId   String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([sessionId, status])
+  @@index([squarePaymentId])
+  @@index([squareCheckoutId])
+  @@index([squareLinkId])
+  @@index([createdAt])
+}
+
+// Deduplication store for Square webhook events
+model SquareWebhookEvent {
+  id               String    @id @default(uuid())
+  squareEventId    String    @unique
+  eventType        String
+  receivedAt       DateTime
+  processedAt      DateTime?
+  processingStatus String    @default("pending") // pending | processed | failed | skipped
+  payload          Json
+  retryCount       Int       @default(0)
+
+  @@index([processingStatus])
+}
+
+// Cache for Google Places review data (singleton: id = 'google-reviews')
+model GoogleReviewCache {
+  id               String    @id  // always 'google-reviews'
+  placeId          String
+  name             String?
+  rating           Float?
+  userRatingCount  Int?
+  mapsUrl          String?   @db.Text
+  reviews          Json      // GoogleReview[]
+  fetchedAt        DateTime?
+  lastError        String?   @db.Text
+  lastErrorAt      DateTime?
+}
+
+// Blog Posts for Articles, Announcements, AI SEO & Direct Engine Optimization
+model BlogPost {
+  id              String    @id @default(uuid())
+  slug            String    @unique
+  title           String
+  content         String    @db.MediumText
+  excerpt         String?   @db.Text
+  coverImage      String?
+  category        String?
+  tags            Json?     // string[]
+  author          String?   @default("Adarsha シェフ")
+  readTimeMinutes Int       @default(3)
+  isPublished     Boolean   @default(true)
+  publishedAt     DateTime?
+  metaTitle       String?
+  metaDescription String?   @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([isPublished, publishedAt])
+  @@index([slug])
+  @@index([category])
+}
+

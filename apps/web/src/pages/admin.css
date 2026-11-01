@@ -1,0 +1,175 @@
+/* Admin dashboard on phones and tablets. The layout itself uses inline styles, so these overrides need !important. */
+
+.adm-menu-btn,
+.adm-close-btn { display: none; }
+.adm-menu-btn,
+.adm-close-btn {
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: #111827;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.adm-menu-btn:hover,
+.adm-close-btn:hover { background: #f3f4f6; }
+.adm-sidebar nav [role='button']:focus-visible { outline: 2px solid #111827; outline-offset: 2px; }
+
+@media (max-width: 1024px) {
+  .adm-menu-btn { display: grid; }
+  .adm-close-btn { display: grid; margin-left: auto; }
+  .adm-sidebar {
+    position: fixed !important;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    width: min(300px, 85vw) !important;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    overflow-y: auto;
+  }
+  .adm-sidebar.is-open { transform: translateX(0); box-shadow: 0 0 40px rgba(0, 0, 0, 0.25) !important; }
+  .adm-backdrop { position: fixed; inset: 0; z-index: 55; background: rgba(17, 24, 39, 0.45); }
+  .adm-main { width: 100%; }
+  .adm-topbar { padding: 0 1rem !important; }
+  .adm-content { padding: 1.5rem 1rem !important; }
+
+  /* Menu Management: categories above the items instead of beside them. */
+  .adm-menu-layout { flex-direction: column; height: auto !important; }
+  .adm-menu-categories { width: 100% !important; max-height: none !important; }
+}
+
+@media (max-width: 640px) {
+  .adm-search { display: none; }
+  .adm-topbar { justify-content: space-between !important; height: 60px !important; }
+  .adm-hide-sm { display: none; }
+  .adm-title { font-size: 1.5rem !important; }
+  .adm-content { padding: 1rem 0.75rem 2rem !important; }
+  /* Two-column forms become one column. */
+  .adm-content [style*='grid-template-columns: 1fr 1fr'] { grid-template-columns: 1fr !important; }
+  .adm-content [style*='grid-column: 1 / -1'] { grid-column: auto !important; }
+  /* Big inner padding eats too much width on a phone. */
+  .adm-content [style*='padding: 2rem'] { padding: 1.25rem !important; }
+  /* Menu items: image above the text so names and buttons get the full width. */
+  .adm-content [style*='gap: 1.5rem; padding: 1.5rem'] { flex-wrap: wrap; }
+  /* Modals fit the screen and scroll inside. */
+  .adm-root [style*='position: fixed'][style*='inset: 0'] > *,
+  .adm-root [style*='position: fixed'][style*='top: 0px'] > * { max-height: 90vh; overflow-y: auto; }
+}
+
+/* ---- Online ordering switches ---- */
+.ordering-switches {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+.ordering-switch-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 0.75rem; }
+.ordering-switch { display: flex; align-items: center; gap: 0.875rem; padding: 0.875rem 1rem; border: 1px solid #e5e7eb; border-radius: 10px; color: #9ca3af; }
+.ordering-switch.is-on { border-color: #86efac; background: #f0fdf4; color: #15803d; }
+.ordering-switch > div { color: #111827; }
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 48px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 9999px;
+  background: #d1d5db;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.switch span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s;
+}
+.switch[aria-checked='true'] { background: #16a34a; }
+.switch[aria-checked='true'] span { transform: translateX(20px); }
+.switch:focus-visible { outline: 3px solid #111827; outline-offset: 2px; }
+.switch:disabled { opacity: 0.6; cursor: wait; }
+
+.fulfill-badge { display: inline-block; padding: 1px 8px; border-radius: 9999px; background: #f3f4f6; color: #374151; font-size: 0.78rem; font-weight: 600; }
+.fulfill-badge.is-delivery { background: #dbeafe; color: #1d4ed8; }
+
+/* Stamp card settings: form beside a live preview; reward rows. */
+.stamp-admin-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.stamp-reward-row { display: grid; grid-template-columns: 90px minmax(0, 1fr) 120px auto; gap: 0.75rem; align-items: end; padding: 0.75rem; border: 1px solid #f0f0f0; border-radius: 10px; background: #fcfcfc; }
+@media (max-width: 1280px) {
+  .stamp-admin-layout { grid-template-columns: minmax(0, 1fr); }
+}
+/* The reward text gets a full line of its own. */
+.stamp-reward-row > label:nth-child(2) { grid-column: 1 / -1; order: -1; }
+@media (max-width: 720px) {
+  .stamp-reward-row { grid-template-columns: 1fr 1fr; }
+}
+
+/* Counter: scan a member and stamp. */
+.stamp-counter-form { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.stamp-counter-form input { flex: 1 1 180px; min-width: 0; }
+.stamp-counter-member { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; margin-top: 1rem; }
+@media (max-width: 900px) { .stamp-counter-member { grid-template-columns: minmax(0, 1fr); } }
+.fulfill-badge.is-table { background: #7c2d12; color: #ffedd5; }
+
+/* ---- Top bar: search, notifications, quick add ---- */
+.tb-search { position: relative; width: min(100%, 360px); }
+.tb-search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #9ca3af; pointer-events: none; }
+.tb-search input { width: 100%; padding: 0.6rem 1rem 0.6rem 2.5rem; border-radius: 9999px; border: 1px solid #e5e7eb; background: #f9fafb; outline: none; font: inherit; font-size: 0.9rem; box-sizing: border-box; }
+.tb-search input:focus { border-color: #9ca3af; background: #fff; }
+.tb-pop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 80; width: min(92vw, 380px); max-height: min(70vh, 520px); overflow-y: auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.25); padding: 6px; }
+.tb-search-pop { width: min(92vw, 440px); }
+.tb-pop-right { left: auto; right: 0; }
+.tb-pop-head { padding: 8px 10px; font-weight: 700; font-size: 0.9rem; }
+.tb-pop-empty { margin: 0; padding: 16px 12px; color: #6b7280; font-size: 0.88rem; text-align: center; }
+.tb-group + .tb-group { border-top: 1px solid #f3f4f6; margin-top: 4px; padding-top: 4px; }
+.tb-group-title { padding: 6px 10px 2px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af; }
+.tb-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 10px; border: none; background: none; border-radius: 8px; text-align: left; font: inherit; color: #111827; cursor: pointer; }
+.tb-row:hover, .tb-row:focus-visible { background: #f3f4f6; outline: none; }
+.tb-row-icon { color: #6b7280; margin-top: 2px; flex-shrink: 0; }
+.tb-row-text { min-width: 0; display: flex; flex-direction: column; }
+.tb-row-text strong { font-size: 0.88rem; font-weight: 600; overflow-wrap: anywhere; }
+.tb-row-text small { font-size: 0.78rem; color: #6b7280; overflow-wrap: anywhere; }
+.tb-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; background: #9ca3af; }
+.tb-note.is-critical .tb-dot { background: #d03b3b; }
+.tb-note.is-warning .tb-dot { background: #fab219; }
+.tb-icon-btn { position: relative; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: none; background: none; color: #4b5563; cursor: pointer; }
+.tb-icon-btn:hover { background: #f3f4f6; }
+.tb-count { position: absolute; top: 0; right: -2px; min-width: 18px; padding: 1px 5px; border-radius: 9999px; background: #ef4444; color: #fff; font-size: 0.65rem; font-weight: 700; border: 2px solid #fff; box-sizing: border-box; }
+.tb-add-btn { display: flex; align-items: center; gap: 8px; padding: 0.6rem 1.25rem; background: #000; color: #fff; border: none; border-radius: 9999px; font: inherit; font-weight: 500; cursor: pointer; }
+@media (max-width: 640px) {
+  .tb-search { flex: 1; width: auto; }
+  .tb-add-btn { padding: 0.6rem; }
+  .tb-pop { position: fixed; top: 72px; left: 8px; right: 8px; width: auto; }
+}
+
+/* ---- Guest calls from tables: ring until accepted ---- */
+.tca { position: fixed; right: 16px; bottom: 16px; z-index: 90; display: flex; flex-direction: column; gap: 8px; width: min(380px, calc(100vw - 32px)); max-height: 70vh; overflow-y: auto; }
+.tca-card { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 14px; color: #fff; box-shadow: 0 14px 30px -10px rgba(0, 0, 0, 0.45); animation: tca-in 0.25s ease-out, tca-pulse 1.6s ease-in-out infinite; }
+.tca-card.is-staff { background: #b91c1c; }
+.tca-card.is-water { background: #1d4ed8; }
+.tca-card.is-bill { background: #b45309; }
+.tca-icon { width: 40px; height: 40px; border-radius: 50%; background: rgba(255, 255, 255, 0.18); display: grid; place-items: center; flex-shrink: 0; }
+.tca-text { flex: 1; min-width: 0; background: none; border: none; color: inherit; font: inherit; text-align: left; cursor: pointer; padding: 0; line-height: 1.35; }
+.tca-text strong { font-size: 1.05rem; }
+.tca-kind { display: block; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85; }
+.tca-text small { display: block; opacity: 0.8; font-size: 0.75rem; }
+.tca-accept { flex-shrink: 0; min-height: 44px; padding: 0 16px; border-radius: 10px; border: none; background: #fff; color: #111827; font: inherit; font-weight: 800; cursor: pointer; }
+.tca-accept:disabled { opacity: 0.6; }
+.tca-sound { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; border-radius: 10px; border: 2px dashed #b91c1c; background: #fff; color: #b91c1c; font: inherit; font-weight: 700; cursor: pointer; }
+@keyframes tca-in { from { transform: translateY(12px); opacity: 0; } }
+@keyframes tca-pulse { 50% { box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.15), 0 14px 30px -10px rgba(0, 0, 0, 0.45); } }
+@media (prefers-reduced-motion: reduce) { .tca-card { animation: none; } }
