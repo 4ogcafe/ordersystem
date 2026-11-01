@@ -166,7 +166,7 @@ export default function Account() {
   const activeOrders = allOrders.filter(order => isActiveOrder(order.status));
   const pastOrders = allOrders.filter(order => !isActiveOrder(order.status));
   const completed = allOrders.filter(order => order.status === 'COMPLETED');
-  const totalSaved = completed.reduce((sum, order) => sum + order.offerDiscount + order.rewardDiscount + order.pointsDiscount, 0);
+  const totalSaved = completed.reduce((sum, order) => sum + (order.offerDiscount || 0) + (order.rewardDiscount || 0) + (order.pointsDiscount || 0), 0);
   const usableOffers = offers.filter(offer => !offer.used);
   const showStamps = Boolean(stampCard?.enabled);
   const rewardCount = usableOffers.length + (stampCard?.rewards.length ?? 0);

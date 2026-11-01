@@ -1,5 +1,5 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
-import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { apiFetch, errorMessage, getPublic } from '../lib/api';
 import { useCustomer } from '../lib/customer-context';
 import { offerLabel, toHalfWidth, yen } from '../lib/format';
@@ -56,7 +56,6 @@ const safeNext = (next: string | null) => (next && next.startsWith('/') && !next
 
 
 export default function AccountAuth({ mode }: { mode: 'login' | 'register' }) {
-  const navigate = useNavigate();
   const [params] = useSearchParams();
   const { customer, signIn } = useCustomer();
   const benefits = useBenefits();
@@ -93,7 +92,7 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' }) {
         localStorage.setItem('kalpana_customer_token', data.token);
       }
       signIn(data.customer);
-      navigate(next, { replace: true });
+      window.location.assign(next);
     } catch {
       setError('通信エラーが発生しました。もう一度お試しください。');
     } finally {

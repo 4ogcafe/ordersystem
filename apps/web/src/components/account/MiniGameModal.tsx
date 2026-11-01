@@ -219,10 +219,11 @@ export default function MiniGameModal({
 
   if (!isOpen) return null;
 
-  const currentMode = previewConfig?.mode ?? gameStatus?.config.mode ?? 'LUCKY_WHEEL';
-  const prizes = previewConfig?.prizes ?? gameStatus?.config.prizes ?? [];
-  const title = previewConfig?.titleJa ?? gameStatus?.config.titleJa ?? '毎日チャレンジ！ミニゲーム';
-  const subtitle = previewConfig?.subtitleJa ?? gameStatus?.config.subtitleJa ?? 'ゲームに挑戦して特典をゲット！';
+  const resolvedConfig = gameStatus?.config ?? (gameStatus as any);
+  const currentMode: GameMode = previewConfig?.mode ?? resolvedConfig?.mode ?? 'LUCKY_WHEEL';
+  const prizes: GamePrize[] = previewConfig?.prizes ?? resolvedConfig?.prizes ?? [];
+  const title: string = previewConfig?.titleJa ?? resolvedConfig?.titleJa ?? '毎日チャレンジ！ミニゲーム';
+  const subtitle: string = previewConfig?.subtitleJa ?? resolvedConfig?.subtitleJa ?? 'ゲームに挑戦して特典をゲット！';
 
   // Request play from server or simulate locally in preview mode
   const handleStartPlay = async (): Promise<{ index: number; prize: GamePrize }> => {

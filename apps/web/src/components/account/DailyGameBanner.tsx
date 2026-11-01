@@ -32,8 +32,15 @@ export default function DailyGameBanner({ onRewardClaimed, compact = false }: Da
     return null;
   }
 
-  const { canPlay, nextPlayAt, config, spendStatus } = status;
-  const gameMode = config.mode;
+  const { canPlay, nextPlayAt, spendStatus } = status;
+  const config = status.config ?? {
+    enabled: status.enabled,
+    mode: (status as any).mode ?? 'LUCKY_WHEEL',
+    titleJa: (status as any).titleJa ?? '毎日チャレンジ！ミニゲーム',
+    subtitleJa: (status as any).subtitleJa ?? 'ゲームに挑戦して、お得なポイントや割引クーポンをGETしよう！',
+    prizes: (status as any).prizes ?? [],
+  };
+  const gameMode = config?.mode ?? 'LUCKY_WHEEL';
   const gameIcon = gameMode === 'LUCKY_WHEEL' ? '🎯' : gameMode === 'SCRATCH_CARD' ? '🎫' : '🎰';
   const isSpendRequired = spendStatus?.requireOrderSpend ?? false;
   const availablePlays = spendStatus?.availablePlays ?? (canPlay ? 1 : 0);

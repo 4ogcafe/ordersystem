@@ -4264,14 +4264,25 @@ if ($method === 'GET' && ($subPath === '/game/status' || $subPath === '/game/sta
         ];
     }, $config['prizes'] ?? []);
 
+    $gameConfigObj = [
+        'enabled' => (bool)($config['enabled'] ?? true),
+        'mode' => $config['mode'] ?? 'LUCKY_WHEEL',
+        'titleJa' => $config['titleJa'] ?? '毎日チャレンジ！ミニゲーム',
+        'subtitleJa' => $config['subtitleJa'] ?? 'ゲームに挑戦して、お得なポイントや割引クーポンをGETしよう！',
+        'cooldownHours' => (int)($config['cooldownHours'] ?? 24),
+        'prizes' => $safePrizes,
+    ];
+
     echo json_encode([
         'enabled' => (bool)$config['enabled'],
         'mode' => $config['mode'] ?? 'LUCKY_WHEEL',
         'titleJa' => $config['titleJa'],
         'subtitleJa' => $config['subtitleJa'],
         'canPlay' => $canPlay,
+        'nextPlayAt' => $canPlay ? null : ($lastPlay ? date('c', $lastPlay + $cooldownSec) : null),
         'availablePlays' => $availablePlays,
         'prizes' => $safePrizes,
+        'config' => $gameConfigObj,
         'spendStatus' => [
             'requireOrderSpend' => (bool)($config['requireOrderSpend'] ?? true),
             'cycleSpendAmount' => $cycleAmount,
