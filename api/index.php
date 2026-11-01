@@ -982,8 +982,8 @@ function runDatabaseMigrations(PDO $pdo): array {
     foreach ($columnsToEnsure as $col) {
         list($table, $colName, $colDef) = $col;
         try {
-            $check = $pdo->prepare("SHOW COLUMNS FROM `{$table}` LIKE ?");
-            $check->execute([$colName]);
+            $check = $pdo->prepare("SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ? AND COLUMN_NAME = ? AND TABLE_SCHEMA = DATABASE()");
+            $check->execute([$table, $colName]);
             if (!$check->fetch()) {
                 $pdo->exec("ALTER TABLE `{$table}` ADD `{$colName}` {$colDef}");
                 $columnsUpdated[] = "{$table}.{$colName}";

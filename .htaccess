@@ -38,7 +38,7 @@ DirectoryIndex index.html index.php
   RewriteRule (^|/)(\.env.*|.*config.*\.php|kalpana-config\.php|adarsha-config\.php|config\.php)$ - [F,L]
 
   # Block repo source directories & internal build folders
-  RewriteRule ^(apps|packages|docs|\.agents|\.vscode|CLAUDE.*|public_html)(/.*)?$ - [F,L]
+  RewriteRule ^(apps|packages|docs|\.agents|\.vscode|CLAUDE.*)(/.*)?$ - [F,L]
 
   # Block source & build configs
   RewriteRule (^|/)(package.*\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|docker-compose.*|composer\..*|tsconfig.*\.json|\.git.*)$ - [F,L]
