@@ -42,26 +42,29 @@ export default function OrderingSwitches({ onChange }: { onChange?: () => void }
 
   const toggle = async (key: Key) => {
     const next = !state[key];
-    if (key !== 'orderingEnabled') {
-      const hours = key === 'pickupEnabled'
+    const patch: Record<string, any> = { [key]: next };
+    if (key !== 'orderingEnabled' && next) {
+      let hours = key === 'pickupEnabled'
         ? state.pickupHours
         : key === 'deliveryEnabled'
         ? state.deliveryHours || state.pickupHours
         : state.dineInHours || state.pickupHours;
-      if (next && !hours.trim()) {
-        const typeName = key === 'pickupEnabled' ? 'pickup' : key === 'deliveryEnabled' ? 'delivery' : 'table ordering';
-        toast.error(`Set the ${typeName} hours below first, then switch it on.`);
-        return;
+      if (!hours || !hours.trim()) {
+        const defaultHours = key === 'dineInEnabled'
+          ? '11:00-15:00, 17:00-22:30'
+          : '11:30-15:00, 17:00-22:00';
+        const hoursKey = key === 'pickupEnabled' ? 'pickupHours' : key === 'deliveryEnabled' ? 'deliveryHours' : 'dineInHours';
+        patch[hoursKey] = defaultHours;
       }
     }
     setSaving(key);
     try {
-      const res = await apiFetch('/api/v1/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: next }) });
+      const res = await apiFetch('/api/v1/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
       if (!res.ok) {
         toast.error(await errorMessage(res, 'Could not update.'));
         return;
       }
-      setState({ ...state, [key]: next });
+      setState({ ...state, ...patch, [key]: next });
       const label = key === 'orderingEnabled'
         ? 'Master Online ordering system'
         : key === 'pickupEnabled'

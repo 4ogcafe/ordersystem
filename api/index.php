@@ -963,6 +963,19 @@ function runDatabaseMigrations(PDO $pdo): array {
         ['Settings', 'newsletterTitleJa', "VARCHAR(191) NULL"],
         ['Settings', 'newsletterSubJa', "TEXT NULL"],
         ['Settings', 'newsletterBgImage', "VARCHAR(191) NULL"],
+        ['Settings', 'pickupHours', "VARCHAR(191) NULL DEFAULT '11:30-15:00, 17:00-22:00'"],
+        ['Settings', 'deliveryHours', "VARCHAR(191) NULL DEFAULT '11:30-15:00, 17:00-22:00'"],
+        ['Settings', 'dineInEnabled', "BOOLEAN NOT NULL DEFAULT 0"],
+        ['Settings', 'dineInHours', "VARCHAR(191) NULL DEFAULT '11:00-15:00, 17:00-22:30'"],
+        ['Settings', 'dineInLeadMinutes', "INTEGER NULL DEFAULT 0"],
+        ['Settings', 'dineInTaxRatePercent', "INTEGER NULL DEFAULT 10"],
+        ['Settings', 'dineInTableCount', "INTEGER NULL DEFAULT 15"],
+        ['Settings', 'dineInTablePrefix', "VARCHAR(191) NULL DEFAULT 'テーブル '"],
+        ['Settings', 'dineInTableNames', "TEXT NULL"],
+        ['Settings', 'dineInRequireTableNumber', "BOOLEAN NOT NULL DEFAULT 1"],
+        ['Settings', 'dineInAllowPayAtRegister', "BOOLEAN NOT NULL DEFAULT 1"],
+        ['Settings', 'dineInAllowOnlinePay', "BOOLEAN NOT NULL DEFAULT 1"],
+        ['Settings', 'dineInNoteJa', "TEXT NULL"],
     ];
 
     $columnsUpdated = [];
@@ -1247,7 +1260,7 @@ if ($method === 'GET' && ($subPath === '/settings' || $subPath === '/settings/')
             }
         }
         // Cast booleans
-        $boolFields = ['orderingEnabled', 'pickupEnabled', 'deliveryEnabled', 'pointsEnabled', 'stampCardEnabled', 'footerShowHours', 'footerShowSocials'];
+        $boolFields = ['orderingEnabled', 'pickupEnabled', 'deliveryEnabled', 'dineInEnabled', 'dineInRequireTableNumber', 'dineInAllowPayAtRegister', 'dineInAllowOnlinePay', 'pointsEnabled', 'stampCardEnabled', 'footerShowHours', 'footerShowSocials'];
         foreach ($boolFields as $bf) {
             if (isset($settings[$bf])) {
                 $settings[$bf] = (bool)$settings[$bf];
@@ -1288,7 +1301,20 @@ if ($method === 'GET' && ($subPath === '/settings' || $subPath === '/settings/')
         'holidays' => ['regular' => '火曜日'],
         'orderingEnabled' => true,
         'pickupEnabled' => true,
+        'pickupHours' => '11:30-15:00, 17:00-22:00',
         'deliveryEnabled' => false,
+        'deliveryHours' => '11:30-15:00, 17:00-22:00',
+        'dineInEnabled' => false,
+        'dineInHours' => '11:00-15:00, 17:00-22:30',
+        'dineInTableNames' => '1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, カウンター1, カウンター2, カウンター3',
+        'dineInTablePrefix' => 'テーブル ',
+        'dineInTableCount' => 15,
+        'dineInTaxRatePercent' => 10,
+        'dineInLeadMinutes' => 0,
+        'dineInRequireTableNumber' => true,
+        'dineInAllowPayAtRegister' => true,
+        'dineInAllowOnlinePay' => true,
+        'dineInNoteJa' => 'お席のQRコードまたはスマートフォンからそのままご注文いただけます。お会計は食後にレジにてお願いいたします。',
         'pointsEnabled' => true,
         'stampCardEnabled' => true,
     ];
@@ -2322,7 +2348,7 @@ if ($method === 'PUT' && ($subPath === '/settings' || $subPath === '/settings/')
     // Settings columns update
     $existing = $pdo->query('SELECT id FROM Settings LIMIT 1')->fetch();
     $jsonCols = ['weeklyHours', 'holidays', 'socials', 'featuredReviews', 'footerLinks', 'pickupClosedDays', 'pickupClosedDates', 'stampRewards', 'deliveryAreas'];
-    $boolCols = ['orderingEnabled', 'pickupEnabled', 'deliveryEnabled', 'pointsEnabled', 'stampCardEnabled', 'stampsEnabled', 'footerShowHours', 'footerShowSocials'];
+    $boolCols = ['orderingEnabled', 'pickupEnabled', 'deliveryEnabled', 'dineInEnabled', 'dineInRequireTableNumber', 'dineInAllowPayAtRegister', 'dineInAllowOnlinePay', 'pointsEnabled', 'stampCardEnabled', 'stampsEnabled', 'footerShowHours', 'footerShowSocials'];
 
     // Map stampCardEnabled to stampsEnabled
     if (isset($input['stampCardEnabled'])) {
