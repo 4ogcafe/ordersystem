@@ -20,6 +20,7 @@ coverage/
 
 # Server config & credentials
 public_html/api/config.php
+api/config.php
 adarsha-config.php
 kalpana-config.php
 *.sql
@@ -52,3 +53,4 @@ Thumbs.db
 
 # Audit logs
 CLAUDE-SECURITY-*/
+
