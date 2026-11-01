@@ -3,7 +3,7 @@ import { toast } from 'react-hot-toast';
 import {
   Search, Plus, ShoppingCart, History,
   ChefHat, X, ChevronDown, Bell, Heart,
-  Receipt
+  Receipt, RotateCcw
 } from 'lucide-react';
 import { apiFetch, assetUrl, errorMessage, getPublic } from '../../lib/api';
 import { yen } from '../../lib/format';
@@ -215,6 +215,7 @@ export default function DineInOrderExperience({
   const [submittingOrder, setSubmittingOrder] = useState<boolean>(false);
   const [callingStaff, setCallingStaff] = useState<boolean>(false);
   const [requestingBill, setRequestingBill] = useState<boolean>(false);
+  const [isTablePaid, setIsTablePaid] = useState<boolean>(false);
 
   // Prevent background scrolling when any popup/modal is open
   const isAnyModalOpen = Boolean(
@@ -299,8 +300,40 @@ export default function DineInOrderExperience({
         setTableSubtotal(data.totalSubtotal || 0);
         setTableTax(data.totalTax || 0);
         setTableGrandTotal(data.grandTotal || 0);
+
+        if (data.allCompleted && tokens) {
+          setIsTablePaid(true);
+        } else if (data.orders && data.orders.length > 0 && data.orders.every((o: any) => o.status === 'COMPLETED')) {
+          setIsTablePaid(true);
+        } else {
+          setIsTablePaid(false);
+        }
       }
     } catch {}
+  };
+
+  // Reset table sitting / clear session so next customers start fresh
+  const handleResetTableSession = async () => {
+    try {
+      await apiFetch('/api/v1/tables/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tableNumber: tableNumber.trim(),
+          storeId: selectedStore.id,
+        }),
+      });
+    } catch {}
+    try {
+      sessionStorage.removeItem(`adarsha_session_tokens_${tableNumber}`);
+      sessionStorage.removeItem(`adarsha_tray_${tableNumber}`);
+    } catch {}
+    setTableOrders([]);
+    setTableSubtotal(0);
+    setTableTax(0);
+    setTableGrandTotal(0);
+    setIsTablePaid(false);
+    toast.success(lang === 'ja' ? 'テーブルをリセットしました。新しいご注文を開始できます。' : 'Table session reset. Ready for new orders!', { icon: '✨' });
   };
 
   useEffect(() => {
@@ -966,6 +999,26 @@ export default function DineInOrderExperience({
             </div>
 
             <div className="dio-modal-body">
+              {/* Payment Completed Banner & Table Reset */}
+              {isTablePaid && (
+                <div style={{ background: '#ecfdf5', border: '1px solid #10b981', color: '#065f46', borderRadius: 16, padding: '16px 20px', marginBottom: 16, textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.15rem', fontWeight: 800, marginBottom: 4 }}>
+                    ✅ {lang === 'ja' ? 'お会計が完了いたしました' : 'Payment Completed'}
+                  </div>
+                  <p style={{ fontSize: '0.85rem', margin: '0 0 12px', opacity: 0.9 }}>
+                    {lang === 'ja' ? 'ご利用誠にありがとうございました。またのお越しを心よりお待ちしております。' : 'Thank you for dining with us!'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleResetTableSession}
+                    style={{ background: '#10b981', color: '#fff', border: 'none', borderRadius: 9999, padding: '10px 18px', fontWeight: 800, fontSize: '0.9rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <RotateCcw size={15} />
+                    <span>{lang === 'ja' ? '新しいお客様・新規注文を開始（卓リセット）' : 'Start New Table Sitting'}</span>
+                  </button>
+                </div>
+              )}
+
               {/* Running bill card */}
               <div style={{ background: '#111827', color: '#fff', borderRadius: 16, padding: '16px 20px', marginBottom: 16 }}>
                 <div style={{ fontSize: '0.85rem', color: '#9ca3af', display: 'flex', justifyContent: 'space-between' }}>
@@ -1044,6 +1097,17 @@ export default function DineInOrderExperience({
                   </div>
                 ))
               )}
+
+              <div style={{ textAlign: 'center', marginTop: 16 }}>
+                <button
+                  type="button"
+                  onClick={handleResetTableSession}
+                  style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: '0.78rem', textDecoration: 'underline', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                >
+                  <RotateCcw size={12} />
+                  <span>{lang === 'ja' ? 'テーブルを空席リセット（次のお客様へ）' : 'Reset Table Session'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

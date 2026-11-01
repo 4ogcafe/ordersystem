@@ -28,7 +28,8 @@ import {
   Check,
   Building2,
   Landmark,
-  Percent
+  Percent,
+  RotateCcw
 } from 'lucide-react';
 import { apiFetch, errorMessage, getPublic } from '../lib/api';
 import { yen, formatOrderNumber } from '../lib/format';
@@ -299,10 +300,11 @@ export default function CashCounter() {
     manualDiscountReason?: string
   ): ReceiptOrder => {
     const branch = resolveOrderStore(order, stores);
-    const tableNum = extractTableNumber(order.note);
+    const tableNum = order.tableNumber || extractTableNumber(order.note);
     const baseTot = order.grandTotal ?? order.total;
     const finalTot = Math.max(0, baseTot - manualDiscount);
     const finalTendered = tendered > 0 ? tendered : finalTot;
+    const roundInfo = order.orderCount > 1 ? `(${order.orderCount}回注文合算 伝票#${order.orderNumbers ? order.orderNumbers.map((n: number) => formatOrderNumber(n)).join(', #') : ''})` : null;
     return {
       id: order.id,
       number: order.number,
@@ -310,6 +312,7 @@ export default function CashCounter() {
       phone: order.phone,
       note: [
         tableNum ? `[テーブル: ${tableNum}]` : null,
+        roundInfo,
         method ? `決済方法: ${method}` : null,
         manualDiscount > 0 ? `値引: -${yen(manualDiscount)}${manualDiscountReason ? ` (${manualDiscountReason})` : ''}` : null,
         finalTendered > 0 ? `お預かり: ${yen(finalTendered)}` : null,
@@ -486,8 +489,9 @@ export default function CashCounter() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orderId: activeCheckoutOrder.id,
+          orderIds: activeCheckoutOrder.orderIds || [activeCheckoutOrder.id],
           orderNumber: activeCheckoutOrder.number,
-          tableNumber: tableNum,
+          tableNumber: tableNum || activeCheckoutOrder.tableNumber,
           type: 'ORDER_SETTLEMENT',
           fulfillment: activeCheckoutOrder.fulfillment || 'PICKUP',
           customerName: activeCheckoutOrder.customerName,
@@ -511,7 +515,7 @@ export default function CashCounter() {
           changeAmount: change,
           storeId: orderBranch?.id || (storeFilter !== 'ALL' ? storeFilter : undefined),
           storeName: orderBranch?.name,
-          markCompleted: markOrderCompleted,
+          markCompleted: true,
         }),
       });
 
@@ -729,12 +733,200 @@ export default function CashCounter() {
     };
   }, [stats, storeFilter, transactions, currentBranch]);
 
+  // ── Table Reset / Free Table Handler ──────────────────────────────────────
+  const handleResetTable = async (tableNum: string, storeId?: string) => {
+    if (!window.confirm(`テーブル ${tableNum} の注文をすべて完了済にし、空席としてリセットしますか？\n（次の新しいお客様をご案内できるようになります）`)) {
+      return;
+    }
+    try {
+      const res = await apiFetch('/api/v1/tables/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tableNumber: tableNum,
+          storeId,
+        }),
+      });
+      if (res.ok) {
+        toast.success(`テーブル ${tableNum} を空席にリセットしました！`, { icon: '🪑' });
+        await loadData();
+      } else {
+        toast.error('テーブルのリセットに失敗しました');
+      }
+    } catch {
+      toast.error('通信エラーが発生しました');
+    }
+  };
+
+  // ── Consolidated Table Orders ──────────────────────────────────────────────
+  // When the same table orders multiple times (rounds: curry, naan, dessert, etc.),
+  // consolidate all rounds into a single unified invoice/bill ticket.
+  const consolidatedOrders = useMemo(() => {
+    const result: any[] = [];
+    const tableGroups: Record<string, any[]> = {};
+
+    orders.forEach(o => {
+      const tableNum = extractTableNumber(o.note) || (o.fulfillment === 'DINE_IN' ? (o.tableNumber || '1') : null);
+      if (!tableNum && o.fulfillment !== 'DINE_IN') {
+        // Non-table order (takeout, delivery)
+        const isPaid = isOrderPaid(o);
+        const grandTotal = o.grandTotal ?? o.total;
+        result.push({
+          ...o,
+          orderIds: [o.id],
+          orderNumbers: [o.number],
+          orderCount: 1,
+          isConsolidatedTable: false,
+          paymentStatus: isPaid ? 'PAID' : 'UNPAID',
+          tableNumber: null,
+          grandTotal,
+          items: o.items || [],
+          rawOrders: [o],
+        });
+        return;
+      }
+
+      // Dine-in Table order
+      const branch = resolveOrderStore(o, stores);
+      const storeKey = branch?.id || 'main';
+      const isPaid = isOrderPaid(o);
+
+      // Group table orders:
+      // - Unpaid orders for this table always group into a single consolidated active bill.
+      // - Paid orders for this table group by table sitting session.
+      const sittingDate = new Date(o.createdAt).toISOString().slice(0, 10);
+      const groupKey = isPaid
+        ? `${storeKey}_table_${tableNum}_PAID_${sittingDate}`
+        : `${storeKey}_table_${tableNum}_UNPAID`;
+
+      if (!tableGroups[groupKey]) {
+        tableGroups[groupKey] = [];
+      }
+      tableGroups[groupKey].push(o);
+    });
+
+    // Consolidate each table group
+    Object.values(tableGroups).forEach(group => {
+      group.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const primary = group[0];
+      const latest = group[group.length - 1];
+      const tableNum = extractTableNumber(primary.note) || (primary.fulfillment === 'DINE_IN' ? (primary.tableNumber || '1') : '1');
+      const branch = resolveOrderStore(primary, stores);
+      const anyUnpaid = group.some(o => !isOrderPaid(o));
+      const isPaid = !anyUnpaid;
+
+      const mergedItems: any[] = [];
+      let subtotal = 0;
+      let tax = 0;
+      let total = 0;
+      let grandTotal = 0;
+      let pointsUsed = 0;
+      let pointsDiscount = 0;
+      let deliveryFee = 0;
+      const orderNumbers: number[] = [];
+      const orderIds: string[] = [];
+
+      group.forEach((ord, roundIdx) => {
+        orderIds.push(ord.id);
+        orderNumbers.push(ord.number);
+        const ordGrand = ord.grandTotal ?? ord.total;
+        grandTotal += ordGrand;
+        total += (ord.total || ordGrand);
+        const ordSub = ord.subtotal || Math.round(ordGrand / 1.1);
+        subtotal += ordSub;
+        tax += (ord.tax || (ordGrand - ordSub));
+        if (ord.pointsUsed) pointsUsed += ord.pointsUsed;
+        if (ord.pointsDiscount) pointsDiscount += ord.pointsDiscount;
+        if (ord.deliveryFee) deliveryFee += ord.deliveryFee;
+
+        (ord.items || []).forEach((line: any) => {
+          mergedItems.push({
+            ...line,
+            roundNumber: roundIdx + 1,
+            orderNumber: ord.number,
+            unitPrice: line.unitPrice ?? Math.round((line.lineTotal || 0) / (line.quantity || 1)),
+            lineTotal: line.lineTotal || (line.unitPrice ? line.unitPrice * (line.quantity || 1) : 0),
+          });
+        });
+      });
+
+      // Aggregate transaction info if paid
+      let bestTx: any = null;
+      let txTendered = 0;
+      let txChange = 0;
+      let txDiscount = 0;
+      let txTotal = 0;
+
+      group.forEach(ord => {
+        const tx = getOrderTransaction(ord);
+        if (tx) {
+          if (!bestTx) bestTx = tx;
+          txTotal += (tx.total || 0);
+          txTendered += (tx.amountTendered || 0);
+          txChange += (tx.changeAmount || 0);
+          txDiscount += (tx.discount || 0);
+        }
+      });
+
+      const consolidatedTx = bestTx ? {
+        ...bestTx,
+        total: txTotal > 0 ? txTotal : grandTotal,
+        amountTendered: txTendered > 0 ? txTendered : grandTotal,
+        changeAmount: txChange,
+        discount: txDiscount,
+      } : null;
+
+      const note = group.length > 1
+        ? `[テーブル: ${tableNum}] ${group.length}回注文合算 (伝票 #${orderNumbers.map(n => formatOrderNumber(n)).join(', #')})`
+        : (primary.note || `[テーブル: ${tableNum}]`);
+
+      result.push({
+        ...primary,
+        id: group.length > 1 ? `table-${branch?.id || 'main'}-${tableNum}-${isPaid ? 'paid' : 'unpaid'}-${primary.id}` : primary.id,
+        orderIds,
+        number: primary.number,
+        orderNumbers,
+        orderCount: group.length,
+        isConsolidatedTable: true,
+        status: anyUnpaid ? 'CONFIRMED' : 'COMPLETED',
+        paymentStatus: isPaid ? 'PAID' : 'UNPAID',
+        customerName: primary.customerName || `テーブル ${tableNum}`,
+        phone: primary.phone || '',
+        note,
+        pickupAt: primary.pickupAt,
+        createdAt: primary.createdAt,
+        completedAt: latest.completedAt || (isPaid ? latest.updatedAt : undefined),
+        fulfillment: 'DINE_IN',
+        tableNumber: tableNum,
+        items: mergedItems,
+        subtotal,
+        tax,
+        taxRate: 10,
+        total,
+        grandTotal,
+        offer: primary.offer,
+        pointsUsed,
+        pointsDiscount,
+        deliveryFee,
+        transaction: consolidatedTx,
+        store: branch,
+        rawOrders: group,
+      });
+    });
+
+    return result.sort((a, b) => {
+      if (a.paymentStatus === 'UNPAID' && b.paymentStatus === 'PAID') return -1;
+      if (a.paymentStatus === 'PAID' && b.paymentStatus === 'UNPAID') return 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [orders, stores, isOrderPaid, getOrderTransaction]);
+
   // ── Filtered Orders ───────────────────────────────────────────────────────
 
   const visibleOrders = useMemo(() => {
-    return orders.filter(o => {
+    return consolidatedOrders.filter(o => {
       // Payment filter
-      const paid = isOrderPaid(o);
+      const paid = o.paymentStatus === 'PAID';
       if (paymentFilter === 'UNPAID' && paid) return false;
       if (paymentFilter === 'PAID' && !paid) return false;
 
@@ -748,27 +940,27 @@ export default function CashCounter() {
       }
       return true;
     });
-  }, [orders, paymentFilter, filter, storeFilter, stores, isOrderPaid]);
+  }, [consolidatedOrders, paymentFilter, filter, storeFilter, stores]);
 
   const unpaidCount = useMemo(() => {
-    return orders.filter(o => {
+    return consolidatedOrders.filter(o => {
       if (storeFilter !== 'ALL') {
         const resolved = resolveOrderStore(o, stores);
         if (resolved?.id !== storeFilter) return false;
       }
-      return !isOrderPaid(o);
+      return o.paymentStatus === 'UNPAID';
     }).length;
-  }, [orders, storeFilter, stores, isOrderPaid]);
+  }, [consolidatedOrders, storeFilter, stores]);
 
   const paidCount = useMemo(() => {
-    return orders.filter(o => {
+    return consolidatedOrders.filter(o => {
       if (storeFilter !== 'ALL') {
         const resolved = resolveOrderStore(o, stores);
         if (resolved?.id !== storeFilter) return false;
       }
-      return isOrderPaid(o);
+      return o.paymentStatus === 'PAID';
     }).length;
-  }, [orders, storeFilter, stores, isOrderPaid]);
+  }, [consolidatedOrders, storeFilter, stores]);
 
   if (!user) {
     return (
@@ -986,13 +1178,13 @@ export default function CashCounter() {
         ) : (
           <div className="cc-grid">
             {visibleOrders.map(order => {
-              const tableNum = extractTableNumber(order.note);
+              const tableNum = order.tableNumber || extractTableNumber(order.note);
               const isTable = order.fulfillment === 'DINE_IN' || Boolean(tableNum);
               const isDeliv = order.fulfillment === 'DELIVERY';
               const grandTotal = order.grandTotal ?? order.total;
               const orderBranch = resolveOrderStore(order, stores);
-              const paid = isOrderPaid(order);
-              const tx = getOrderTransaction(order);
+              const paid = order.paymentStatus === 'PAID' || isOrderPaid(order);
+              const tx = order.transaction || getOrderTransaction(order);
 
               return (
                 <div
@@ -1010,7 +1202,7 @@ export default function CashCounter() {
                       </span>
                     ) : (
                       <span className="cc-ticket-badge unpaid">
-                        🔴 未精算
+                        🔴 未精算 {order.orderCount > 1 ? `(${order.orderCount}回合算)` : ''}
                       </span>
                     )}
                   </div>
@@ -1018,9 +1210,21 @@ export default function CashCounter() {
                   <div className="cc-ticket-head">
                     <div>
                       {tableNum ? (
-                        <span className="cc-ticket-badge table">
-                          <UtensilsCrossed size={14} /> テーブル {tableNum}
-                        </span>
+                        <div>
+                          <span className="cc-ticket-badge table" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            <UtensilsCrossed size={14} /> テーブル {tableNum}
+                            {order.orderCount > 1 && (
+                              <span style={{ background: '#f59e0b', color: '#000', padding: '1px 6px', borderRadius: '4px', fontSize: '0.72rem', fontWeight: 800 }}>
+                                {order.orderCount}回 注文合算
+                              </span>
+                            )}
+                          </span>
+                          {order.orderNumbers && order.orderNumbers.length > 1 && (
+                            <small style={{ color: 'var(--cc-muted)', display: 'block', marginTop: '3px', fontSize: '0.74rem' }}>
+                              伝票 #{order.orderNumbers.map((n: number) => formatOrderNumber(n)).join(', #')}
+                            </small>
+                          )}
+                        </div>
                       ) : isDeliv ? (
                         <span className="cc-ticket-badge delivery">
                           🛵 配達 #{formatOrderNumber(order.number)}
@@ -1047,7 +1251,14 @@ export default function CashCounter() {
                   <ul className="cc-ticket-items">
                     {order.items.map((line: any, idx: number) => (
                       <li key={idx}>
-                        <span>{line.nameJa || line.nameEn}</span>
+                        <span>
+                          {line.roundNumber && order.orderCount > 1 && (
+                            <span style={{ fontSize: '0.72rem', color: '#93c5fd', marginRight: '6px', fontWeight: 700 }}>
+                              [第{line.roundNumber}回]
+                            </span>
+                          )}
+                          {line.nameJa || line.nameEn}
+                        </span>
                         <strong style={{ color: '#fcd34d' }}>× {line.quantity}</strong>
                       </li>
                     ))}
@@ -1171,7 +1382,7 @@ export default function CashCounter() {
                         justifyContent: 'center',
                         gap: '6px'
                       }}
-                      title="お会計伝票・請求書をプレビュー・印刷"
+                      title="合算お会計伝票・請求書をプレビュー・印刷"
                     >
                       <FileText size={15} />
                       <span>伝票・請求書</span>
@@ -1209,7 +1420,7 @@ export default function CashCounter() {
                         onClick={() => {
                           setActiveCheckoutOrder(order);
                           setCheckoutStep('CALC');
-                          setMarkOrderCompleted(order.fulfillment !== 'DINE_IN');
+                          setMarkOrderCompleted(true);
                           setAutoPrintReceipt(false);
                         }}
                         style={{ padding: '10px 8px', fontSize: '0.95rem' }}
@@ -1219,6 +1430,34 @@ export default function CashCounter() {
                       </button>
                     )}
                   </div>
+
+                  {/* Free Table / Reset Table Button */}
+                  {tableNum && (
+                    <button
+                      type="button"
+                      onClick={() => handleResetTable(tableNum, orderBranch?.id)}
+                      style={{
+                        marginTop: '8px',
+                        padding: '7px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                        background: 'rgba(239, 68, 68, 0.08)',
+                        color: '#fca5a5',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        width: '100%',
+                      }}
+                      title="テーブルの注文をクローズし、空席としてリセットします"
+                    >
+                      <RotateCcw size={13} />
+                      <span>卓解放・リセット (Free Table {tableNum})</span>
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -1975,7 +2214,7 @@ export default function CashCounter() {
       {/* ================================================================= */}
       {billPreviewOrder && (() => {
         const orderBranch = resolveOrderStore(billPreviewOrder, stores);
-        const tableNum = extractTableNumber(billPreviewOrder.note);
+        const tableNum = billPreviewOrder.tableNumber || extractTableNumber(billPreviewOrder.note);
         const tot = billPreviewOrder.grandTotal ?? billPreviewOrder.total;
         const recOrder = createReceiptOrderFromOrder(billPreviewOrder);
 
@@ -2017,8 +2256,12 @@ export default function CashCounter() {
                 </div>
                 <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                  <span>伝票番号: #{formatOrderNumber(billPreviewOrder.number)}</span>
-                  <span>{tableNum ? `お席: 🪑 テーブル ${tableNum}` : billPreviewOrder.customerName}</span>
+                  <span>
+                    伝票番号: {billPreviewOrder.orderNumbers && billPreviewOrder.orderNumbers.length > 1
+                      ? billPreviewOrder.orderNumbers.map((n: number) => `#${formatOrderNumber(n)}`).join(', ')
+                      : `#${formatOrderNumber(billPreviewOrder.number)}`}
+                  </span>
+                  <span>{tableNum ? `お席: 🪑 テーブル ${tableNum} ${billPreviewOrder.orderCount > 1 ? `(${billPreviewOrder.orderCount}回 注文合算)` : ''}` : billPreviewOrder.customerName}</span>
                 </div>
                 <div style={{ fontSize: '0.75rem', color: '#555' }}>
                   日時: {new Date(billPreviewOrder.createdAt).toLocaleString('ja-JP')}
@@ -2030,7 +2273,10 @@ export default function CashCounter() {
                     const unit = line.unitPrice ?? Math.round((line.lineTotal || 0) / (line.quantity || 1));
                     return (
                       <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>{line.nameJa || line.nameEn} × {line.quantity}</span>
+                        <span>
+                          {line.roundNumber && billPreviewOrder.orderCount > 1 ? `[第${line.roundNumber}回] ` : ''}
+                          {line.nameJa || line.nameEn} × {line.quantity}
+                        </span>
                         <span>{yen(line.lineTotal || unit * line.quantity)}</span>
                       </div>
                     );

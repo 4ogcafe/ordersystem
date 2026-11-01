@@ -461,8 +461,9 @@ export default function CashCounterTab({ user }: { user?: any }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orderId: selectedOrder.id,
+          orderIds: (selectedOrder as any).orderIds || [selectedOrder.id],
           orderNumber: selectedOrder.number,
-          tableNumber: tableNum,
+          tableNumber: tableNum || (selectedOrder as any).tableNumber,
           type: 'ORDER_SETTLEMENT',
           fulfillment: selectedOrder.fulfillment || 'PICKUP',
           customerName: selectedOrder.customerName,
@@ -772,19 +773,101 @@ export default function CashCounterTab({ user }: { user?: any }) {
 
   // ── Filtered Active Orders & Transactions ─────────────────────────────────
 
+  const consolidatedOrders = useMemo(() => {
+    const result: any[] = [];
+    const tableGroups: Record<string, any[]> = {};
+
+    orders.forEach((o: any) => {
+      const tableNum = extractTableNumber(o.note) || (o.fulfillment === 'DINE_IN' ? (o.tableNumber || '1') : null);
+      if (!tableNum && o.fulfillment !== 'DINE_IN') {
+        result.push({
+          ...o,
+          orderIds: [o.id],
+          orderNumbers: [o.number],
+          orderCount: 1,
+          isConsolidatedTable: false,
+          tableNumber: null,
+        });
+        return;
+      }
+
+      const storeKey = o.storeId || o.store?.id || 'main';
+      const groupKey = `${storeKey}_table_${tableNum}`;
+      if (!tableGroups[groupKey]) {
+        tableGroups[groupKey] = [];
+      }
+      tableGroups[groupKey].push(o);
+    });
+
+    Object.values(tableGroups).forEach(group => {
+      group.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const primary = group[0];
+      const tableNum = extractTableNumber(primary.note) || (primary.fulfillment === 'DINE_IN' ? ((primary as any).tableNumber || '1') : '1');
+      const mergedItems: any[] = [];
+      let subtotal = 0;
+      let tax = 0;
+      let total = 0;
+      let grandTotal = 0;
+      const orderNumbers: number[] = [];
+      const orderIds: string[] = [];
+
+      group.forEach((ord, roundIdx) => {
+        orderIds.push(ord.id);
+        orderNumbers.push(ord.number);
+        const ordGrand = ord.grandTotal ?? ord.total;
+        grandTotal += ordGrand;
+        total += (ord.total || ordGrand);
+        const ordSub = ord.subtotal || Math.round(ordGrand / 1.1);
+        subtotal += ordSub;
+        tax += (ord.tax || (ordGrand - ordSub));
+
+        (ord.items || []).forEach((line: any) => {
+          mergedItems.push({
+            ...line,
+            roundNumber: roundIdx + 1,
+            orderNumber: ord.number,
+            unitPrice: line.unitPrice ?? Math.round((line.lineTotal || 0) / (line.quantity || 1)),
+            lineTotal: line.lineTotal || (line.unitPrice ? line.unitPrice * (line.quantity || 1) : 0),
+          });
+        });
+      });
+
+      result.push({
+        ...primary,
+        id: group.length > 1 ? `table-${tableNum}-${primary.id}` : primary.id,
+        orderIds,
+        number: primary.number,
+        orderNumbers,
+        orderCount: group.length,
+        isConsolidatedTable: true,
+        tableNumber: tableNum,
+        customerName: primary.customerName || `テーブル ${tableNum}`,
+        items: mergedItems,
+        subtotal,
+        tax,
+        total,
+        grandTotal,
+        note: group.length > 1 ? `[テーブル: ${tableNum}] ${group.length}回注文合算` : primary.note,
+        rawOrders: group,
+      });
+    });
+
+    return result;
+  }, [orders]);
+
   const filteredOrders = useMemo(() => {
-    return orders.filter(o => {
+    return consolidatedOrders.filter(o => {
       if (orderFilter !== 'ALL' && o.fulfillment !== orderFilter) return false;
       if (orderSearch.trim()) {
         const q = orderSearch.toLowerCase();
-        const numMatch = String(o.number).includes(q);
+        const numMatch = String(o.number).includes(q) || (o.orderNumbers && o.orderNumbers.some((n: number) => String(n).includes(q)));
         const nameMatch = o.customerName.toLowerCase().includes(q);
-        const tableMatch = extractTableNumber(o.note)?.toLowerCase().includes(q);
+        const tableMatch = (o.tableNumber || extractTableNumber(o.note))?.toLowerCase().includes(q);
         if (!numMatch && !nameMatch && !tableMatch) return false;
       }
       return true;
     });
-  }, [orders, orderFilter, orderSearch]);
+  }, [consolidatedOrders, orderFilter, orderSearch]);
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -1102,7 +1185,7 @@ export default function CashCounterTab({ user }: { user?: any }) {
                           </div>
 
                           <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '2px' }}>
-                            {order.items.map(i => `${i.nameJa || i.nameEn} ×${i.quantity}`).join(', ')}
+                            {order.items.map((i: any) => `${i.nameJa || i.nameEn} ×${i.quantity}`).join(', ')}
                           </div>
                         </div>
 

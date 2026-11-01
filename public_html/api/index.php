@@ -3067,8 +3067,16 @@ if ($method === 'GET' && ($subPath === '/orders/table' || $subPath === '/orders/
         $orders = $stmt->fetchAll();
     }
 
+    $tokensAllCompleted = false;
+    if (!empty($orders)) {
+        $activeOrders = array_filter($orders, function($o) {
+            return in_array($o['status'], ['NEW', 'CONFIRMED', 'PREPARING', 'READY', 'ACCEPTED'], true);
+        });
+        $tokensAllCompleted = count($activeOrders) === 0;
+    }
+
     if (empty($orders) && $tableNum !== '') {
-        $stmt = $pdo->prepare("SELECT * FROM PickupOrder WHERE (tableNumber = ? OR note LIKE ? OR customerName LIKE ?) AND createdAt >= DATE_SUB(NOW(), INTERVAL 8 HOUR) AND status != 'CANCELLED' ORDER BY createdAt ASC");
+        $stmt = $pdo->prepare("SELECT * FROM PickupOrder WHERE (tableNumber = ? OR note LIKE ? OR customerName LIKE ?) AND status IN ('NEW', 'CONFIRMED', 'PREPARING', 'READY', 'ACCEPTED') AND createdAt >= DATE_SUB(NOW(), INTERVAL 8 HOUR) ORDER BY createdAt ASC");
         $stmt->execute([$tableNum, "%[テーブル: {$tableNum}]%", "%テーブル {$tableNum}%"]);
         $orders = $stmt->fetchAll();
     }
@@ -3122,6 +3130,8 @@ if ($method === 'GET' && ($subPath === '/orders/table' || $subPath === '/orders/
         ];
     }
 
+    $isTableFree = empty($formattedOrders) || $tokensAllCompleted;
+
     header('Cache-Control: no-store');
     echo json_encode([
         'tableNumber' => $tableNum,
@@ -3130,8 +3140,45 @@ if ($method === 'GET' && ($subPath === '/orders/table' || $subPath === '/orders/
         'totalTax' => $totalTax,
         'grandTotal' => $totalGrand,
         'totalItemsCount' => $totalItemsCount,
-        'activeSession' => count($formattedOrders) > 0,
+        'activeSession' => count($formattedOrders) > 0 && !$tokensAllCompleted,
+        'allCompleted' => $tokensAllCompleted,
+        'isTableFree' => $isTableFree,
     ]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: POST /tables/reset (Free up / auto-reset table session)
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/tables/reset' || $subPath === '/tables/reset/')) {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $tableNum = trim((string)($input['tableNumber'] ?? ''));
+    $storeId = trim((string)($input['storeId'] ?? ''));
+
+    if ($tableNum === '') {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'TABLE_REQUIRED', 'message' => 'テーブル番号が指定されていません。']]);
+        exit;
+    }
+
+    try {
+        $storeCond = !empty($storeId) ? "AND (storeId = ? OR storeId IS NULL)" : "";
+        $sql = "UPDATE PickupOrder SET status = 'COMPLETED', completedAt = NOW(), updatedAt = NOW() 
+                WHERE status IN ('NEW', 'CONFIRMED', 'PREPARING', 'READY', 'ACCEPTED') 
+                  AND (tableNumber = ? OR note LIKE ? OR note LIKE ?) $storeCond";
+        $params = [$tableNum, "%[テーブル: {$tableNum}]%", "%[テーブル:{$tableNum}]%"];
+        if (!empty($storeId)) {
+            $params[] = $storeId;
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+    } catch (\Throwable $e) {}
+
+    echo json_encode([
+        'success' => true,
+        'tableNumber' => $tableNum,
+        'message' => "テーブル {$tableNum} をリセット・解放しました。",
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -6346,6 +6393,7 @@ if ($method === 'POST' && ($subPath === '/cash-register/transaction' || $subPath
         'id' => bin2hex(random_bytes(16)),
         'timestamp' => (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format(DateTime::ATOM),
         'orderId' => $input['orderId'] ?? null,
+        'orderIds' => isset($input['orderIds']) && is_array($input['orderIds']) ? $input['orderIds'] : (!empty($input['orderId']) ? [$input['orderId']] : []),
         'orderNumber' => isset($input['orderNumber']) ? (int)$input['orderNumber'] : null,
         'tableNumber' => $input['tableNumber'] ?? null,
         'type' => in_array($input['type'] ?? '', ['ORDER_SETTLEMENT', 'WALK_IN', 'REFUND'], true) ? $input['type'] : 'ORDER_SETTLEMENT',
@@ -6373,12 +6421,43 @@ if ($method === 'POST' && ($subPath === '/cash-register/transaction' || $subPath
     $state = loadCashRegisterStateHelper($pdo);
     $state['transactions'][] = $transaction;
 
-    if (!empty($input['orderId'])) {
-        $markCompleted = !isset($input['markCompleted']) || (bool)$input['markCompleted'];
-        if ($markCompleted) {
+    // Mark order(s) completed
+    $markCompleted = !isset($input['markCompleted']) || (bool)$input['markCompleted'];
+    if ($markCompleted) {
+        $orderIdsToComplete = [];
+        if (!empty($input['orderId'])) {
+            $orderIdsToComplete[] = $input['orderId'];
+        }
+        if (!empty($input['orderIds']) && is_array($input['orderIds'])) {
+            foreach ($input['orderIds'] as $oid) {
+                if ($oid && !in_array($oid, $orderIdsToComplete, true)) {
+                    $orderIdsToComplete[] = $oid;
+                }
+            }
+        }
+
+        if (!empty($orderIdsToComplete)) {
+            $inPlaceholders = implode(',', array_fill(0, count($orderIdsToComplete), '?'));
             try {
-                $up = $pdo->prepare("UPDATE PickupOrder SET status = 'COMPLETED', completedAt = NOW(), updatedAt = NOW() WHERE id = ?");
-                $up->execute([$input['orderId']]);
+                $up = $pdo->prepare("UPDATE PickupOrder SET status = 'COMPLETED', completedAt = NOW(), updatedAt = NOW() WHERE id IN ($inPlaceholders)");
+                $up->execute($orderIdsToComplete);
+            } catch (\Throwable $e) {}
+        }
+
+        // Also if tableNumber is passed, mark all remaining active orders for this table as COMPLETED to free the table!
+        if (!empty($input['tableNumber'])) {
+            try {
+                $tbl = trim((string)$input['tableNumber']);
+                $storeCond = !empty($input['storeId']) ? "AND (storeId = ? OR storeId IS NULL)" : "";
+                $sql = "UPDATE PickupOrder SET status = 'COMPLETED', completedAt = NOW(), updatedAt = NOW() 
+                        WHERE status IN ('NEW', 'CONFIRMED', 'READY', 'ACCEPTED', 'PREPARING') 
+                          AND (tableNumber = ? OR note LIKE ? OR note LIKE ?) $storeCond";
+                $params = [$tbl, "%[テーブル: {$tbl}]%", "%[テーブル:{$tbl}]%"];
+                if (!empty($input['storeId'])) {
+                    $params[] = $input['storeId'];
+                }
+                $upTbl = $pdo->prepare($sql);
+                $upTbl->execute($params);
             } catch (\Throwable $e) {}
         }
     }
