@@ -976,6 +976,7 @@ function runDatabaseMigrations(PDO $pdo): array {
         ['Settings', 'dineInAllowPayAtRegister', "BOOLEAN NOT NULL DEFAULT 1"],
         ['Settings', 'dineInAllowOnlinePay', "BOOLEAN NOT NULL DEFAULT 1"],
         ['Settings', 'dineInNoteJa', "TEXT NULL"],
+        ['PickupOrder', 'tableNumber', "VARCHAR(191) NULL"],
     ];
 
     $columnsUpdated = [];
@@ -2664,14 +2665,21 @@ function computeOrderQuote(PDO $pdo, array $input, ?array $customer, array $sett
     $total = $afterOffer - $pointsDiscount;
     $pointsToEarn = ($isMember && $pointsEnabled) ? (int)(floor($total / 100) * $pointsPer100Yen) : 0;
 
-    // Tax
-    $taxRate = isset($settings['taxRatePercent']) && $settings['taxRatePercent'] !== null ? (int)$settings['taxRatePercent'] : 8;
-    $tax = (int)floor(($total * $taxRate) / 100);
-
     // Fulfillment
     $fulfillment = strtoupper(trim((string)($input['fulfillment'] ?? 'PICKUP')));
-    if ($fulfillment !== 'DELIVERY') $fulfillment = 'PICKUP';
+    if (!in_array($fulfillment, ['DINE_IN', 'PICKUP', 'DELIVERY'], true)) {
+        $fulfillment = 'PICKUP';
+    }
     $isDelivery = $fulfillment === 'DELIVERY';
+    $isDineIn = $fulfillment === 'DINE_IN';
+
+    // Tax
+    if ($isDineIn) {
+        $taxRate = isset($settings['dineInTaxRatePercent']) && $settings['dineInTaxRatePercent'] !== null ? (int)$settings['dineInTaxRatePercent'] : 10;
+    } else {
+        $taxRate = isset($settings['taxRatePercent']) && $settings['taxRatePercent'] !== null ? (int)$settings['taxRatePercent'] : 8;
+    }
+    $tax = (int)floor(($total * $taxRate) / 100);
 
     $deliveryFeeSetting = (int)($settings['deliveryFee'] ?? 0);
     $deliveryFreeOver = (int)($settings['deliveryFreeOver'] ?? 0);
@@ -2828,17 +2836,35 @@ if ($method === 'POST' && ($subPath === '/orders' || $subPath === '/orders/')) {
         }
     }
 
+    $fulfillment = strtoupper(trim((string)($input['fulfillment'] ?? 'PICKUP')));
+    if (!in_array($fulfillment, ['DINE_IN', 'PICKUP', 'DELIVERY'], true)) {
+        $fulfillment = 'PICKUP';
+    }
+    $isDelivery = $fulfillment === 'DELIVERY';
+    $isDineIn = $fulfillment === 'DINE_IN';
+
+    $tableNumber = trim((string)($input['tableNumber'] ?? ''));
     $name = trim((string)($input['name'] ?? ''));
     $phone = trim((string)($input['phone'] ?? ''));
-    if ($name === '' || $phone === '') {
-        http_response_code(400);
-        echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => 'お名前とお電話番号を入力してください。']]);
-        exit;
+
+    if ($isDineIn) {
+        if ($name === '') {
+            $name = $tableNumber !== '' ? "テーブル {$tableNumber}" : '店内客';
+        }
+        if ($phone === '') {
+            $phone = '00-0000-0000';
+        }
+    } else {
+        if ($name === '' || $phone === '') {
+            http_response_code(400);
+            echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => 'お名前とお電話番号を入力してください。']]);
+            exit;
+        }
     }
 
     $pickupAtStr = trim((string)($input['pickupAt'] ?? ''));
-    if ($pickupAtStr === '') {
-        $pickupAtDt = (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->modify('+30 minutes');
+    if ($isDineIn || $pickupAtStr === '') {
+        $pickupAtDt = new DateTime('now', new DateTimeZone('Asia/Tokyo'));
     } else {
         try {
             $pickupAtDt = new DateTime($pickupAtStr, new DateTimeZone('Asia/Tokyo'));
@@ -2846,10 +2872,6 @@ if ($method === 'POST' && ($subPath === '/orders' || $subPath === '/orders/')) {
             $pickupAtDt = (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->modify('+30 minutes');
         }
     }
-
-    $fulfillment = strtoupper(trim((string)($input['fulfillment'] ?? 'PICKUP')));
-    if ($fulfillment !== 'DELIVERY') $fulfillment = 'PICKUP';
-    $isDelivery = $fulfillment === 'DELIVERY';
 
     if ($isDelivery && empty($input['deliveryAddress'])) {
         http_response_code(400);
@@ -2900,7 +2922,10 @@ if ($method === 'POST' && ($subPath === '/orders' || $subPath === '/orders/')) {
         $deliveryAddrJson = $isDelivery && !empty($input['deliveryAddress']) ? json_encode($input['deliveryAddress'], JSON_UNESCAPED_UNICODE) : null;
         $ip = $_SERVER['REMOTE_ADDR'] ?? null;
         $email = !empty($input['email']) ? trim((string)$input['email']) : null;
-        $note = !empty($input['note']) ? trim((string)$input['note']) : null;
+        $note = !empty($input['note']) ? trim((string)$input['note']) : '';
+        if ($tableNumber !== '' && strpos($note, '[テーブル:') === false) {
+            $note = trim("[テーブル: {$tableNumber}] " . $note);
+        }
         $storeName = $input['storeName'] ?? ($input['store']['name'] ?? '');
         if ($storeName !== '' && (empty($note) || strpos($note, '店舗:') === false)) {
             $note = ($note ? $note . ' ' : '') . "【受取店舗: {$storeName}】";
@@ -2927,6 +2952,12 @@ if ($method === 'POST' && ($subPath === '/orders' || $subPath === '/orders/')) {
             $quote['tax'], $quote['grandTotal'], $ip, $fulfillment, $quote['deliveryFee'],
             $deliveryAddrJson, $nowDb, $nowDb
         ]);
+
+        if ($tableNumber !== '') {
+            try {
+                $pdo->prepare("UPDATE PickupOrder SET tableNumber = ? WHERE id = ?")->execute([$tableNumber, $orderId]);
+            } catch (Exception $e) {}
+        }
 
         if ($customerId && $quote['pointsUsed'] > 0) {
             $pdo->prepare('UPDATE Customer SET points = GREATEST(0, points - ?) WHERE id = ?')->execute([$quote['pointsUsed'], $customerId]);
@@ -3016,6 +3047,162 @@ if ($method === 'GET' && preg_match('#^/orders/track/([a-zA-Z0-9_-]+)/?$#', $sub
         'deliveryFee' => (int)($order['deliveryFee'] ?? 0),
         'deliveryAddress' => $deliveryAddress ?: null,
         'createdAt' => (new DateTime($order['createdAt']))->format('c'),
+    ]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: GET /orders/table (Fetch all orders for a dining table / session)
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/orders/table' || $subPath === '/orders/table/')) {
+    $tableNum = trim((string)($_GET['table'] ?? ''));
+    $tokensParam = trim((string)($_GET['tokens'] ?? ''));
+    $tokens = array_filter(array_map('trim', explode(',', $tokensParam)));
+
+    $orders = [];
+    if (!empty($tokens)) {
+        $placeholders = implode(',', array_fill(0, count($tokens), '?'));
+        $stmt = $pdo->prepare("SELECT * FROM PickupOrder WHERE token IN ($placeholders) ORDER BY createdAt ASC");
+        $stmt->execute(array_values($tokens));
+        $orders = $stmt->fetchAll();
+    }
+
+    if (empty($orders) && $tableNum !== '') {
+        $stmt = $pdo->prepare("SELECT * FROM PickupOrder WHERE (tableNumber = ? OR note LIKE ? OR customerName LIKE ?) AND createdAt >= DATE_SUB(NOW(), INTERVAL 8 HOUR) AND status != 'CANCELLED' ORDER BY createdAt ASC");
+        $stmt->execute([$tableNum, "%[テーブル: {$tableNum}]%", "%テーブル {$tableNum}%"]);
+        $orders = $stmt->fetchAll();
+    }
+
+    $formattedOrders = [];
+    $totalSubtotal = 0;
+    $totalTax = 0;
+    $totalGrand = 0;
+    $totalItemsCount = 0;
+
+    foreach ($orders as $order) {
+        $items = is_string($order['items']) ? json_decode($order['items'], true) : ($order['items'] ?: []);
+        $itemsList = array_map(function($line) {
+            return [
+                'itemId' => $line['itemId'] ?? null,
+                'nameEn' => $line['nameEn'] ?? '',
+                'nameJa' => $line['nameJa'] ?? null,
+                'quantity' => (int)($line['quantity'] ?? 1),
+                'unitPrice' => (int)($line['unitPrice'] ?? 0),
+                'lineTotal' => (int)($line['lineTotal'] ?? 0),
+                'options' => $line['options'] ?? null,
+            ];
+        }, is_array($items) ? $items : []);
+
+        foreach ($itemsList as $it) {
+            $totalItemsCount += $it['quantity'];
+        }
+
+        $sub = (int)($order['subtotal'] ?? $order['total']);
+        $tax = (int)($order['tax'] ?? 0);
+        $grand = (int)($order['grandTotal'] ?? $order['total']);
+
+        $totalSubtotal += $sub;
+        $totalTax += $tax;
+        $totalGrand += $grand;
+
+        $formattedOrders[] = [
+            'token' => $order['token'],
+            'number' => (int)$order['number'],
+            'status' => $order['status'],
+            'customerName' => $order['customerName'],
+            'tableNumber' => $order['tableNumber'] ?? $tableNum,
+            'note' => $order['note'],
+            'pickupAt' => (new DateTime($order['pickupAt']))->format('c'),
+            'createdAt' => (new DateTime($order['createdAt']))->format('c'),
+            'items' => $itemsList,
+            'subtotal' => $sub,
+            'taxRate' => isset($order['taxRate']) ? (int)$order['taxRate'] : 10,
+            'tax' => $tax,
+            'grandTotal' => $grand,
+        ];
+    }
+
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'tableNumber' => $tableNum,
+        'orders' => $formattedOrders,
+        'totalSubtotal' => $totalSubtotal,
+        'totalTax' => $totalTax,
+        'grandTotal' => $totalGrand,
+        'totalItemsCount' => $totalItemsCount,
+        'activeSession' => count($formattedOrders) > 0,
+    ]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: POST /tables/call-staff (Call waiter / staff from table)
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/tables/call-staff' || $subPath === '/tables/call-staff/')) {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $tableNum = trim((string)($input['tableNumber'] ?? ''));
+    $reason = trim((string)($input['reason'] ?? 'CALL'));
+    $note = trim((string)($input['note'] ?? ''));
+
+    if ($tableNum === '') {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'TABLE_REQUIRED', 'message' => 'テーブル番号が指定されていません。']]);
+        exit;
+    }
+
+    $reasonLabels = [
+        'WATER' => 'お冷のおかわり',
+        'BILL' => 'お会計（レジ呼出）',
+        'CALL' => 'スタッフ呼出',
+        'EXTRA' => '取り皿・おしぼり・カトラリー',
+    ];
+    $label = $reasonLabels[$reason] ?? 'スタッフ呼出';
+
+    $msgId = generateUuidV4();
+    $now = (new DateTime('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s.v');
+    $content = "【テーブル {$tableNum} 番席より呼出】 {$label}" . ($note ? " ({$note})" : "");
+
+    try {
+        $stmt = $pdo->prepare("INSERT INTO ContactMessage (id, type, name, email, phone, message, status, createdAt, updatedAt) VALUES (?, 'RESERVATION', ?, 'table@adarsha.internal', '00-0000-0000', ?, 'UNREAD', ?, ?)");
+        $stmt->execute([$msgId, "テーブル {$tableNum} 呼出", $content, $now, $now]);
+    } catch (Exception $e) {}
+
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'success' => true,
+        'message' => "【{$label}】スタッフへ通知しました。まもなくお席へ伺います。",
+        'calledAt' => (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format('c'),
+    ]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: POST /tables/request-bill (Request check / bill from table)
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/tables/request-bill' || $subPath === '/tables/request-bill/')) {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $tableNum = trim((string)($input['tableNumber'] ?? ''));
+    $methodType = trim((string)($input['paymentMethod'] ?? 'REGISTER'));
+
+    if ($tableNum === '') {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'TABLE_REQUIRED', 'message' => 'テーブル番号が指定されていません。']]);
+        exit;
+    }
+
+    $msgId = generateUuidV4();
+    $now = (new DateTime('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s.v');
+    $content = "【テーブル {$tableNum} 番席がお会計を希望されています】 支払い方法: " . ($methodType === 'ONLINE' ? 'オンライン決済' : 'レジでお支払い');
+
+    try {
+        $stmt = $pdo->prepare("INSERT INTO ContactMessage (id, type, name, email, phone, message, status, createdAt, updatedAt) VALUES (?, 'RESERVATION', ?, 'table@adarsha.internal', '00-0000-0000', ?, 'UNREAD', ?, ?)");
+        $stmt->execute([$msgId, "テーブル {$tableNum} お会計", $content, $now, $now]);
+    } catch (Exception $e) {}
+
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'success' => true,
+        'message' => "お会計の準備を進めております。伝票をお持ちになり、レジカウンターへお越しください。",
     ]);
     exit;
 }

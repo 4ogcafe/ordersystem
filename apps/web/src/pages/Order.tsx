@@ -32,6 +32,7 @@ import PriceSummary from '../components/order/PriceSummary';
 import QuantitySelector from '../components/order/QuantitySelector';
 import type { BuyNowState } from '../components/order/OrderButtons';
 import { useOrderQuote, type Savings } from '../components/order/useOrderQuote';
+import DineInOrderExperience from '../components/order/DineInOrderExperience';
 
 interface Slot {
   date: string;
@@ -648,6 +649,27 @@ export default function Order() {
   const activePhone = selectedStore?.phone || settings.phone;
   const phoneLink = activePhone ? <a href={`tel:${activePhone}`} style={{ color: 'var(--spice)', fontWeight: 'bold' }}>{activePhone}</a> : null;
   const subtotal = lines.reduce((sum, line) => sum + line.price * line.quantity, 0);
+
+  if (isDineIn && !placed) {
+    return (
+      <DineInOrderExperience
+        initialTableNumber={tableNumber || queryTable || '1'}
+        selectedStore={selectedStore}
+        stores={stores}
+        onSwitchToTakeout={() => {
+          setFulfillment('PICKUP');
+          try {
+            sessionStorage.removeItem('adarsha_table_session');
+          } catch {}
+          setSearchParams(params => {
+            params.delete('table');
+            params.delete('fulfillment');
+            return params;
+          });
+        }}
+      />
+    );
+  }
 
   return (
     <main>

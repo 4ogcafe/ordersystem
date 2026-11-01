@@ -45,6 +45,8 @@ function AppContent() {
           <Route path="/contact" element={<Contact />} />
           <Route path="/menu/:type" element={<Menu />} />
           <Route path="/order" element={<Order />} />
+          <Route path="/dine-in" element={<Order />} />
+          <Route path="/table" element={<Order />} />
           <Route path="/order/:token" element={<OrderStatus />} />
           <Route path="/account" element={<Account />} />
           <Route path="/account/login" element={<AccountAuth mode="login" />} />
