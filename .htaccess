@@ -1,1 +1,99 @@
-DirectoryIndex index.html
+# Disable directory browsing completely
+Options -Indexes
+
+DirectoryIndex index.html index.php
+
+# Proper MIME types for images & modern formats
+<IfModule mod_mime.c>
+  AddType image/webp .webp
+  AddType image/jpeg .jpg .jpeg
+  AddType image/png .png
+  AddType image/svg+xml .svg
+  AddType image/x-icon .ico
+  AddType font/woff2 .woff2
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # ----------------------------------------------------------------------
+  # A. BLOCK KNOWN AI BOTS & SCRAPERS AT SERVER LEVEL (HTTP 403)
+  # ----------------------------------------------------------------------
+  RewriteCond %{HTTP_USER_AGENT} (GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-Web|anthropic-ai|Google-Extended|PerplexityBot|Applebot-Extended|Bytespider|CCBot|Diffbot|FacebookBot|Meta-ExternalAgent|cohere-ai|Amazonbot|ImagesiftBot|Omgilibot|YouBot) [NC]
+  RewriteRule ^ - [F,L]
+
+  # ----------------------------------------------------------------------
+  # B. BLOCK SENSITIVE FILES, REPO SOURCE CODE, CONFIGS & LOGS (HTTP 403)
+  # ----------------------------------------------------------------------
+  # Block hidden files (except .well-known)
+  RewriteCond %{REQUEST_URI} !/\.well-known/ [NC]
+  RewriteRule (^\.|\/\.) - [F,L]
+
+  # Block environment variables, secrets, keys & configs
+  RewriteRule (^|/)(\.env.*|.*config.*\.php|kalpana-config\.php|adarsha-config\.php|config\.php)$ - [F,L]
+
+  # Block repo source directories & internal build folders
+  RewriteRule ^(apps|packages|docs|\.agents|\.vscode|CLAUDE.*|public_html)(/.*)?$ - [F,L]
+
+  # Block source & build configs
+  RewriteRule (^|/)(package.*\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|docker-compose.*|composer\..*|tsconfig.*\.json|\.git.*)$ - [F,L]
+
+  # Block database files & sql dumps
+  RewriteRule \.(sql|sqlite|sqlite3|db|dump)$ - [F,L]
+
+  # Block backup & temp files
+  RewriteRule \.(bak|backup|old|save|swp|tmp|temp)$ - [F,L]
+
+  # Block documentation, logs & tests
+  RewriteRule \.(md|log|ini|yml|yaml)$ - [F,L]
+  RewriteRule ^testFilter\.js$ - [F,L]
+
+  # ----------------------------------------------------------------------
+  # C. SERVE EXISTING STATIC ASSETS & FILES DIRECTLY
+  # ----------------------------------------------------------------------
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # ----------------------------------------------------------------------
+  # D. ROUTE API REQUESTS TO SECURE PHP API GATEWAY
+  # ----------------------------------------------------------------------
+  RewriteRule ^api(/.*)?$ api/index.php [QSA,L]
+
+  # ----------------------------------------------------------------------
+  # E. 404 FOR MISSING ASSETS (PREVENT HTML RETURNED AS IMAGE/CSS)
+  # ----------------------------------------------------------------------
+  RewriteCond %{REQUEST_URI} ^/(assets|uploads)/ [OR]
+  RewriteCond %{REQUEST_URI} \.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2)$ [NC]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^ - [R=404,L]
+
+  # ----------------------------------------------------------------------
+  # F. FRONTEND SPA FALLBACK
+  # ----------------------------------------------------------------------
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# Security Headers & Bot Privacy Directives
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set X-XSS-Protection "1; mode=block"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+  Header set X-Robots-Tag "noarchive, noimageindex"
+</IfModule>
+
+# Caching & Core Web Vitals Optimization
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresDefault "access plus 1 month"
+  ExpiresByType text/html "access plus 0 seconds"
+  ExpiresByType text/css "access plus 1 year"
+  ExpiresByType application/javascript "access plus 1 year"
+  ExpiresByType image/webp "access plus 1 year"
+  ExpiresByType image/png "access plus 1 year"
+  ExpiresByType image/jpeg "access plus 1 year"
+  ExpiresByType image/svg+xml "access plus 1 year"
+  ExpiresByType font/woff2 "access plus 1 year"
+</IfModule>
