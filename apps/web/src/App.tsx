@@ -32,8 +32,18 @@ const BlogPost = lazy(() => import('./pages/BlogPost'));
 
 function AppContent() {
   const location = useLocation();
-  // The admin, kitchen, cash counter and member dashboards have their own navigation.
-  const hideNavAndFooter = ['/login', '/admin', '/kitchen', '/cash-counter', '/cashier', '/account'].includes(location.pathname);
+  const searchParams = new URLSearchParams(location.search);
+  const isDineIn = location.pathname.startsWith('/dine-in') ||
+    location.pathname.startsWith('/table') || (
+      location.pathname === '/order' && (
+        searchParams.get('fulfillment')?.toUpperCase() === 'DINE_IN' ||
+        searchParams.has('table') ||
+        Boolean(sessionStorage.getItem('adarsha_table_session'))
+      )
+    );
+
+  // Hide regular website Navbar, Footer, and CartDrawer for app-like screens
+  const hideNavAndFooter = isDineIn || ['/login', '/admin', '/kitchen', '/cash-counter', '/cashier', '/account'].includes(location.pathname);
 
   return (
     <div className="antialiased">
@@ -46,7 +56,9 @@ function AppContent() {
           <Route path="/menu/:type" element={<Menu />} />
           <Route path="/order" element={<Order />} />
           <Route path="/dine-in" element={<Order />} />
+          <Route path="/dine-in/:tableNum" element={<Order />} />
           <Route path="/table" element={<Order />} />
+          <Route path="/table/:tableNum" element={<Order />} />
           <Route path="/order/:token" element={<OrderStatus />} />
           <Route path="/account" element={<Account />} />
           <Route path="/account/login" element={<AccountAuth mode="login" />} />
@@ -68,7 +80,7 @@ function AppContent() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
-      <CartDrawer />
+      {!isDineIn && <CartDrawer />}
       {!hideNavAndFooter && <Footer />}
     </div>
   );

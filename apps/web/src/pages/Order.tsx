@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { AlertTriangle, Bell, Check, ChevronDown, ChevronUp, Clock, ExternalLink, MapPin, Moon, Phone, Plus, Search, ShoppingBag, Sparkles, Store, Sun, Trash2 } from 'lucide-react';
 import { apiFetch, assetUrl, errorMessage, getPublic } from '../lib/api';
@@ -185,8 +185,10 @@ export default function Order() {
   const [placed, setPlaced] = useState(false);
   const [asGuest, setAsGuest] = useState(false);
   const [savings, setSavings] = useState<Savings>({ offerId: '', offerIds: [], rewardId: '', pointsToUse: 0 });
-  const queryTable = searchParams.get('table') || '';
+  const { tableNum } = useParams<{ tableNum?: string }>();
+  const queryTable = searchParams.get('table') || tableNum || '';
   const queryFulfillment = searchParams.get('fulfillment') || '';
+  const isDineInPath = location.pathname.startsWith('/dine-in') || location.pathname.startsWith('/table');
 
   const savedSession = useMemo(() => {
     try {
@@ -198,7 +200,7 @@ export default function Order() {
   }, []);
 
   const effectiveTable = queryTable || savedSession?.table || '';
-  const isDineInInit = Boolean(queryTable || queryFulfillment.toUpperCase() === 'DINE_IN' || savedSession?.fulfillment === 'DINE_IN');
+  const isDineInInit = Boolean(queryTable || isDineInPath || queryFulfillment.toUpperCase() === 'DINE_IN' || savedSession?.fulfillment === 'DINE_IN');
   const initialFulfillment: Fulfillment = isDineInInit ? 'DINE_IN' : 'PICKUP';
 
   const [fulfillment, setFulfillment] = useState<Fulfillment>(initialFulfillment);
