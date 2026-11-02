@@ -29,6 +29,7 @@ export interface QuickMenuItem {
   isRecommended?: boolean;
   isSoldOut?: boolean;
   isOrderable?: boolean;
+  menuTypes?: string[];
   category?: { id: string; nameEn: string; nameJa?: string | null };
 }
 
@@ -424,9 +425,63 @@ export default function DineInOrderExperience({
     });
   };
 
-  // Filtered menu items
+  // Dine-in visible categories: filter out Takeout categories and empty top-level containers
+  const visibleCategories = useMemo(() => {
+    return categories.filter(cat => {
+      const id = (cat.id || '').toLowerCase();
+      const en = (cat.nameEn || '').toLowerCase();
+      const ja = cat.nameJa || '';
+      if (
+        id === 'cat_takeout' ||
+        id.includes('takeout') ||
+        en.includes('takeout') ||
+        ja.includes('テイクアウト') ||
+        ja.includes('お持ち帰り') ||
+        id === 'cat_grand' ||
+        id === 'cat_lunch'
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [categories]);
+
+  // Filtered menu items for Dine-In (excludes takeout-only items)
   const filteredItems = useMemo(() => {
     return menuItems.filter(item => {
+      // Dine-in mode: do NOT show takeout-only items
+      const catId = item.categoryId || item.category?.id || '';
+      const catNameEn = (item.category?.nameEn || '').toLowerCase();
+      const catNameJa = item.category?.nameJa || '';
+      const nameEn = (item.nameEn || '').toLowerCase();
+      const nameJa = item.nameJa || '';
+      const types = Array.isArray(item.menuTypes) ? item.menuTypes : [];
+
+      // Category is Takeout
+      if (
+        catId === 'cat_takeout' ||
+        catId.includes('takeout') ||
+        catNameEn.includes('takeout') ||
+        catNameJa.includes('テイクアウト') ||
+        catNameJa.includes('お持ち帰り')
+      ) {
+        return false;
+      }
+
+      // Name indicates Takeout-only
+      if (
+        nameJa.includes('テイクアウト専用') ||
+        nameJa.includes('お持ち帰り専用') ||
+        nameEn.includes('takeout only')
+      ) {
+        return false;
+      }
+
+      // If item has menuTypes and it's ONLY TAKEOUT (exclusive to takeout)
+      if (types.length > 0 && types.includes('TAKEOUT') && !types.includes('GRAND') && !types.includes('LUNCH')) {
+        return false;
+      }
+
       if (selectedCategoryId !== 'all') {
         const itemCatId = item.categoryId || item.category?.id;
         if (itemCatId !== selectedCategoryId) return false;
@@ -445,7 +500,7 @@ export default function DineInOrderExperience({
   // Active category display title
   const activeCategoryTitle = useMemo(() => {
     if (selectedCategoryId === 'all') {
-      return lang === 'ja' ? '全メニュー (ディナー)' : 'All Dishes (Dinner)';
+      return lang === 'ja' ? '店内メニュー' : 'Dine-In Menu';
     }
     const cat = categories.find(c => c.id === selectedCategoryId);
     if (!cat) return lang === 'ja' ? 'おすすめ料理' : 'Featured Dishes';
@@ -700,7 +755,7 @@ export default function DineInOrderExperience({
         >
           {lang === 'ja' ? '全メニュー' : 'All Dishes'}
         </button>
-        {categories.map(cat => (
+        {visibleCategories.map(cat => (
           <button
             key={cat.id}
             type="button"
@@ -781,7 +836,7 @@ export default function DineInOrderExperience({
               >
                 {lang === 'ja' ? '全メニュー' : 'All Dishes'}
               </button>
-              {categories.map(cat => (
+              {visibleCategories.map(cat => (
                 <button
                   key={cat.id}
                   type="button"

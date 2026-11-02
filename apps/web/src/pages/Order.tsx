@@ -514,9 +514,66 @@ export default function Order() {
     [selectedStore, selectedPickupDateStr]
   );
 
+  // Visible categories for Quick Menu (filters out Lunch Set & Dinner Set in Takeout mode)
+  const visibleCategories = useMemo(() => {
+    return menuCategories.filter(cat => {
+      if (!isDineIn) {
+        const id = (cat.id || '').toLowerCase();
+        const en = (cat.nameEn || '').toLowerCase();
+        const ja = cat.nameJa || '';
+        if (
+          id === 'cat_lunch_set' ||
+          id.includes('lunch_set') ||
+          id.includes('dinner_set') ||
+          id === 'cat_lunch' ||
+          id === 'cat_grand' ||
+          /lunch\s*set/i.test(en) ||
+          /dinner\s*set/i.test(en) ||
+          /ランチセット/.test(ja) ||
+          /ディナーセット/.test(ja)
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [menuCategories, isDineIn]);
+
   const filteredQuickMenu = useMemo(() => {
     const q = menuSearch.trim().toLowerCase();
     return menuItems.filter(item => {
+      // In Takeout mode (!isDineIn): do NOT show Lunch Set and Dinner Set items
+      if (!isDineIn) {
+        const catId = (item.categoryId || '').toLowerCase();
+        const en = (item.nameEn || '').toLowerCase();
+        const ja = item.nameJa || '';
+        const types = Array.isArray(item.menuTypes) ? item.menuTypes : [];
+
+        // Category is Lunch Set or Dinner Set
+        if (
+          catId === 'cat_lunch_set' ||
+          catId.includes('lunch_set') ||
+          catId.includes('dinner_set')
+        ) {
+          return false;
+        }
+
+        // Name contains Lunch Set or Dinner Set
+        if (
+          /lunch\s*set/i.test(en) ||
+          /dinner\s*set/i.test(en) ||
+          /ランチセット/.test(ja) ||
+          /ディナーセット/.test(ja)
+        ) {
+          return false;
+        }
+
+        // Item does not have TAKEOUT in menuTypes (e.g. Lunch Set A has only ['LUNCH'])
+        if (types.length > 0 && !types.includes('TAKEOUT')) {
+          return false;
+        }
+      }
+
       if (activeCategoryId === 'popular' && !item.isPopular && !item.isRecommended) return false;
       if (activeCategoryId !== 'all' && activeCategoryId !== 'popular' && item.categoryId !== activeCategoryId) return false;
       if (!q) return true;
@@ -525,7 +582,7 @@ export default function Order() {
       const desc = (item.descJa || '').toLowerCase();
       return ja.includes(q) || en.includes(q) || desc.includes(q);
     });
-  }, [menuItems, activeCategoryId, menuSearch]);
+  }, [menuItems, activeCategoryId, menuSearch, isDineIn]);
 
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -1307,7 +1364,7 @@ export default function Order() {
                       >
                         <Sparkles size={13} style={{ marginRight: '3px', verticalAlign: '-2px' }} /> 人気・おすすめ
                       </button>
-                      {menuCategories.map(cat => (
+                      {visibleCategories.map(cat => (
                         <button
                           key={cat.id}
                           type="button"
