@@ -89,6 +89,12 @@ foreach ($configCandidates as $candidate) {
     }
 }
 
+// Persist config outside web root so future Git deploys never lose credentials
+$outsideConfig = dirname(__DIR__, 2) . '/adarsha-config.php';
+if (!empty($config['db_pass']) && !is_file($outsideConfig)) {
+    @file_put_contents($outsideConfig, "<?php\n// Auto-persisted outside web root for secure deployment\nreturn " . var_export($config, true) . ";\n");
+}
+
 $cfg = function (string $key, $default = null) use ($config) {
     if (isset($config[$key]) && $config[$key] !== '') return $config[$key];
     $k = strtoupper($key);
@@ -103,8 +109,8 @@ $cfg = function (string $key, $default = null) use ($config) {
 $dbHost = $cfg('db_host', 'localhost');
 $dbName = $cfg('db_name', 'u309882766_adarsha_db');
 $dbUser = $cfg('db_user', 'u309882766_adarshaRestro');
-$dbPass = $cfg('db_pass', '64650@Mohan');
-$jwtSecret = $cfg('jwt_secret', 'adarsha-live-secret-change-in-production-32chars!!');
+$dbPass = $cfg('db_pass', null);
+$jwtSecret = $cfg('jwt_secret', 'adarsha-live-secret-key-32-chars-long!!');
 $googlePlacesApiKey = $cfg('google_places_api_key', getenv('GOOGLE_PLACES_API_KEY') ?: 'AIzaSyDl85DWQNGzQomTXbtFuYbR0EFQUG-48yk');
 
 $pdoOptions = [
@@ -921,6 +927,16 @@ function runDatabaseMigrations(PDO $pdo): array {
             INDEX `BlogPost_published_idx`(`isPublished`, `publishedAt`),
             INDEX `BlogPost_category_idx`(`category`),
             PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;",
+
+        'RateLimit' => "CREATE TABLE IF NOT EXISTS `RateLimit` (
+            `keyStr` VARCHAR(191) NOT NULL,
+            `attempts` INTEGER NOT NULL DEFAULT 1,
+            `firstAttemptAt` DATETIME(3) NOT NULL,
+            `lastAttemptAt` DATETIME(3) NOT NULL,
+            `blockedUntil` DATETIME(3) NULL,
+            PRIMARY KEY (`keyStr`),
+            INDEX `RateLimit_blockedUntil_idx` (`blockedUntil`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
     ];
 
@@ -973,6 +989,7 @@ function runDatabaseMigrations(PDO $pdo): array {
         ['Customer', 'verificationToken', "VARCHAR(64) NULL"],
         ['Customer', 'verificationExpiresAt', "DATETIME(3) NULL"],
         ['Customer', 'emailVerifiedAt', "DATETIME(3) NULL"],
+        ['Customer', 'verificationAttempts', "INTEGER NOT NULL DEFAULT 0"],
     ];
 
     $columnsUpdated = [];
@@ -1258,11 +1275,12 @@ function runDatabaseMigrations(PDO $pdo): array {
     ];
 }
 
-// Auto-run migrations if Settings, BlogPost, or new columns are missing
+// Auto-run migrations if Settings, BlogPost, RateLimit, or Customer security columns are missing
 try {
     $pdo->query('SELECT 1 FROM `Settings` LIMIT 1');
     $pdo->query('SELECT 1 FROM `BlogPost` LIMIT 1');
-    $pdo->query('SELECT `isEmailVerified` FROM `Customer` LIMIT 1');
+    $pdo->query('SELECT `isEmailVerified`, `verificationAttempts` FROM `Customer` LIMIT 1');
+    $pdo->query('SELECT 1 FROM `RateLimit` LIMIT 1');
 } catch (Exception $e) {
     runDatabaseMigrations($pdo);
 }
@@ -4703,6 +4721,19 @@ if ($method === 'POST' && ($subPath === '/contact' || $subPath === '/contact/'))
         exit;
     }
 
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    $rl = checkRateLimit($pdo, 'contact_ip', $ip, 5, 600, 600);
+    if (!$rl['allowed']) {
+        http_response_code(429);
+        echo json_encode([
+            'error' => [
+                'code' => 'TOO_MANY_REQUESTS',
+                'message' => 'お問い合わせの送信頻度が高すぎます。しばらく時間をおいてから送信してください。'
+            ]
+        ]);
+        exit;
+    }
+
     if (empty($name) || empty($email)) {
         http_response_code(400);
         echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => '名前とメールアドレスは必須です']]);
@@ -4715,6 +4746,7 @@ if ($method === 'POST' && ($subPath === '/contact' || $subPath === '/contact/'))
 
     $stmt = $pdo->prepare('INSERT INTO ContactMessage (id, name, email, phone, type, message, date, guests, isRead, ip, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)');
     $stmt->execute([$id, $name, $email, $phone, $type, $message, $date, $guests, $ip, $now]);
+    recordRateLimitFailure($pdo, 'contact_ip', $ip, 5, 600, 600);
 
     http_response_code(201);
     echo json_encode(['success' => true, 'id' => $id]);
@@ -5554,6 +5586,74 @@ function getBearerOrCookie($cookieName) {
     return null;
 }
 
+function checkRateLimit(PDO $pdo, string $action, string $identifier, int $maxAttempts = 5, int $windowSeconds = 900, int $blockSeconds = 900): array {
+    $key = substr($action . ':' . strtolower(trim($identifier)), 0, 190);
+    $now = time();
+
+    try {
+        $stmt = $pdo->prepare('SELECT attempts, firstAttemptAt, lastAttemptAt, blockedUntil FROM RateLimit WHERE keyStr = ? LIMIT 1');
+        $stmt->execute([$key]);
+        $row = $stmt->fetch();
+
+        if ($row) {
+            $blockedUntil = !empty($row['blockedUntil']) ? strtotime($row['blockedUntil']) : 0;
+            if ($blockedUntil > $now) {
+                $retryAfter = $blockedUntil - $now;
+                return ['allowed' => false, 'retryAfter' => $retryAfter, 'attempts' => (int)$row['attempts']];
+            }
+
+            $firstAt = !empty($row['firstAttemptAt']) ? strtotime($row['firstAttemptAt']) : 0;
+            if ($now - $firstAt > $windowSeconds) {
+                $pdo->prepare('DELETE FROM RateLimit WHERE keyStr = ?')->execute([$key]);
+                return ['allowed' => true, 'retryAfter' => 0, 'attempts' => 0];
+            }
+
+            if ((int)$row['attempts'] >= $maxAttempts) {
+                $blockUntilStr = date('Y-m-d H:i:s.v', $now + $blockSeconds);
+                $pdo->prepare('UPDATE RateLimit SET blockedUntil = ? WHERE keyStr = ?')->execute([$blockUntilStr, $key]);
+                return ['allowed' => false, 'retryAfter' => $blockSeconds, 'attempts' => (int)$row['attempts']];
+            }
+        }
+    } catch (Throwable $e) {}
+
+    return ['allowed' => true, 'retryAfter' => 0, 'attempts' => 0];
+}
+
+function recordRateLimitFailure(PDO $pdo, string $action, string $identifier, int $maxAttempts = 5, int $windowSeconds = 900, int $blockSeconds = 900): void {
+    $key = substr($action . ':' . strtolower(trim($identifier)), 0, 190);
+    $now = time();
+    $nowStr = date('Y-m-d H:i:s.v');
+
+    try {
+        $stmt = $pdo->prepare('SELECT attempts, firstAttemptAt FROM RateLimit WHERE keyStr = ? LIMIT 1');
+        $stmt->execute([$key]);
+        $row = $stmt->fetch();
+
+        if ($row) {
+            $firstAt = !empty($row['firstAttemptAt']) ? strtotime($row['firstAttemptAt']) : 0;
+            if ($now - $firstAt > $windowSeconds) {
+                $upd = $pdo->prepare('UPDATE RateLimit SET attempts = 1, firstAttemptAt = ?, lastAttemptAt = ?, blockedUntil = NULL WHERE keyStr = ?');
+                $upd->execute([$nowStr, $nowStr, $key]);
+            } else {
+                $newAttempts = (int)$row['attempts'] + 1;
+                $blockedUntil = ($newAttempts >= $maxAttempts) ? date('Y-m-d H:i:s.v', $now + $blockSeconds) : null;
+                $upd = $pdo->prepare('UPDATE RateLimit SET attempts = ?, lastAttemptAt = ?, blockedUntil = ? WHERE keyStr = ?');
+                $upd->execute([$newAttempts, $nowStr, $blockedUntil, $key]);
+            }
+        } else {
+            $ins = $pdo->prepare('INSERT INTO RateLimit (keyStr, attempts, firstAttemptAt, lastAttemptAt, blockedUntil) VALUES (?, 1, ?, ?, NULL)');
+            $ins->execute([$key, $nowStr, $nowStr]);
+        }
+    } catch (Throwable $e) {}
+}
+
+function clearRateLimit(PDO $pdo, string $action, string $identifier): void {
+    $key = substr($action . ':' . strtolower(trim($identifier)), 0, 190);
+    try {
+        $pdo->prepare('DELETE FROM RateLimit WHERE keyStr = ?')->execute([$key]);
+    } catch (Throwable $e) {}
+}
+
 function generateUuidV4() {
     $data = random_bytes(16);
     $data[6] = chr(ord($data[6]) & 0x0f | 0x40); // set version to 0100
@@ -5653,6 +5753,21 @@ if ($method === 'POST' && ($subPath === '/auth/login' || $subPath === '/auth/log
         exit;
     }
 
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    $rlIp = checkRateLimit($pdo, 'login_staff_ip', $ip, 15, 900, 900);
+    $rlEmail = checkRateLimit($pdo, 'login_staff_email', $email, 5, 900, 900);
+    if (!$rlIp['allowed'] || !$rlEmail['allowed']) {
+        $retryAfter = max($rlIp['retryAfter'], $rlEmail['retryAfter']);
+        http_response_code(429);
+        echo json_encode([
+            'error' => [
+                'code' => 'TOO_MANY_ATTEMPTS',
+                'message' => 'ログインの試行回数が上限を超過しました。' . ceil($retryAfter / 60) . '分後に再度お試しください。'
+            ]
+        ]);
+        exit;
+    }
+
     $stmt = $pdo->prepare('SELECT id, name, email, role, passwordHash, isActive FROM User WHERE LOWER(email) = ? LIMIT 1');
     $stmt->execute([$email]);
     $user = $stmt->fetch();
@@ -5663,10 +5778,14 @@ if ($method === 'POST' && ($subPath === '/auth/login' || $subPath === '/auth/log
     }
 
     if (!$user || !$verified || empty($user['isActive'])) {
+        recordRateLimitFailure($pdo, 'login_staff_ip', $ip, 15, 900, 900);
+        recordRateLimitFailure($pdo, 'login_staff_email', $email, 5, 900, 900);
         http_response_code(401);
         echo json_encode(['error' => ['code' => 'INVALID_CREDENTIALS', 'message' => 'Invalid email or password']]);
         exit;
     }
+
+    clearRateLimit($pdo, 'login_staff_email', $email);
 
     $sessionUser = [
         'id' => $user['id'],
@@ -6006,10 +6125,27 @@ if ($method === 'POST' && ($subPath === '/customers/verify-code' || $subPath ===
 
     $storedCode = trim((string)($customer['verificationCode'] ?? ''));
     $expiresAt = !empty($customer['verificationExpiresAt']) ? strtotime($customer['verificationExpiresAt']) : 0;
+    $attempts = (int)($customer['verificationAttempts'] ?? 0);
+
+    if ($attempts >= 5) {
+        $pdo->prepare('UPDATE Customer SET verificationCode = NULL, verificationToken = NULL WHERE id = ?')->execute([$customer['id']]);
+        http_response_code(429);
+        echo json_encode(['error' => ['code' => 'TOO_MANY_ATTEMPTS', 'message' => '確認コードの入力上限（5回）に達しました。セキュリティのため「コードを再送信」を押して新しいコードを取得してください。']]);
+        exit;
+    }
 
     if ($storedCode === '' || !hash_equals($storedCode, $code)) {
-        http_response_code(400);
-        echo json_encode(['error' => ['code' => 'INVALID_CODE', 'message' => '確認コードが正しくありません。再度ご確認ください。']]);
+        $newAttempts = $attempts + 1;
+        $pdo->prepare('UPDATE Customer SET verificationAttempts = ? WHERE id = ?')->execute([$newAttempts, $customer['id']]);
+        $remaining = max(0, 5 - $newAttempts);
+        if ($remaining === 0) {
+            $pdo->prepare('UPDATE Customer SET verificationCode = NULL, verificationToken = NULL WHERE id = ?')->execute([$customer['id']]);
+            http_response_code(429);
+            echo json_encode(['error' => ['code' => 'TOO_MANY_ATTEMPTS', 'message' => '確認コードの入力上限（5回）に達しました。新しい確認コードを再送信してください。']]);
+        } else {
+            http_response_code(400);
+            echo json_encode(['error' => ['code' => 'INVALID_CODE', 'message' => "確認コードが正しくありません。（残り {$remaining} 回試行可能）"]]);
+        }
         exit;
     }
 
@@ -6020,7 +6156,7 @@ if ($method === 'POST' && ($subPath === '/customers/verify-code' || $subPath ===
     }
 
     $now = date('Y-m-d H:i:s');
-    $upd = $pdo->prepare('UPDATE Customer SET isEmailVerified = 1, emailVerifiedAt = ?, verificationCode = NULL, verificationToken = NULL, isActive = 1, updatedAt = ? WHERE id = ?');
+    $upd = $pdo->prepare('UPDATE Customer SET isEmailVerified = 1, emailVerifiedAt = ?, verificationCode = NULL, verificationToken = NULL, verificationAttempts = 0, isActive = 1, updatedAt = ? WHERE id = ?');
     $upd->execute([$now, $now, $customer['id']]);
 
     $customer['isEmailVerified'] = 1;
@@ -6097,7 +6233,7 @@ if ($method === 'POST' && ($subPath === '/customers/resend-code' || $subPath ===
     $token = bin2hex(random_bytes(32));
     $expiresAt = date('Y-m-d H:i:s', time() + 15 * 60);
 
-    $upd = $pdo->prepare('UPDATE Customer SET verificationCode = ?, verificationToken = ?, verificationExpiresAt = ?, updatedAt = NOW() WHERE id = ?');
+    $upd = $pdo->prepare('UPDATE Customer SET verificationCode = ?, verificationToken = ?, verificationExpiresAt = ?, verificationAttempts = 0, updatedAt = NOW() WHERE id = ?');
     $upd->execute([$code, $token, $expiresAt, $customer['id']]);
 
     sendAccountVerificationEmail($email, $customer['name'], $code, $token);
@@ -6163,6 +6299,21 @@ if ($method === 'POST' && ($subPath === '/customers/login' || $subPath === '/cus
     $email = strtolower(trim($input['email'] ?? ''));
     $password = (string)($input['password'] ?? '');
 
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    $rlIp = checkRateLimit($pdo, 'login_cust_ip', $ip, 20, 900, 900);
+    $rlEmail = checkRateLimit($pdo, 'login_cust_email', $email, 5, 900, 900);
+    if (!$rlIp['allowed'] || !$rlEmail['allowed']) {
+        $retryAfter = max($rlIp['retryAfter'], $rlEmail['retryAfter']);
+        http_response_code(429);
+        echo json_encode([
+            'error' => [
+                'code' => 'TOO_MANY_ATTEMPTS',
+                'message' => 'ログインの試行回数が上限を超過しました。' . ceil($retryAfter / 60) . '分後に再度お試しください。'
+            ]
+        ]);
+        exit;
+    }
+
     $stmt = $pdo->prepare('SELECT * FROM Customer WHERE LOWER(email) = ? LIMIT 1');
     $stmt->execute([$email]);
     $customer = $stmt->fetch();
@@ -6170,10 +6321,14 @@ if ($method === 'POST' && ($subPath === '/customers/login' || $subPath === '/cus
     $verified = $customer && !empty($customer['passwordHash']) && password_verify($password, $customer['passwordHash']);
 
     if (!$customer || !$verified || (isset($customer['isActive']) && !$customer['isActive']) || !empty($customer['deletedAt'])) {
+        recordRateLimitFailure($pdo, 'login_cust_ip', $ip, 20, 900, 900);
+        recordRateLimitFailure($pdo, 'login_cust_email', $email, 5, 900, 900);
         http_response_code(401);
         echo json_encode(['error' => ['code' => 'INVALID_CREDENTIALS', 'message' => 'メールアドレスまたはパスワードが正しくありません。']]);
         exit;
     }
+
+    clearRateLimit($pdo, 'login_cust_email', $email);
 
     // Check if email is unverified
     if (isset($customer['isEmailVerified']) && !$customer['isEmailVerified']) {
