@@ -337,9 +337,9 @@ export default function DineInOrderExperience({
     } catch {}
   }, [tray, tableNumber]);
 
-  // Load menu items & categories
+  // Load menu items & categories (dynamically for Dine-In)
   useEffect(() => {
-    getPublic<QuickMenuItem[]>('/api/v1/menu/items')
+    getPublic<QuickMenuItem[]>('/api/v1/menu/items?fulfillment=DINE_IN')
       .then(items => {
         if (Array.isArray(items)) {
           setMenuItems(items.filter(it => it.isOrderable !== false && !it.isSoldOut));
@@ -347,7 +347,7 @@ export default function DineInOrderExperience({
       })
       .catch(() => {});
 
-    getPublic<QuickCategory[]>('/api/v1/menu/categories')
+    getPublic<QuickCategory[]>('/api/v1/menu/categories?fulfillment=DINE_IN')
       .then(cats => {
         if (Array.isArray(cats)) setCategories(cats);
       })
@@ -681,28 +681,49 @@ export default function DineInOrderExperience({
       {/* ── TOP HEADER (Logo, Brand & Branch, Flag Pill) ── */}
       <header className="dio-header">
         <div className="dio-header-inner">
-          <div className="dio-header-logo-wrap">
-            <img src="/adarsha-log.webp" alt="Adarsha" className="dio-header-logo" />
-          </div>
+          <div className="dio-header-left">
+            <div className="dio-header-logo-wrap">
+              <img src="/adarsha-log.webp" alt="Adarsha" className="dio-header-logo" />
+            </div>
 
-          <div className="dio-header-center">
-            <span className="dio-header-brand">{lang === 'ja' ? 'アダルサ' : 'Adarsha'}</span>
-            <span className="dio-header-branch">{branchDisplayName}</span>
-            <button
-              type="button"
-              className="dio-table-pill"
-              onClick={() => {
-                if (onOpenChoiceModal) onOpenChoiceModal();
-                else {
-                  setNewTableInput(tableNumber);
-                  setShowTableEditModal(true);
-                }
-              }}
-              title={lang === 'ja' ? 'お席番号・注文方法の変更' : 'Change table / order type'}
-            >
-              <span>{lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}</span>
-              <ChevronDown size={11} />
-            </button>
+            <div className="dio-header-brand-wrap">
+              <div className="dio-header-title-lines">
+                <span className="dio-header-brand">{lang === 'ja' ? 'アダルサ' : 'Adarsha'}</span>
+                <span className="dio-header-branch">{branchDisplayName}</span>
+              </div>
+              <div className="dio-header-pills-row">
+                <button
+                  type="button"
+                  className="dio-table-pill"
+                  onClick={() => {
+                    if (onOpenChoiceModal) onOpenChoiceModal();
+                    else {
+                      setNewTableInput(tableNumber);
+                      setShowTableEditModal(true);
+                    }
+                  }}
+                  title={lang === 'ja' ? 'お席番号・注文方法の変更' : 'Change table / order type'}
+                >
+                  <span>{lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}</span>
+                  <ChevronDown size={11} />
+                </button>
+
+                {(onOpenChoiceModal || onSwitchToTakeout) && (
+                  <button
+                    type="button"
+                    className="dio-switch-pill"
+                    onClick={() => {
+                      if (onOpenChoiceModal) onOpenChoiceModal();
+                      else if (onSwitchToTakeout) onSwitchToTakeout();
+                    }}
+                    title={lang === 'ja' ? 'テイクアウト（お持ち帰り）に切り替え' : 'Switch to Takeout'}
+                  >
+                    <ShoppingBag size={11} />
+                    <span>{lang === 'ja' ? '持帰切替' : 'To Go'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="dio-header-right">

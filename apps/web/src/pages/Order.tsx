@@ -299,8 +299,11 @@ export default function Order() {
         }
       })
       .finally(() => setStoresLoaded(true));
+  }, []);
 
-    getPublic<QuickMenuItem[]>('/api/v1/menu/items')
+  // Load menu items & categories dynamically according to current fulfillment (DINE_IN vs PICKUP/TAKEOUT)
+  useEffect(() => {
+    getPublic<QuickMenuItem[]>(`/api/v1/menu/items?fulfillment=${fulfillment}`)
       .then(data => {
         if (Array.isArray(data)) {
           setMenuItems(data.filter(it => it.isOrderable !== false && !it.isSoldOut));
@@ -308,12 +311,12 @@ export default function Order() {
       })
       .catch(() => {});
 
-    getPublic<QuickCategory[]>('/api/v1/menu/categories')
+    getPublic<QuickCategory[]>(`/api/v1/menu/categories?fulfillment=${fulfillment}`)
       .then(cats => {
         if (Array.isArray(cats)) setMenuCategories(cats);
       })
       .catch(() => {});
-  }, []);
+  }, [fulfillment]);
 
   // Sync if URL ?store= changes or another component dispatches adarsha:store-changed
   useEffect(() => {
@@ -1396,7 +1399,7 @@ export default function Order() {
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))', gap: '12px', maxHeight: '420px', overflowY: 'auto', paddingRight: '4px' }}>
-                    {filteredQuickMenu.slice(0, 24).map(item => {
+                    {filteredQuickMenu.map(item => {
                       const inCartLine = lines.find(l => l.id === item.id);
                       const displayName = item.nameJa || item.nameEn;
                       return (

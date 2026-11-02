@@ -1353,6 +1353,42 @@ if ($method === 'GET' && ($subPath === '/settings' || $subPath === '/settings/')
 if ($method === 'GET' && ($subPath === '/menu/categories' || $subPath === '/menu/categories/')) {
     $stmt = $pdo->query('SELECT * FROM Category ORDER BY sortOrder ASC');
     $categories = $stmt->fetchAll();
+
+    $reqFulfillment = strtoupper(trim($_GET['fulfillment'] ?? ''));
+    if ($reqFulfillment === 'DINE_IN') {
+        $categories = array_values(array_filter($categories, function ($cat) {
+            $id = strtolower($cat['id'] ?? '');
+            $en = strtolower($cat['nameEn'] ?? '');
+            $ja = $cat['nameJa'] ?? '';
+            return !(
+                $id === 'cat_takeout' ||
+                strpos($id, 'takeout') !== false ||
+                strpos($en, 'takeout') !== false ||
+                mb_strpos($ja, 'テイクアウト') !== false ||
+                mb_strpos($ja, 'お持ち帰り') !== false ||
+                $id === 'cat_grand' ||
+                $id === 'cat_lunch'
+            );
+        }));
+    } elseif ($reqFulfillment === 'TAKEOUT' || $reqFulfillment === 'PICKUP') {
+        $categories = array_values(array_filter($categories, function ($cat) {
+            $id = strtolower($cat['id'] ?? '');
+            $en = strtolower($cat['nameEn'] ?? '');
+            $ja = $cat['nameJa'] ?? '';
+            return !(
+                $id === 'cat_lunch_set' ||
+                strpos($id, 'lunch_set') !== false ||
+                strpos($id, 'dinner_set') !== false ||
+                strpos($en, 'lunch set') !== false ||
+                strpos($en, 'dinner set') !== false ||
+                mb_strpos($ja, 'ランチセット') !== false ||
+                mb_strpos($ja, 'ディナーセット') !== false ||
+                $id === 'cat_lunch' ||
+                $id === 'cat_grand'
+            );
+        }));
+    }
+
     echo json_encode($categories);
     exit;
 }
@@ -1648,6 +1684,66 @@ if ($method === 'GET' && ($subPath === '/menu/items' || $subPath === '/menu/item
 
         return $item;
     }, $items);
+
+    $reqFulfillment = strtoupper(trim($_GET['fulfillment'] ?? ''));
+    if ($reqFulfillment === 'DINE_IN') {
+        $formatted = array_values(array_filter($formatted, function ($item) {
+            $catId = strtolower($item['categoryId'] ?? '');
+            $catNameEn = strtolower($item['category']['nameEn'] ?? '');
+            $catNameJa = $item['category']['nameJa'] ?? '';
+            $nameEn = strtolower($item['nameEn'] ?? '');
+            $nameJa = $item['nameJa'] ?? '';
+            $types = is_array($item['menuTypes']) ? $item['menuTypes'] : [];
+
+            if (
+                $catId === 'cat_takeout' ||
+                strpos($catId, 'takeout') !== false ||
+                strpos($catNameEn, 'takeout') !== false ||
+                mb_strpos($catNameJa, 'テイクアウト') !== false ||
+                mb_strpos($catNameJa, 'お持ち帰り') !== false ||
+                mb_strpos($nameJa, 'テイクアウト専用') !== false ||
+                mb_strpos($nameJa, 'お持ち帰り専用') !== false ||
+                strpos($nameEn, 'takeout only') !== false
+            ) {
+                return false;
+            }
+
+            if (!empty($types) && in_array('TAKEOUT', $types, true) && !in_array('GRAND', $types, true) && !in_array('LUNCH', $types, true)) {
+                return false;
+            }
+            return true;
+        }));
+    } elseif ($reqFulfillment === 'TAKEOUT' || $reqFulfillment === 'PICKUP') {
+        $formatted = array_values(array_filter($formatted, function ($item) {
+            $catId = strtolower($item['categoryId'] ?? '');
+            $catNameEn = strtolower($item['category']['nameEn'] ?? '');
+            $catNameJa = $item['category']['nameJa'] ?? '';
+            $nameEn = strtolower($item['nameEn'] ?? '');
+            $nameJa = $item['nameJa'] ?? '';
+            $types = is_array($item['menuTypes']) ? $item['menuTypes'] : [];
+
+            if (
+                $catId === 'cat_lunch_set' ||
+                strpos($catId, 'lunch_set') !== false ||
+                strpos($catId, 'dinner_set') !== false ||
+                strpos($catNameEn, 'lunch set') !== false ||
+                strpos($catNameEn, 'dinner set') !== false ||
+                mb_strpos($catNameJa, 'ランチセット') !== false ||
+                mb_strpos($catNameJa, 'ディナーセット') !== false ||
+                preg_match('/lunch\s*set/i', $nameEn) ||
+                preg_match('/dinner\s*set/i', $nameEn) ||
+                mb_strpos($nameJa, 'ランチセット') !== false ||
+                mb_strpos($nameJa, 'ディナーセット') !== false
+            ) {
+                return false;
+            }
+
+            if (!empty($types) && !in_array('TAKEOUT', $types, true)) {
+                return false;
+            }
+            return true;
+        }));
+    }
 
     echo json_encode($formatted);
     exit;
