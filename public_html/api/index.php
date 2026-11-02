@@ -109,8 +109,8 @@ $cfg = function (string $key, $default = null) use ($config) {
 $dbHost = $cfg('db_host', 'localhost');
 $dbName = $cfg('db_name', 'u309882766_adarsha_db');
 $dbUser = $cfg('db_user', 'u309882766_adarshaRestro');
-$dbPass = $cfg('db_pass', null);
-$jwtSecret = $cfg('jwt_secret', 'adarsha-live-secret-key-32-chars-long!!');
+$dbPass = $cfg('db_pass', '64650@Mohan');
+$jwtSecret = $cfg('jwt_secret', 'adarsha-live-secret-change-in-production-32chars!!');
 $googlePlacesApiKey = $cfg('google_places_api_key', getenv('GOOGLE_PLACES_API_KEY') ?: 'AIzaSyDl85DWQNGzQomTXbtFuYbR0EFQUG-48yk');
 
 $pdoOptions = [
