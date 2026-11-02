@@ -48,6 +48,11 @@ DirectoryIndex index.html index.php
   # ----------------------------------------------------------------------
   RewriteRule ^api(/.*)?$ api/index.php [QSA,L]
 
+  # Fallback between root uploads and public_html/uploads if either exists
+  RewriteCond %{REQUEST_URI} ^/uploads/(.+)$
+  RewriteCond %{DOCUMENT_ROOT}/public_html/uploads/%1 -f
+  RewriteRule ^uploads/(.+)$ public_html/uploads/$1 [L]
+
   # ----------------------------------------------------------------------
   # 404 FOR MISSING STATIC ASSETS (PREVENT HTML RETURNED AS IMAGE/CSS)
   # ----------------------------------------------------------------------
