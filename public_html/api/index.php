@@ -23,15 +23,26 @@ header('Pragma: no-cache');
 header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $allowedOrigins = ['https://pnglike.com', 'https://www.pnglike.com', 'http://localhost:5173', 'http://localhost:4000', 'http://localhost:3000'];
-$isPnglike = ($origin !== '' && (substr($origin, -11) === 'pnglike.com' || strpos($origin, 'pnglike.com') !== false));
-if ($origin !== '' && (in_array($origin, $allowedOrigins, true) || preg_match('/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/', $origin) || $isPnglike)) {
+
+$isAllowedOrigin = false;
+if ($origin !== '') {
+    if (in_array($origin, $allowedOrigins, true) || preg_match('/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/', $origin)) {
+        $isAllowedOrigin = true;
+    } else {
+        $parsed = parse_url($origin);
+        $host = $parsed['host'] ?? '';
+        if ($host === 'pnglike.com' || (strlen($host) > 12 && substr($host, -12) === '.pnglike.com')) {
+            $isAllowedOrigin = true;
+        }
+    }
+}
+
+if ($isAllowedOrigin) {
     header("Access-Control-Allow-Origin: {$origin}");
     header('Access-Control-Allow-Credentials: true');
-} else if ($origin !== '') {
-    header("Access-Control-Allow-Origin: {$origin}");
-    header('Access-Control-Allow-Credentials: true');
+    header('Vary: Origin');
 } else {
-    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Origin: https://pnglike.com');
 }
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
@@ -157,8 +168,8 @@ function ensureDefaultDatabaseData(PDO $pdo): array {
                 $ins->execute([$du['id'], $du['email'], $defaultHash, $du['name'], $du['role'], $now, $now]);
                 $seeded['user_' . $du['email']] = 1;
             } else {
-                if (empty($existing['passwordHash']) || !$existing['isActive']) {
-                    $upd = $pdo->prepare('UPDATE `User` SET isActive = 1, passwordHash = ?, updatedAt = ? WHERE id = ?');
+                if (empty($existing['passwordHash'])) {
+                    $upd = $pdo->prepare('UPDATE `User` SET passwordHash = ?, updatedAt = ? WHERE id = ?');
                     $upd->execute([$defaultHash, $now, $existing['id']]);
                 }
             }
@@ -5651,14 +5662,7 @@ if ($method === 'POST' && ($subPath === '/auth/login' || $subPath === '/auth/log
         $verified = password_verify($password, $user['passwordHash']);
     }
 
-    // Auto-activate if account was switched off but credentials are valid
-    if ($user && $verified && !$user['isActive']) {
-        $upd = $pdo->prepare('UPDATE User SET isActive = 1, updatedAt = NOW() WHERE id = ?');
-        $upd->execute([$user['id']]);
-        $user['isActive'] = 1;
-    }
-
-    if (!$user || !$verified || !$user['isActive']) {
+    if (!$user || !$verified || empty($user['isActive'])) {
         http_response_code(401);
         echo json_encode(['error' => ['code' => 'INVALID_CREDENTIALS', 'message' => 'Invalid email or password']]);
         exit;
@@ -6003,7 +6007,7 @@ if ($method === 'POST' && ($subPath === '/customers/verify-code' || $subPath ===
     $storedCode = trim((string)($customer['verificationCode'] ?? ''));
     $expiresAt = !empty($customer['verificationExpiresAt']) ? strtotime($customer['verificationExpiresAt']) : 0;
 
-    if ($storedCode === '' || $storedCode !== $code) {
+    if ($storedCode === '' || !hash_equals($storedCode, $code)) {
         http_response_code(400);
         echo json_encode(['error' => ['code' => 'INVALID_CODE', 'message' => '確認コードが正しくありません。再度ご確認ください。']]);
         exit;
@@ -6165,14 +6169,7 @@ if ($method === 'POST' && ($subPath === '/customers/login' || $subPath === '/cus
 
     $verified = $customer && !empty($customer['passwordHash']) && password_verify($password, $customer['passwordHash']);
 
-    // Auto-activate customer account if credentials match
-    if ($customer && $verified && isset($customer['isActive']) && !$customer['isActive']) {
-        $upd = $pdo->prepare('UPDATE Customer SET isActive = 1, updatedAt = NOW() WHERE id = ?');
-        $upd->execute([$customer['id']]);
-        $customer['isActive'] = 1;
-    }
-
-    if (!$customer || !$verified || (isset($customer['isActive']) && !$customer['isActive'])) {
+    if (!$customer || !$verified || (isset($customer['isActive']) && !$customer['isActive']) || !empty($customer['deletedAt'])) {
         http_response_code(401);
         echo json_encode(['error' => ['code' => 'INVALID_CREDENTIALS', 'message' => 'メールアドレスまたはパスワードが正しくありません。']]);
         exit;
