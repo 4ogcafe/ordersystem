@@ -33,6 +33,7 @@ import QuantitySelector from '../components/order/QuantitySelector';
 import type { BuyNowState } from '../components/order/OrderButtons';
 import { useOrderQuote, type Savings } from '../components/order/useOrderQuote';
 import DineInOrderExperience from '../components/order/DineInOrderExperience';
+import QrFulfillmentChoiceModal from '../components/order/QrFulfillmentChoiceModal';
 
 interface Slot {
   date: string;
@@ -203,6 +204,19 @@ export default function Order() {
   const isDineInInit = Boolean(queryTable || isDineInPath || queryFulfillment.toUpperCase() === 'DINE_IN' || savedSession?.fulfillment === 'DINE_IN');
   const initialFulfillment: Fulfillment = isDineInInit ? 'DINE_IN' : 'PICKUP';
 
+  const isQrScan = Boolean(queryTable || isDineInPath || searchParams.has('qr'));
+
+  // QR choice modal: shown on QR scan so customer can choose Dine-In vs Takeout
+  const [showQrChoice, setShowQrChoice] = useState<boolean>(() => {
+    if (!isQrScan) return false;
+    try {
+      const explicitChoice = sessionStorage.getItem('adarsha_qr_choice');
+      return !explicitChoice;
+    } catch {
+      return true;
+    }
+  });
+
   const [fulfillment, setFulfillment] = useState<Fulfillment>(initialFulfillment);
   const [tableNumber, setTableNumber] = useState<string>(effectiveTable);
   const [address, setAddress] = useState<DeliveryAddress>(EMPTY_ADDRESS);
@@ -217,6 +231,41 @@ export default function Order() {
   const isDineIn = fulfillment === 'DINE_IN';
   const word = timeWord(fulfillment);
   const { quote, problem } = useOrderQuote(items, savings, Boolean(customer), fulfillment);
+
+  const handleSelectDineIn = () => {
+    setFulfillment('DINE_IN');
+    setShowQrChoice(false);
+    try {
+      sessionStorage.setItem('adarsha_qr_choice', 'DINE_IN');
+      sessionStorage.setItem('adarsha_table_session', JSON.stringify({
+        table: effectiveTable || tableNumber || '1',
+        storeId: selectedStoreId,
+        fulfillment: 'DINE_IN',
+      }));
+    } catch {}
+    setSearchParams(params => {
+      params.set('fulfillment', 'DINE_IN');
+      if (effectiveTable) params.set('table', effectiveTable);
+      return params;
+    }, { replace: true });
+  };
+
+  const handleSelectTakeout = () => {
+    setFulfillment('PICKUP');
+    setShowQrChoice(false);
+    try {
+      sessionStorage.setItem('adarsha_qr_choice', 'PICKUP');
+      sessionStorage.setItem('adarsha_table_session', JSON.stringify({
+        table: effectiveTable || tableNumber || '1',
+        storeId: selectedStoreId,
+        fulfillment: 'PICKUP',
+      }));
+    } catch {}
+    setSearchParams(params => {
+      params.set('fulfillment', 'PICKUP');
+      return params;
+    }, { replace: true });
+  };
 
   // Preserve table order session across reloads and menu browsing
   useEffect(() => {
@@ -654,22 +703,23 @@ export default function Order() {
 
   if (isDineIn && !placed) {
     return (
-      <DineInOrderExperience
-        initialTableNumber={tableNumber || queryTable || '1'}
-        selectedStore={selectedStore}
-        stores={stores}
-        onSwitchToTakeout={() => {
-          setFulfillment('PICKUP');
-          try {
-            sessionStorage.removeItem('adarsha_table_session');
-          } catch {}
-          setSearchParams(params => {
-            params.delete('table');
-            params.delete('fulfillment');
-            return params;
-          });
-        }}
-      />
+      <>
+        <DineInOrderExperience
+          initialTableNumber={tableNumber || queryTable || '1'}
+          selectedStore={selectedStore}
+          stores={stores}
+          onSwitchToTakeout={handleSelectTakeout}
+          onOpenChoiceModal={() => setShowQrChoice(true)}
+        />
+        <QrFulfillmentChoiceModal
+          open={showQrChoice}
+          tableNumber={effectiveTable || tableNumber || '1'}
+          store={selectedStore}
+          onSelectDineIn={handleSelectDineIn}
+          onSelectTakeout={handleSelectTakeout}
+          onClose={() => setShowQrChoice(false)}
+        />
+      </>
     );
   }
 
@@ -685,6 +735,73 @@ export default function Order() {
             <div className="divider"></div>
             <p className="section-sub">ご希望の店舗（全{stores.length}店舗対応）とメニューを選んで、1つの画面でスムーズにご注文いただけます</p>
           </div>
+
+          {/* ── QR SWITCHER BANNER (When customer arrived via table QR but is viewing takeout) ── */}
+          {effectiveTable && !isDineIn && !placed && (
+            <section
+              style={{
+                ...cardStyle,
+                marginBottom: '20px',
+                border: '1.5px solid #fed7aa',
+                background: 'linear-gradient(135deg, #ffffff 0%, #fff7ed 100%)',
+                padding: '16px 20px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ width: '40px', height: '40px', borderRadius: '12px', backgroundColor: '#ea580c', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: '1.2rem' }}>
+                    🛍️
+                  </span>
+                  <div>
+                    <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#c2410c', textTransform: 'uppercase' }}>
+                      QR SCANNED · テーブル {effectiveTable}
+                    </div>
+                    <div style={{ fontSize: '1.05rem', color: '#431407', margin: 0, fontWeight: 800 }}>
+                      テイクアウト（お持ち帰り）注文中
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: '#7c2d12', marginTop: 2 }}>
+                      お席でお食事される場合は「店内飲食」へお切り替えください
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={handleSelectDineIn}
+                    style={{
+                      background: '#ea580c',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: 9999,
+                      padding: '8px 16px',
+                      fontSize: '0.84rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 6px rgba(234, 88, 12, 0.2)',
+                    }}
+                  >
+                    🍽️ テーブル {effectiveTable} の店内飲食に切替
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowQrChoice(true)}
+                    style={{
+                      background: '#ffffff',
+                      color: '#64748b',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 9999,
+                      padding: '8px 12px',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    選択
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
 
           {/* ── TABLE ORDER HEADER (When scanning table QR or ordering dine-in) ── */}
           {!placed && isDineIn && (
@@ -1547,6 +1664,14 @@ export default function Order() {
           )}
         </div>
       </div>
+      <QrFulfillmentChoiceModal
+        open={showQrChoice}
+        tableNumber={effectiveTable || tableNumber || '1'}
+        store={selectedStore}
+        onSelectDineIn={handleSelectDineIn}
+        onSelectTakeout={handleSelectTakeout}
+        onClose={() => setShowQrChoice(false)}
+      />
     </main>
   );
 }

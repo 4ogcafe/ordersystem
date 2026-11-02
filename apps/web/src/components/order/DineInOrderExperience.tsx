@@ -4,7 +4,7 @@ import {
   Search, Plus, ShoppingCart, History,
   ChefHat, X, ChevronDown, Bell, Heart,
   Receipt, RotateCcw, User, LogIn, LogOut,
-  CheckCircle2, Sparkles
+  CheckCircle2, Sparkles, ShoppingBag
 } from 'lucide-react';
 import { apiFetch, assetUrl, errorMessage, getPublic } from '../../lib/api';
 import { yen } from '../../lib/format';
@@ -76,6 +76,7 @@ interface DineInOrderExperienceProps {
   selectedStore: StoreLocation;
   stores?: StoreLocation[];
   onSwitchToTakeout?: () => void;
+  onOpenChoiceModal?: () => void;
 }
 
 export interface CustomOptionItem {
@@ -138,6 +139,7 @@ export default function DineInOrderExperience({
   initialTableNumber,
   selectedStore,
   onSwitchToTakeout,
+  onOpenChoiceModal,
 }: DineInOrderExperienceProps) {
   const { customer, signIn, signOut } = useCustomer();
 
@@ -630,18 +632,48 @@ export default function DineInOrderExperience({
           <div className="dio-header-center">
             <span className="dio-header-brand">{lang === 'ja' ? 'アダルサ' : 'Adarsha'}</span>
             <span className="dio-header-branch">{branchDisplayName}</span>
-            <button
-              type="button"
-              className="dio-table-pill"
-              onClick={() => {
-                setNewTableInput(tableNumber);
-                setShowTableEditModal(true);
-              }}
-              title={lang === 'ja' ? 'お席番号の変更' : 'Change table number'}
-            >
-              <span>{lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}</span>
-              <ChevronDown size={11} />
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
+              <button
+                type="button"
+                className="dio-table-pill"
+                onClick={() => {
+                  setNewTableInput(tableNumber);
+                  setShowTableEditModal(true);
+                }}
+                title={lang === 'ja' ? 'お席番号の変更' : 'Change table number'}
+              >
+                <span>{lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}</span>
+                <ChevronDown size={11} />
+              </button>
+
+              {(onOpenChoiceModal || onSwitchToTakeout) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenChoiceModal) onOpenChoiceModal();
+                    else if (onSwitchToTakeout) onSwitchToTakeout();
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    background: '#f8fafc',
+                    border: '1px solid #cbd5e1',
+                    color: '#475569',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    padding: '1px 8px',
+                    borderRadius: 9999,
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                  }}
+                  title={lang === 'ja' ? '注文方法を変更（テイクアウト／店内飲食）' : 'Switch between Takeout and Dine-In'}
+                >
+                  <ShoppingBag size={11} />
+                  <span>{lang === 'ja' ? '持帰切替' : 'To Go'}</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="dio-header-right">
@@ -1773,27 +1805,33 @@ export default function DineInOrderExperience({
                 {lang === 'ja' ? 'テーブル番号を保存' : 'Save Table Number'}
               </button>
 
-              {onSwitchToTakeout && (
+              {(onOpenChoiceModal || onSwitchToTakeout) && (
                 <button
                   type="button"
                   style={{
                     width: '100%',
                     marginTop: 10,
-                    padding: '10px 14px',
+                    padding: '11px 14px',
                     borderRadius: 12,
-                    border: '1px solid #e5e7eb',
-                    background: '#f9fafb',
-                    color: '#4b5563',
-                    fontWeight: 700,
-                    fontSize: '0.85rem',
+                    border: '1.5px solid #cbd5e1',
+                    background: '#f8fafc',
+                    color: '#0f172a',
+                    fontWeight: 800,
+                    fontSize: '0.86rem',
                     cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
                   }}
                   onClick={() => {
                     setShowTableEditModal(false);
-                    onSwitchToTakeout();
+                    if (onOpenChoiceModal) onOpenChoiceModal();
+                    else if (onSwitchToTakeout) onSwitchToTakeout();
                   }}
                 >
-                  {lang === 'en' ? 'Switch to Takeout / Delivery' : 'テイクアウト・デリバリーに切り替え'}
+                  <ShoppingBag size={16} />
+                  <span>{lang === 'en' ? 'Switch to Takeout (To Go)' : 'テイクアウト（お持ち帰り）に切り替え'}</span>
                 </button>
               )}
             </div>
