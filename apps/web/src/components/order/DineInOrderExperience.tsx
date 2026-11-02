@@ -217,12 +217,25 @@ export default function DineInOrderExperience({
 
   // Auth modal states (Optional Login & Registration)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authStep, setAuthStep] = useState<'form' | 'verify'>('form');
   const [authEmail, setAuthEmail] = useState<string>('');
   const [authPassword, setAuthPassword] = useState<string>('');
   const [authName, setAuthName] = useState<string>('');
   const [authPhone, setAuthPhone] = useState<string>('');
+  const [authVerificationCode, setAuthVerificationCode] = useState<string>('');
+  const [authVerifyingEmail, setAuthVerifyingEmail] = useState<string>('');
+  const [authResendCooldown, setAuthResendCooldown] = useState<number>(0);
   const [authSubmitting, setAuthSubmitting] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string>('');
+  const [authInfoMsg, setAuthInfoMsg] = useState<string>('');
+
+  useEffect(() => {
+    if (authResendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setAuthResendCooldown(prev => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [authResendCooldown]);
 
   // Item customization modal
   const [customizingItem, setCustomizingItem] = useState<QuickMenuItem | null>(null);
@@ -243,6 +256,7 @@ export default function DineInOrderExperience({
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
+    setAuthInfoMsg('');
     setAuthSubmitting(true);
     try {
       const isRegister = authMode === 'register';
@@ -256,12 +270,28 @@ export default function DineInOrderExperience({
         body: JSON.stringify(body),
       });
 
+      const data = await res.json();
+
       if (!res.ok) {
-        setAuthError(await errorMessage(res, isRegister ? (lang === 'ja' ? '登録できませんでした。入力内容をご確認ください。' : 'Registration failed.') : (lang === 'ja' ? 'ログインできませんでした。メールアドレスとパスワードをご確認ください。' : 'Login failed.')));
+        if (data?.requiresVerification) {
+          setAuthVerifyingEmail(data.email || authEmail.trim());
+          setAuthStep('verify');
+          setAuthResendCooldown(60);
+          setAuthInfoMsg(data.error?.message || (lang === 'ja' ? 'メールアドレスの確認が必要です。' : 'Email verification required.'));
+          return;
+        }
+        setAuthError(data?.error?.message || (isRegister ? (lang === 'ja' ? '登録できませんでした。入力内容をご確認ください。' : 'Registration failed.') : (lang === 'ja' ? 'ログインできませんでした。メールアドレスとパスワードをご確認ください。' : 'Login failed.')));
         return;
       }
 
-      const data = await res.json();
+      if (data?.requiresVerification) {
+        setAuthVerifyingEmail(data.email || authEmail.trim());
+        setAuthStep('verify');
+        setAuthResendCooldown(60);
+        setAuthInfoMsg(data.message || (lang === 'ja' ? `確認コードを ${data.email || authEmail.trim()} 宛に送信しました。` : `Verification code sent to ${data.email || authEmail.trim()}`));
+        return;
+      }
+
       if (data.token) {
         localStorage.setItem('kalpana_customer_token', data.token);
       }
@@ -279,6 +309,66 @@ export default function DineInOrderExperience({
       setAuthError(lang === 'ja' ? '通信エラーが発生しました。もう一度お試しください。' : 'Connection error. Please try again.');
     } finally {
       setAuthSubmitting(false);
+    }
+  };
+
+  const handleVerifyCodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authVerificationCode.trim()) {
+      setAuthError(lang === 'ja' ? '6桁の確認コードを入力してください。' : 'Please enter the 6-digit code.');
+      return;
+    }
+    setAuthError('');
+    setAuthInfoMsg('');
+    setAuthSubmitting(true);
+    try {
+      const res = await apiFetch('/api/v1/customers/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authVerifyingEmail, code: authVerificationCode.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data?.error?.message || (lang === 'ja' ? '確認コードが正しくありません。再度ご確認ください。' : 'Invalid code. Please try again.'));
+        return;
+      }
+      if (data.token) {
+        localStorage.setItem('kalpana_customer_token', data.token);
+      }
+      if (data.customer) {
+        signIn(data.customer);
+      }
+      setShowAuthModal(false);
+      setAuthStep('form');
+      setAuthPassword('');
+      setAuthVerificationCode('');
+      toast.success(lang === 'ja' ? `メール認証が完了しました！ようこそ、${data.customer?.name || ''}様` : `Verified successfully! Welcome, ${data.customer?.name || ''}`);
+    } catch {
+      setAuthError(lang === 'ja' ? '通信エラーが発生しました。もう一度お試しください。' : 'Connection error. Please try again.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleResendAuthCode = async () => {
+    if (authResendCooldown > 0 || !authVerifyingEmail) return;
+    setAuthError('');
+    setAuthInfoMsg('');
+    try {
+      const res = await apiFetch('/api/v1/customers/resend-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authVerifyingEmail }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(lang === 'ja' ? '新しい確認コードをメールに再送信しました。' : 'New code sent to your email.');
+        setAuthResendCooldown(60);
+      } else {
+        setAuthError(data?.error?.message || (lang === 'ja' ? '再送信に失敗しました。' : 'Resend failed.'));
+      }
+    } catch {
+      setAuthError(lang === 'ja' ? '通信エラーが発生しました。' : 'Connection error.');
     }
   };
 
@@ -2187,159 +2277,269 @@ export default function DineInOrderExperience({
                     </div>
                   </div>
 
-                  {/* Mode tabs */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', background: '#f3f4f6', borderRadius: 10, padding: 3, marginBottom: 14 }}>
-                    <button
-                      type="button"
-                      style={{
-                        padding: '8px 12px',
-                        border: 'none',
-                        borderRadius: 8,
-                        fontSize: '0.85rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        background: authMode === 'login' ? '#ffffff' : 'transparent',
-                        color: authMode === 'login' ? 'var(--dio-primary)' : '#6b7280',
-                        boxShadow: authMode === 'login' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                        transition: 'all 0.15s',
-                      }}
-                      onClick={() => { setAuthMode('login'); setAuthError(''); }}
-                    >
-                      {lang === 'ja' ? 'ログイン' : 'Log In'}
-                    </button>
-                    <button
-                      type="button"
-                      style={{
-                        padding: '8px 12px',
-                        border: 'none',
-                        borderRadius: 8,
-                        fontSize: '0.85rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        background: authMode === 'register' ? '#ffffff' : 'transparent',
-                        color: authMode === 'register' ? 'var(--dio-primary)' : '#6b7280',
-                        boxShadow: authMode === 'register' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                        transition: 'all 0.15s',
-                      }}
-                      onClick={() => { setAuthMode('register'); setAuthError(''); }}
-                    >
-                      {lang === 'ja' ? '新規登録（無料）' : 'Register (Free)'}
-                    </button>
-                  </div>
+                  {authStep === 'verify' ? (
+                    <form onSubmit={handleVerifyCodeSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '10px 12px', fontSize: '0.82rem', color: '#7c2d12', lineHeight: 1.5 }}>
+                        <strong>{lang === 'ja' ? 'メールに確認コードを送信しました' : 'Verification code sent'}</strong>
+                        <div style={{ marginTop: 2, wordBreak: 'break-all' }}>{authVerifyingEmail}</div>
+                      </div>
 
-                  {authError && (
-                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', marginBottom: 12, color: '#b91c1c', fontSize: '0.8rem' }}>
-                      {authError}
-                    </div>
-                  )}
+                      <p style={{ margin: 0, fontSize: '0.8rem', color: '#4b5563', lineHeight: 1.5 }}>
+                        {lang === 'ja'
+                          ? '届いた6桁の数字を入力してアカウントを有効化してください。（送信元: 4ogcafe@gmail.com）'
+                          : 'Enter the 6-digit code sent to your email to activate your account. (From: 4ogcafe@gmail.com)'}
+                      </p>
 
-                  <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-                    {authMode === 'register' && (
+                      {authInfoMsg && (
+                        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '8px 10px', color: '#166534', fontSize: '0.78rem' }}>
+                          {authInfoMsg}
+                        </div>
+                      )}
+
+                      {authError && (
+                        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 10px', color: '#b91c1c', fontSize: '0.78rem' }}>
+                          {authError}
+                        </div>
+                      )}
+
                       <div>
                         <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
-                          {lang === 'ja' ? 'お名前' : 'Full Name'} <span style={{ color: '#dc2626' }}>*</span>
+                          {lang === 'ja' ? '確認コード（6桁）' : 'Verification Code (6 digits)'}
                         </label>
                         <input
                           type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={6}
                           required
-                          value={authName}
-                          onChange={e => setAuthName(e.target.value)}
-                          placeholder={lang === 'ja' ? '例: 山田 太郎' : 'e.g. John Doe'}
+                          autoFocus
+                          placeholder="123456"
+                          value={authVerificationCode}
+                          onChange={e => setAuthVerificationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                           style={{
                             width: '100%',
                             padding: '10px 12px',
                             border: '1.5px solid #d1d5db',
                             borderRadius: 8,
-                            fontSize: '0.9rem',
+                            fontSize: '1.4rem',
+                            letterSpacing: '0.25em',
+                            fontWeight: 800,
+                            textAlign: 'center',
                             boxSizing: 'border-box',
                             outline: 'none',
                           }}
                         />
                       </div>
-                    )}
 
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
-                        {lang === 'ja' ? 'メールアドレス' : 'Email Address'} <span style={{ color: '#dc2626' }}>*</span>
-                      </label>
-                      <input
-                        type="email"
-                        required
-                        value={authEmail}
-                        onChange={e => setAuthEmail(e.target.value)}
-                        placeholder="you@example.com"
-                        style={{
-                          width: '100%',
-                          padding: '10px 12px',
-                          border: '1.5px solid #d1d5db',
-                          borderRadius: 8,
-                          fontSize: '0.9rem',
-                          boxSizing: 'border-box',
-                          outline: 'none',
-                        }}
-                      />
-                    </div>
+                      <button
+                        type="submit"
+                        disabled={authSubmitting || authVerificationCode.length < 6}
+                        className="dio-send-order-btn"
+                        style={{ marginTop: 6, opacity: authSubmitting || authVerificationCode.length < 6 ? 0.7 : 1 }}
+                      >
+                        {authSubmitting ? (lang === 'ja' ? '確認中…' : 'Verifying…') : (lang === 'ja' ? '認証を完了して続ける' : 'Verify & Continue')}
+                      </button>
 
-                    {authMode === 'register' && (
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
-                          {lang === 'ja' ? 'お電話番号（任意）' : 'Phone (Optional)'}
-                        </label>
-                        <input
-                          type="tel"
-                          value={authPhone}
-                          onChange={e => setAuthPhone(e.target.value)}
-                          placeholder="090-1234-5678"
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                        <button
+                          type="button"
+                          onClick={handleResendAuthCode}
+                          disabled={authResendCooldown > 0}
                           style={{
-                            width: '100%',
-                            padding: '10px 12px',
-                            border: '1.5px solid #d1d5db',
-                            borderRadius: 8,
-                            fontSize: '0.9rem',
-                            boxSizing: 'border-box',
-                            outline: 'none',
+                            background: 'none',
+                            border: 'none',
+                            color: authResendCooldown > 0 ? '#9ca3af' : 'var(--dio-primary)',
+                            fontWeight: 700,
+                            fontSize: '0.78rem',
+                            cursor: authResendCooldown > 0 ? 'not-allowed' : 'pointer',
+                            padding: 0,
                           }}
-                        />
+                        >
+                          {authResendCooldown > 0
+                            ? (lang === 'ja' ? `再送信まで（${authResendCooldown}秒）` : `Resend in (${authResendCooldown}s)`)
+                            : (lang === 'ja' ? 'コードを再送信' : 'Resend Code')}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setAuthStep('form'); setAuthError(''); }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#6b7280',
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                            padding: 0,
+                            textDecoration: 'underline',
+                          }}
+                        >
+                          {lang === 'ja' ? '戻る' : 'Back'}
+                        </button>
                       </div>
-                    )}
+                    </form>
+                  ) : (
+                    <>
+                      {/* Mode tabs */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', background: '#f3f4f6', borderRadius: 10, padding: 3, marginBottom: 14 }}>
+                        <button
+                          type="button"
+                          style={{
+                            padding: '8px 12px',
+                            border: 'none',
+                            borderRadius: 8,
+                            fontSize: '0.85rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            background: authMode === 'login' ? '#ffffff' : 'transparent',
+                            color: authMode === 'login' ? 'var(--dio-primary)' : '#6b7280',
+                            boxShadow: authMode === 'login' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                            transition: 'all 0.15s',
+                          }}
+                          onClick={() => { setAuthMode('login'); setAuthError(''); setAuthInfoMsg(''); }}
+                        >
+                          {lang === 'ja' ? 'ログイン' : 'Log In'}
+                        </button>
+                        <button
+                          type="button"
+                          style={{
+                            padding: '8px 12px',
+                            border: 'none',
+                            borderRadius: 8,
+                            fontSize: '0.85rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            background: authMode === 'register' ? '#ffffff' : 'transparent',
+                            color: authMode === 'register' ? 'var(--dio-primary)' : '#6b7280',
+                            boxShadow: authMode === 'register' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                            transition: 'all 0.15s',
+                          }}
+                          onClick={() => { setAuthMode('register'); setAuthError(''); setAuthInfoMsg(''); }}
+                        >
+                          {lang === 'ja' ? '新規登録（無料）' : 'Register (Free)'}
+                        </button>
+                      </div>
 
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
-                        {lang === 'ja' ? 'パスワード' : 'Password'} <span style={{ color: '#dc2626' }}>*</span>
-                        {authMode === 'register' && <span style={{ fontSize: '0.72rem', color: '#6b7280', fontWeight: 500, marginLeft: 4 }}>{lang === 'ja' ? '（6文字以上）' : '(min 6 chars)'}</span>}
-                      </label>
-                      <input
-                        type="password"
-                        required
-                        minLength={authMode === 'register' ? 6 : 1}
-                        value={authPassword}
-                        onChange={e => setAuthPassword(e.target.value)}
-                        placeholder="••••••••"
-                        style={{
-                          width: '100%',
-                          padding: '10px 12px',
-                          border: '1.5px solid #d1d5db',
-                          borderRadius: 8,
-                          fontSize: '0.9rem',
-                          boxSizing: 'border-box',
-                          outline: 'none',
-                        }}
-                      />
-                    </div>
+                      {authInfoMsg && (
+                        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '8px 12px', marginBottom: 12, color: '#166534', fontSize: '0.8rem' }}>
+                          {authInfoMsg}
+                        </div>
+                      )}
 
-                    <button
-                      type="submit"
-                      disabled={authSubmitting}
-                      className="dio-send-order-btn"
-                      style={{ marginTop: 8 }}
-                    >
-                      {authSubmitting
-                        ? (lang === 'ja' ? '処理中…' : 'Processing…')
-                        : authMode === 'register'
-                          ? (lang === 'ja' ? '無料で会員登録する' : 'Sign Up (Free)')
-                          : (lang === 'ja' ? 'ログインする' : 'Log In')}
-                    </button>
-                  </form>
+                      {authError && (
+                        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', marginBottom: 12, color: '#b91c1c', fontSize: '0.8rem' }}>
+                          {authError}
+                        </div>
+                      )}
+
+                      <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+                        {authMode === 'register' && (
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
+                              {lang === 'ja' ? 'お名前' : 'Full Name'} <span style={{ color: '#dc2626' }}>*</span>
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={authName}
+                              onChange={e => setAuthName(e.target.value)}
+                              placeholder={lang === 'ja' ? '例: 山田 太郎' : 'e.g. John Doe'}
+                              style={{
+                                width: '100%',
+                                padding: '10px 12px',
+                                border: '1.5px solid #d1d5db',
+                                borderRadius: 8,
+                                fontSize: '0.9rem',
+                                boxSizing: 'border-box',
+                                outline: 'none',
+                              }}
+                            />
+                          </div>
+                        )}
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
+                            {lang === 'ja' ? 'メールアドレス' : 'Email Address'} <span style={{ color: '#dc2626' }}>*</span>
+                          </label>
+                          <input
+                            type="email"
+                            required
+                            value={authEmail}
+                            onChange={e => setAuthEmail(e.target.value)}
+                            placeholder="you@example.com"
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px',
+                              border: '1.5px solid #d1d5db',
+                              borderRadius: 8,
+                              fontSize: '0.9rem',
+                              boxSizing: 'border-box',
+                              outline: 'none',
+                            }}
+                          />
+                        </div>
+
+                        {authMode === 'register' && (
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
+                              {lang === 'ja' ? 'お電話番号（任意）' : 'Phone (Optional)'}
+                            </label>
+                            <input
+                              type="tel"
+                              value={authPhone}
+                              onChange={e => setAuthPhone(e.target.value)}
+                              placeholder="090-1234-5678"
+                              style={{
+                                width: '100%',
+                                padding: '10px 12px',
+                                border: '1.5px solid #d1d5db',
+                                borderRadius: 8,
+                                fontSize: '0.9rem',
+                                boxSizing: 'border-box',
+                                outline: 'none',
+                              }}
+                            />
+                          </div>
+                        )}
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
+                            {lang === 'ja' ? 'パスワード' : 'Password'} <span style={{ color: '#dc2626' }}>*</span>
+                            {authMode === 'register' && <span style={{ fontSize: '0.72rem', color: '#6b7280', fontWeight: 500, marginLeft: 4 }}>{lang === 'ja' ? '（6文字以上）' : '(min 6 chars)'}</span>}
+                          </label>
+                          <input
+                            type="password"
+                            required
+                            minLength={authMode === 'register' ? 6 : 1}
+                            value={authPassword}
+                            onChange={e => setAuthPassword(e.target.value)}
+                            placeholder="••••••••"
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px',
+                              border: '1.5px solid #d1d5db',
+                              borderRadius: 8,
+                              fontSize: '0.9rem',
+                              boxSizing: 'border-box',
+                              outline: 'none',
+                            }}
+                          />
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={authSubmitting}
+                          className="dio-send-order-btn"
+                          style={{ marginTop: 8 }}
+                        >
+                          {authSubmitting
+                            ? (lang === 'ja' ? '処理中…' : 'Processing…')
+                            : authMode === 'register'
+                              ? (lang === 'ja' ? '認証コードを送信して登録' : 'Send Verification Code & Register')
+                              : (lang === 'ja' ? 'ログインする' : 'Log In')}
+                        </button>
+                      </form>
+                    </>
+                  )}
 
                   <div style={{ textAlign: 'center', marginTop: 14 }}>
                     <button

@@ -72,6 +72,7 @@ function AppContent() {
           <Route path="/account" element={<Account />} />
           <Route path="/account/login" element={<AccountAuth mode="login" />} />
           <Route path="/account/register" element={<AccountAuth mode="register" />} />
+          <Route path="/account/verify" element={<AccountAuth mode="verify" />} />
           <Route path="/careers" element={<Careers />} />
           <Route path="/jobs" element={<Careers />} />
           <Route path="/blog" element={<Blog />} />

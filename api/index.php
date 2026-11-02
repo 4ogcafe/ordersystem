@@ -695,6 +695,11 @@ function runDatabaseMigrations(PDO $pdo): array {
             `newsletterOptInAt` DATETIME(3) NULL,
             `points` INTEGER NOT NULL DEFAULT 0,
             `isActive` BOOLEAN NOT NULL DEFAULT true,
+            `isEmailVerified` BOOLEAN NOT NULL DEFAULT false,
+            `verificationCode` VARCHAR(32) NULL,
+            `verificationToken` VARCHAR(64) NULL,
+            `verificationExpiresAt` DATETIME(3) NULL,
+            `emailVerifiedAt` DATETIME(3) NULL,
             `deletedAt` DATETIME(3) NULL,
             `memberCode` VARCHAR(191) NULL,
             `stampCount` INTEGER NOT NULL DEFAULT 0,
@@ -952,6 +957,11 @@ function runDatabaseMigrations(PDO $pdo): array {
         ['Settings', 'dineInAllowOnlinePay', "BOOLEAN NOT NULL DEFAULT 1"],
         ['Settings', 'dineInNoteJa', "TEXT NULL"],
         ['PickupOrder', 'tableNumber', "VARCHAR(191) NULL"],
+        ['Customer', 'isEmailVerified', "BOOLEAN NOT NULL DEFAULT 0"],
+        ['Customer', 'verificationCode', "VARCHAR(32) NULL"],
+        ['Customer', 'verificationToken', "VARCHAR(64) NULL"],
+        ['Customer', 'verificationExpiresAt', "DATETIME(3) NULL"],
+        ['Customer', 'emailVerifiedAt', "DATETIME(3) NULL"],
     ];
 
     $columnsUpdated = [];
@@ -5732,6 +5742,7 @@ if ($method === 'GET' && ($subPath === '/auth/me' || $subPath === '/auth/me/')) 
 }
 
 // -------------------------------------------------------------
+// -------------------------------------------------------------
 // Helper: Customer Profile & Member Code
 // -------------------------------------------------------------
 function newMemberCode() {
@@ -5742,6 +5753,96 @@ function newMemberCode() {
         $code .= $alphabet[ord($bytes[$i]) % strlen($alphabet)];
     }
     return $code;
+}
+
+function sendAccountVerificationEmail(string $toEmail, string $toName, string $code, string $token): bool {
+    $senderEmail = '4ogcafe@gmail.com';
+    $senderName = 'アダルサ (ADARSHA)';
+    $subject = '【アダルサ】メールアドレス確認コード（' . $code . '）のご案内';
+    
+    $verifyUrl = 'https://pnglike.com/account/verify?token=' . rawurlencode($token) . '&email=' . rawurlencode($toEmail);
+    $safeName = htmlspecialchars($toName ?: 'お客様', ENT_QUOTES, 'UTF-8');
+
+    $htmlBody = <<<HTML
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>メールアドレスの確認</title>
+<style>
+  body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #faf8f5; color: #1f2937; line-height: 1.6; }
+  .email-container { max-width: 560px; margin: 30px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #fed7aa; }
+  .header { background: linear-gradient(135deg, #b82e1f 0%, #9c2517 100%); padding: 28px 24px; text-align: center; color: #ffffff; }
+  .header h1 { margin: 0; font-size: 1.4rem; letter-spacing: 0.05em; font-weight: 800; }
+  .header p { margin: 6px 0 0; font-size: 0.85rem; opacity: 0.9; }
+  .content { padding: 32px 28px; }
+  .greeting { font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; color: #111827; }
+  .lead { font-size: 0.95rem; color: #4b5563; margin-bottom: 24px; }
+  .code-box { background: #fff7ed; border: 2px dashed #f97316; border-radius: 12px; padding: 24px 16px; text-align: center; margin: 24px 0; }
+  .code-label { font-size: 0.8rem; font-weight: 700; color: #c2410c; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+  .code-number { font-size: 2.2rem; font-weight: 900; letter-spacing: 0.25em; color: #9a3412; font-family: monospace, Courier, monospace; margin: 4px 0; }
+  .code-expiry { font-size: 0.8rem; color: #6b7280; margin-top: 8px; }
+  .btn-container { text-align: center; margin: 28px 0 16px; }
+  .btn { display: inline-block; background: #b82e1f; color: #ffffff !important; text-decoration: none; padding: 13px 32px; border-radius: 9999px; font-weight: 700; font-size: 0.95rem; box-shadow: 0 4px 12px rgba(184,46,31,0.25); }
+  .notice { font-size: 0.78rem; color: #9ca3af; margin-top: 28px; line-height: 1.5; border-top: 1px solid #f3f4f6; padding-top: 16px; }
+  .footer { background: #fdfaf6; padding: 20px 24px; text-align: center; font-size: 0.78rem; color: #6b7280; border-top: 1px solid #fee2e2; }
+</style>
+</head>
+<body>
+<div class="email-container">
+  <div class="header">
+    <h1>アダルサ (ADARSHA)</h1>
+    <p>本格インド・ネパール料理レストラン</p>
+  </div>
+  <div class="content">
+    <div class="greeting">{$safeName} 様</div>
+    <div class="lead">
+      アダルサをご利用いただき、誠にありがとうございます。<br>
+      アカウントの登録・確認を完了するため、下記の確認コードをご入力ください。
+    </div>
+
+    <div class="code-box">
+      <div class="code-label">メールアドレス確認コード</div>
+      <div class="code-number">{$code}</div>
+      <div class="code-expiry">※有効期限: 15分間</div>
+    </div>
+
+    <div class="btn-container">
+      <a href="{$verifyUrl}" class="btn" target="_blank">ワンクリックで認証する</a>
+    </div>
+
+    <div class="notice">
+      ※画面に上記6桁の確認コードを直接ご入力いただくか、上記ボタンをクリックして認証を完了してください。<br>
+      URL: <a href="{$verifyUrl}" style="color: #b82e1f; word-break: break-all;">{$verifyUrl}</a><br><br>
+      ※本メールにお心当たりがない場合は、恐れ入りますが本メールを破棄してください。
+    </div>
+  </div>
+  <div class="footer">
+    <strong>インド料理レストラン アダルサ (ADARSHA)</strong><br>
+    武蔵境店: 東京都武蔵野市境2-14-10 クレール武蔵野1F (TEL: 0422-52-1661)<br>
+    送信元・お問い合わせ: 4ogcafe@gmail.com
+  </div>
+</div>
+</body>
+</html>
+HTML;
+
+    $headers = [
+        'MIME-Version: 1.0',
+        'Content-Type: text/html; charset=UTF-8',
+        'From: =?UTF-8?B?' . base64_encode($senderName) . '?= <' . $senderEmail . '>',
+        'Reply-To: ' . $senderEmail,
+        'Return-Path: ' . $senderEmail,
+        'X-Mailer: PHP/' . phpversion(),
+    ];
+
+    $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    $mailSuccess = @mail($toEmail, $encodedSubject, $htmlBody, implode("\r\n", $headers), '-f ' . $senderEmail);
+    if (!$mailSuccess) {
+        $mailSuccess = @mail($toEmail, $encodedSubject, $htmlBody, implode("\r\n", $headers));
+    }
+    return (bool)$mailSuccess;
 }
 
 function formatCustomerProfile($customer) {
@@ -5775,6 +5876,8 @@ function formatCustomerProfile($customer) {
         'newsletterOptIn' => !empty($customer['newsletterOptIn']),
         'points' => (int)($customer['points'] ?? 0),
         'memberCode' => (string)($customer['memberCode'] ?? ''),
+        'isEmailVerified' => !empty($customer['isEmailVerified']),
+        'emailVerifiedAt' => $customer['emailVerifiedAt'] ?? null,
         'createdAt' => (string)($customer['createdAt'] ?? date('c')),
     ];
 }
@@ -5801,18 +5904,21 @@ if ($method === 'POST' && ($subPath === '/customers/register' || $subPath === '/
         exit;
     }
 
-    $chk = $pdo->prepare('SELECT id FROM Customer WHERE LOWER(email) = ? LIMIT 1');
+    $chk = $pdo->prepare('SELECT id, isEmailVerified, name FROM Customer WHERE LOWER(email) = ? LIMIT 1');
     $chk->execute([$email]);
-    if ($chk->fetch()) {
+    $existing = $chk->fetch();
+
+    if ($existing && !empty($existing['isEmailVerified'])) {
         http_response_code(409);
-        echo json_encode(['error' => ['code' => 'EMAIL_TAKEN', 'message' => 'このメールアドレスはすでに登録されています。ログインしてください。']]);
+        echo json_encode(['error' => ['code' => 'EMAIL_TAKEN', 'message' => 'このメールアドレスはすでに登録・認証されています。ログインしてください。']]);
         exit;
     }
 
-    $customerId = 'cst_' . bin2hex(random_bytes(8));
-    $memberCode = newMemberCode();
-    $passwordHash = password_hash($password, PASSWORD_BCRYPT);
+    $code = sprintf('%06d', random_int(100000, 999999));
+    $token = bin2hex(random_bytes(32));
+    $expiresAt = date('Y-m-d H:i:s', time() + 15 * 60); // 15 mins validity
     $now = date('Y-m-d H:i:s');
+    $passwordHash = password_hash($password, PASSWORD_BCRYPT);
 
     $bonusPoints = 0;
     try {
@@ -5826,20 +5932,116 @@ if ($method === 'POST' && ($subPath === '/customers/register' || $subPath === '/
         }
     } catch (Throwable $e) {}
 
-    $ins = $pdo->prepare('INSERT INTO Customer (id, email, passwordHash, name, phone, memberCode, points, isActive, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)');
-    $ins->execute([$customerId, $email, $passwordHash, $name, $phone ?: null, $memberCode, $bonusPoints, $now, $now]);
-
-    if ($bonusPoints > 0) {
-        try {
-            $ptId = 'pt_' . bin2hex(random_bytes(8));
-            $ptIns = $pdo->prepare('INSERT INTO PointTransaction (id, customerId, type, points, balanceAfter, note, createdAt) VALUES (?, ?, "BONUS", ?, ?, "新規会員登録ボーナス", ?)');
-            $ptIns->execute([$ptId, $customerId, $bonusPoints, $bonusPoints, $now]);
-        } catch (Throwable $e) {}
+    if ($existing) {
+        $customerId = $existing['id'];
+        $upd = $pdo->prepare('UPDATE Customer SET name = ?, phone = ?, passwordHash = ?, verificationCode = ?, verificationToken = ?, verificationExpiresAt = ?, updatedAt = ? WHERE id = ?');
+        $upd->execute([$name, $phone ?: null, $passwordHash, $code, $token, $expiresAt, $now, $customerId]);
+    } else {
+        $customerId = 'cst_' . bin2hex(random_bytes(8));
+        $memberCode = newMemberCode();
+        $ins = $pdo->prepare('INSERT INTO Customer (id, email, passwordHash, name, phone, memberCode, points, isActive, isEmailVerified, verificationCode, verificationToken, verificationExpiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)');
+        $ins->execute([$customerId, $email, $passwordHash, $name, $phone ?: null, $memberCode, $bonusPoints, $code, $token, $expiresAt, $now, $now]);
     }
 
-    $ttl = 30 * 86400; // 30 days
-    $token = createJwt(['sub' => $customerId, 'aud' => 'customer'], $jwtSecret, $ttl);
+    // Send verification email using 4ogcafe@gmail.com
+    sendAccountVerificationEmail($email, $name, $code, $token);
 
+    http_response_code(200);
+    echo json_encode([
+        'requiresVerification' => true,
+        'email' => $email,
+        'message' => '確認コードを ' . $email . ' 宛に送信しました。メールに記載された6桁の確認コードを入力してください。',
+    ]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: POST /customers/verify-code (and /customer/verify-code)
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/customers/verify-code' || $subPath === '/customers/verify-code/' || $subPath === '/customer/verify-code' || $subPath === '/customer/verify-code/')) {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $email = strtolower(trim($input['email'] ?? ''));
+    $code = trim((string)($input['code'] ?? ''));
+
+    if (empty($email) || empty($code)) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => 'メールアドレスと6桁の確認コードを入力してください。']]);
+        exit;
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM Customer WHERE LOWER(email) = ? LIMIT 1');
+    $stmt->execute([$email]);
+    $customer = $stmt->fetch();
+
+    if (!$customer) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'CUSTOMER_NOT_FOUND', 'message' => 'アカウントが見つかりません。新規登録をお願いします。']]);
+        exit;
+    }
+
+    if (!empty($customer['isEmailVerified'])) {
+        $ttl = 30 * 86400;
+        $token = createJwt(['sub' => $customer['id'], 'aud' => 'customer'], $jwtSecret, $ttl);
+        setcookie('kalpana_customer', $token, [
+            'expires' => time() + $ttl,
+            'path' => '/',
+            'domain' => '',
+            'secure' => true,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+        echo json_encode([
+            'success' => true,
+            'customer' => formatCustomerProfile($customer),
+            'token' => $token,
+            'message' => 'すでに認証済みです。',
+        ]);
+        exit;
+    }
+
+    $storedCode = trim((string)($customer['verificationCode'] ?? ''));
+    $expiresAt = !empty($customer['verificationExpiresAt']) ? strtotime($customer['verificationExpiresAt']) : 0;
+
+    if ($storedCode === '' || $storedCode !== $code) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'INVALID_CODE', 'message' => '確認コードが正しくありません。再度ご確認ください。']]);
+        exit;
+    }
+
+    if ($expiresAt > 0 && time() > $expiresAt) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'CODE_EXPIRED', 'message' => '確認コードの有効期限（15分）が切れています。「コードを再送信」を押してください。']]);
+        exit;
+    }
+
+    $now = date('Y-m-d H:i:s');
+    $upd = $pdo->prepare('UPDATE Customer SET isEmailVerified = 1, emailVerifiedAt = ?, verificationCode = NULL, verificationToken = NULL, isActive = 1, updatedAt = ? WHERE id = ?');
+    $upd->execute([$now, $now, $customer['id']]);
+
+    $customer['isEmailVerified'] = 1;
+    $customer['emailVerifiedAt'] = $now;
+
+    // Award signup bonus points if not yet awarded
+    try {
+        $st = $pdo->query('SELECT value FROM Settings WHERE `key` = "loyalty" LIMIT 1');
+        $lRow = $st ? $st->fetch() : null;
+        if ($lRow && !empty($lRow['value'])) {
+            $lData = json_decode($lRow['value'], true);
+            if (!empty($lData['enabled']) && !empty($lData['signupBonusPoints'])) {
+                $bonusPoints = (int)$lData['signupBonusPoints'];
+                if ($bonusPoints > 0 && (int)($customer['points'] ?? 0) === 0) {
+                    $ptId = 'pt_' . bin2hex(random_bytes(8));
+                    $ptIns = $pdo->prepare('INSERT INTO PointTransaction (id, customerId, type, points, balanceAfter, note, createdAt) VALUES (?, ?, "BONUS", ?, ?, "新規会員登録ボーナス", ?)');
+                    $ptIns->execute([$ptId, $customer['id'], $bonusPoints, $bonusPoints, $now]);
+                    $pdo->prepare('UPDATE Customer SET points = points + ? WHERE id = ?')->execute([$bonusPoints, $customer['id']]);
+                    $customer['points'] = $bonusPoints;
+                }
+            }
+        }
+    } catch (Throwable $e) {}
+
+    $ttl = 30 * 86400;
+    $token = createJwt(['sub' => $customer['id'], 'aud' => 'customer'], $jwtSecret, $ttl);
     setcookie('kalpana_customer', $token, [
         'expires' => time() + $ttl,
         'path' => '/',
@@ -5849,15 +6051,102 @@ if ($method === 'POST' && ($subPath === '/customers/register' || $subPath === '/
         'samesite' => 'Lax',
     ]);
 
-    $custStmt = $pdo->prepare('SELECT * FROM Customer WHERE id = ? LIMIT 1');
-    $custStmt->execute([$customerId]);
-    $created = $custStmt->fetch();
-
-    http_response_code(201);
     echo json_encode([
-        'customer' => formatCustomerProfile($created),
+        'success' => true,
+        'customer' => formatCustomerProfile($customer),
         'token' => $token,
+        'message' => 'メール認証が完了しました！会員登録ありがとうございます。',
     ]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: POST /customers/resend-code (and /customer/resend-code)
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/customers/resend-code' || $subPath === '/customers/resend-code/' || $subPath === '/customer/resend-code' || $subPath === '/customer/resend-code/')) {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $email = strtolower(trim($input['email'] ?? ''));
+
+    if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => '有効なメールアドレスを入力してください。']]);
+        exit;
+    }
+
+    $stmt = $pdo->prepare('SELECT id, name, isEmailVerified FROM Customer WHERE LOWER(email) = ? LIMIT 1');
+    $stmt->execute([$email]);
+    $customer = $stmt->fetch();
+
+    if (!$customer) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'CUSTOMER_NOT_FOUND', 'message' => 'アカウントが見つかりません。']]);
+        exit;
+    }
+
+    if (!empty($customer['isEmailVerified'])) {
+        echo json_encode(['success' => true, 'alreadyVerified' => true, 'message' => 'このメールアドレスは既に認証済みです。ログインしてください。']);
+        exit;
+    }
+
+    $code = sprintf('%06d', random_int(100000, 999999));
+    $token = bin2hex(random_bytes(32));
+    $expiresAt = date('Y-m-d H:i:s', time() + 15 * 60);
+
+    $upd = $pdo->prepare('UPDATE Customer SET verificationCode = ?, verificationToken = ?, verificationExpiresAt = ?, updatedAt = NOW() WHERE id = ?');
+    $upd->execute([$code, $token, $expiresAt, $customer['id']]);
+
+    sendAccountVerificationEmail($email, $customer['name'], $code, $token);
+
+    echo json_encode([
+        'success' => true,
+        'message' => '新しい確認コードをメール（' . $email . '）宛に再送信しました。',
+    ]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: GET /customers/verify-link (1-click verification link)
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/customers/verify-link' || $subPath === '/customers/verify-link/' || $subPath === '/customer/verify-link' || $subPath === '/customer/verify-link/')) {
+    $token = trim((string)($_GET['token'] ?? ''));
+    $email = strtolower(trim((string)($_GET['email'] ?? '')));
+
+    if (empty($token) || empty($email)) {
+        header('Location: /account/login?error=invalid_verification_link');
+        exit;
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM Customer WHERE LOWER(email) = ? AND verificationToken = ? LIMIT 1');
+    $stmt->execute([$email, $token]);
+    $customer = $stmt->fetch();
+
+    if (!$customer) {
+        header('Location: /account/login?error=invalid_or_expired_token');
+        exit;
+    }
+
+    $expiresAt = !empty($customer['verificationExpiresAt']) ? strtotime($customer['verificationExpiresAt']) : 0;
+    if ($expiresAt > 0 && time() > $expiresAt) {
+        header('Location: /account/login?error=token_expired&email=' . rawurlencode($email));
+        exit;
+    }
+
+    $now = date('Y-m-d H:i:s');
+    $upd = $pdo->prepare('UPDATE Customer SET isEmailVerified = 1, emailVerifiedAt = ?, verificationCode = NULL, verificationToken = NULL, isActive = 1, updatedAt = ? WHERE id = ?');
+    $upd->execute([$now, $now, $customer['id']]);
+
+    $ttl = 30 * 86400;
+    $jwt = createJwt(['sub' => $customer['id'], 'aud' => 'customer'], $jwtSecret, $ttl);
+    setcookie('kalpana_customer', $jwt, [
+        'expires' => time() + $ttl,
+        'path' => '/',
+        'domain' => '',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+
+    header('Location: /account?verified=1');
     exit;
 }
 
@@ -5885,6 +6174,25 @@ if ($method === 'POST' && ($subPath === '/customers/login' || $subPath === '/cus
     if (!$customer || !$verified || (isset($customer['isActive']) && !$customer['isActive'])) {
         http_response_code(401);
         echo json_encode(['error' => ['code' => 'INVALID_CREDENTIALS', 'message' => 'メールアドレスまたはパスワードが正しくありません。']]);
+        exit;
+    }
+
+    // Check if email is unverified
+    if (isset($customer['isEmailVerified']) && !$customer['isEmailVerified']) {
+        // Generate new code and resend email
+        $code = sprintf('%06d', random_int(100000, 999999));
+        $token = bin2hex(random_bytes(32));
+        $expiresAt = date('Y-m-d H:i:s', time() + 15 * 60);
+        $pdo->prepare('UPDATE Customer SET verificationCode = ?, verificationToken = ?, verificationExpiresAt = ?, updatedAt = NOW() WHERE id = ?')
+            ->execute([$code, $token, $expiresAt, $customer['id']]);
+        sendAccountVerificationEmail($email, $customer['name'], $code, $token);
+
+        http_response_code(403);
+        echo json_encode([
+            'error' => ['code' => 'EMAIL_UNVERIFIED', 'message' => 'メールアドレスの確認が完了していません。' . $email . ' 宛に認証コードを送信しました。'],
+            'requiresVerification' => true,
+            'email' => $email,
+        ]);
         exit;
     }
 
