@@ -142,6 +142,20 @@ export default function AdminDashboard() {
     window.location.assign('/login');
   };
 
+  useEffect(() => {
+    const prevBodyBg = document.body.style.backgroundColor;
+    const prevHtmlBg = document.documentElement.style.backgroundColor;
+    const prevBodyOverflow = document.body.style.overflow;
+    document.body.style.backgroundColor = '#f3f4f6';
+    document.documentElement.style.backgroundColor = '#f3f4f6';
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.backgroundColor = prevBodyBg;
+      document.documentElement.style.backgroundColor = prevHtmlBg;
+      document.body.style.overflow = prevBodyOverflow;
+    };
+  }, []);
+
   const tabs = [
     { name: 'Overview', icon: LayoutDashboard },
     { name: 'Orders', icon: ShoppingBag },
@@ -162,7 +176,7 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="adm-root" style={{ display: 'flex', height: '100vh', backgroundColor: '#f3f4f6', fontFamily: "'Inter', sans-serif" }}>
+    <div className="adm-root" style={{ display: 'flex', height: '100vh', minHeight: '100dvh', maxHeight: '100dvh', width: '100%', backgroundColor: '#f3f4f6', fontFamily: "'Inter', sans-serif", overflow: 'hidden' }}>
       {sidebarOpen && <div className="adm-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
       <title>Admin | Adarsha</title>
       <meta name="robots" content="noindex, nofollow" />
@@ -174,9 +188,12 @@ export default function AdminDashboard() {
         borderRight: '1px solid #e5e7eb',
         display: 'flex', 
         flexDirection: 'column',
-        boxShadow: '4px 0 24px rgba(0,0,0,0.02)'
+        height: '100%',
+        maxHeight: '100dvh',
+        boxShadow: '4px 0 24px rgba(0,0,0,0.02)',
+        overflow: 'hidden'
       }}>
-        <div style={{ padding: '2rem 1.5rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ padding: '2rem 1.5rem', display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
           <div style={{ width: '40px', height: '40px', borderRadius: '8px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <img src="/adarsha-log.webp" alt="Adarsha" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '50%' }} />
           </div>
@@ -186,7 +203,7 @@ export default function AdminDashboard() {
           </button>
         </div>
 
-        <nav style={{ flex: 1, padding: '0 1rem', marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 1rem', marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
           <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px', paddingLeft: '0.5rem' }}>Management</div>
           {tabs.map(tab => {
             const Icon = tab.icon;
@@ -247,7 +264,7 @@ export default function AdminDashboard() {
           </a>
         </nav>
 
-        <div style={{ padding: '1.5rem', borderTop: '1px solid #e5e7eb' }}>
+        <div className="adm-sidebar-footer" style={{ padding: '1.5rem', borderTop: '1px solid #e5e7eb', flexShrink: 0, backgroundColor: '#ffffff' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1.5rem' }}>
             <div style={{ width: '36px', height: '36px', borderRadius: '50%', backgroundColor: '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', color: '#4b5563' }}>
               {user?.name?.charAt(0) || 'A'}

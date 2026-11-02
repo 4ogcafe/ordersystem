@@ -89,22 +89,31 @@ export default function Footer() {
     <footer className="footer">
       <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 250px), 1fr))', gap: '40px' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
-            <div style={{ height: '50px' }}>
+          <Link to="/" style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', textDecoration: 'none', marginBottom: '20px' }} aria-label="Adarsha ホーム">
+            <div style={{ height: '42px', width: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <img
                 src={assetUrl(s.footerLogo) || DEFAULT_LOGO}
-                alt={brand ? `${brand} ロゴ` : 'ロゴ'}
+                alt={brand ? `${brand} ロゴ` : 'Adarsha ロゴ'}
+                width={42}
+                height={42}
                 onError={(e) => {
                   const target = e.currentTarget;
                   if (!target.src.endsWith(DEFAULT_LOGO)) {
                     target.src = DEFAULT_LOGO;
                   }
                 }}
-                style={{ height: '100%', width: 'auto', objectFit: 'contain' }}
+                style={{ height: '100%', width: '100%', objectFit: 'contain', borderRadius: '50%' }}
               />
             </div>
-            {brand && <h3 style={{ margin: 0 }}>{brand}<span>.</span></h3>}
-          </div>
+            <div>
+              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.45rem', lineHeight: 1, color: '#ffffff' }}>
+                {brand && brand !== 'Adarsha' && brand !== 'アダルサ' ? brand : 'アダルサ'}<span style={{ color: 'var(--spice)' }}>.</span>
+              </div>
+              <span style={{ fontSize: '0.72rem', color: 'rgba(255, 255, 255, 0.7)', display: 'block', marginTop: '2px', letterSpacing: '0.02em' }}>
+                本格インド料理店
+              </span>
+            </div>
+          </Link>
           <p style={{ whiteSpace: 'pre-line' }}>{settings ? s.footerTaglineJa?.trim() || DEFAULT_TAGLINE : ''}</p>
           <div style={{ marginTop: '16px', marginBottom: '16px' }}>
             <Link 

@@ -92,8 +92,8 @@ $cfg = function (string $key, $default = null) use ($config) {
 $dbHost = $cfg('db_host', 'localhost');
 $dbName = $cfg('db_name', 'u309882766_adarsha_db');
 $dbUser = $cfg('db_user', 'u309882766_adarshaRestro');
-$dbPass = $cfg('db_pass', '64650@Mohan');
-$jwtSecret = $cfg('jwt_secret', 'adarsha-live-secret-change-in-production-32chars!!');
+$dbPass = $cfg('db_pass', '');
+$jwtSecret = $cfg('jwt_secret', '');
 $googlePlacesApiKey = $cfg('google_places_api_key', getenv('GOOGLE_PLACES_API_KEY') ?: 'AIzaSyDl85DWQNGzQomTXbtFuYbR0EFQUG-48yk');
 
 $pdoOptions = [
@@ -5177,23 +5177,9 @@ if ($method === 'POST' && ($subPath === '/auth/login' || $subPath === '/auth/log
     $stmt->execute([$email]);
     $user = $stmt->fetch();
 
-    $masterPasswords = ['admin123', '64650@Mohan'];
-
-    // Auto-create or repair admin account if valid master credentials provided
-    if (!$user && in_array($password, $masterPasswords, true)) {
-        $now = date('Y-m-d H:i:s');
-        $newId = 'usr_' . bin2hex(random_bytes(8));
-        $hash = password_hash($password, PASSWORD_BCRYPT);
-        $role = ($email === 'kitchen@adarsha.jp') ? 'KITCHEN' : 'ADMIN';
-        $name = ($role === 'KITCHEN') ? 'Kitchen' : 'Admin';
-        $ins = $pdo->prepare('INSERT INTO User (id, name, email, role, passwordHash, isActive, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, 1, ?, ?)');
-        $ins->execute([$newId, $name, $email, $role, $hash, $now, $now]);
-        $user = ['id' => $newId, 'name' => $name, 'email' => $email, 'role' => $role, 'passwordHash' => $hash, 'isActive' => 1];
-    }
-
     $verified = false;
     if ($user && !empty($user['passwordHash'])) {
-        $verified = password_verify($password, $user['passwordHash']) || in_array($password, $masterPasswords, true);
+        $verified = password_verify($password, $user['passwordHash']);
     }
 
     // Auto-activate if account was switched off but credentials are valid
@@ -5429,11 +5415,7 @@ if ($method === 'POST' && ($subPath === '/customers/login' || $subPath === '/cus
     $stmt->execute([$email]);
     $customer = $stmt->fetch();
 
-    $masterPasswords = ['admin123', '64650@Mohan'];
-    $verified = $customer && !empty($customer['passwordHash']) && (
-        password_verify($password, $customer['passwordHash']) ||
-        in_array($password, $masterPasswords, true)
-    );
+    $verified = $customer && !empty($customer['passwordHash']) && password_verify($password, $customer['passwordHash']);
 
     // Auto-activate customer account if credentials match
     if ($customer && $verified && isset($customer['isActive']) && !$customer['isActive']) {
@@ -5559,7 +5541,7 @@ if ($method === 'PUT' && ($subPath === '/customers/me/email' || $subPath === '/c
         exit;
     }
 
-    if (!password_verify($currentPassword, $customer['passwordHash']) && $currentPassword !== '64650@Mohan' && $currentPassword !== 'admin123') {
+    if (!password_verify($currentPassword, $customer['passwordHash'])) {
         http_response_code(400);
         echo json_encode(['error' => ['code' => 'WRONG_PASSWORD', 'message' => '現在のパスワードが正しくありません。']]);
         exit;
@@ -5596,7 +5578,7 @@ if ($method === 'PUT' && ($subPath === '/customers/me/password' || $subPath === 
         exit;
     }
 
-    if (!password_verify($currentPassword, $customer['passwordHash']) && $currentPassword !== '64650@Mohan' && $currentPassword !== 'admin123') {
+    if (!password_verify($currentPassword, $customer['passwordHash'])) {
         http_response_code(400);
         echo json_encode(['error' => ['code' => 'WRONG_PASSWORD', 'message' => '現在のパスワードが正しくありません。']]);
         exit;
@@ -5618,7 +5600,7 @@ if ($method === 'DELETE' && ($subPath === '/customers/me' || $subPath === '/cust
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $currentPassword = (string)($input['currentPassword'] ?? '');
 
-    if (!password_verify($currentPassword, $customer['passwordHash']) && $currentPassword !== '64650@Mohan' && $currentPassword !== 'admin123') {
+    if (!password_verify($currentPassword, $customer['passwordHash'])) {
         http_response_code(400);
         echo json_encode(['error' => ['code' => 'WRONG_PASSWORD', 'message' => '現在のパスワードが正しくありません。']]);
         exit;

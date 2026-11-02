@@ -1,4 +1,71 @@
-/* Admin dashboard on phones and tablets. The layout itself uses inline styles, so these overrides need !important. */
+/* Admin dashboard layout and responsive overrides */
+
+html:has(.adm-root),
+body:has(.adm-root) {
+  background-color: #f3f4f6 !important;
+  overflow: hidden !important;
+  height: 100% !important;
+  margin: 0 !important;
+}
+
+.app-screen {
+  background-color: #f3f4f6 !important;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.adm-root {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  overflow: hidden !important;
+  background-color: #f3f4f6 !important;
+}
+
+.adm-sidebar {
+  width: 280px !important;
+  height: 100% !important;
+  max-height: 100dvh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  background-color: #ffffff !important;
+  flex-shrink: 0 !important;
+}
+
+.adm-sidebar nav {
+  flex: 1 1 0% !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.adm-sidebar-footer {
+  flex-shrink: 0 !important;
+  background-color: #ffffff !important;
+}
+
+.adm-main {
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  max-height: 100dvh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  background-color: #f3f4f6 !important;
+}
+
+.adm-content {
+  flex: 1 1 0% !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  background-color: #f3f4f6 !important;
+}
 
 .adm-menu-btn,
 .adm-close-btn { display: none; }

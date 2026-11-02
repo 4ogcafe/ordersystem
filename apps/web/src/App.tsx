@@ -43,10 +43,11 @@ function AppContent() {
     );
 
   // Hide regular website Navbar, Footer, and CartDrawer for app-like screens
-  const hideNavAndFooter = isDineIn || ['/login', '/admin', '/kitchen', '/cash-counter', '/cashier', '/account'].includes(location.pathname);
+  const appRoutes = ['/login', '/admin', '/kitchen', '/cash-counter', '/cashier', '/account'];
+  const hideNavAndFooter = isDineIn || appRoutes.some(route => location.pathname === route || location.pathname.startsWith(route + '/'));
 
   return (
-    <div className="antialiased">
+    <div className={hideNavAndFooter ? 'antialiased app-screen' : 'antialiased'}>
       {!hideNavAndFooter && <Navbar />}
       <Suspense fallback={<div style={{ minHeight: '60vh' }} aria-busy="true" />}>
         <Routes>
@@ -80,7 +81,7 @@ function AppContent() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
-      {!isDineIn && <CartDrawer />}
+      {!hideNavAndFooter && !isDineIn && <CartDrawer />}
       {!hideNavAndFooter && <Footer />}
     </div>
   );
