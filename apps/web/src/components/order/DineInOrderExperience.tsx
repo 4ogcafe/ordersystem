@@ -3,7 +3,8 @@ import { toast } from 'react-hot-toast';
 import {
   Search, Plus, ShoppingCart, History,
   ChefHat, X, ChevronDown, Bell, Heart,
-  Receipt, RotateCcw
+  Receipt, RotateCcw, User, LogIn, LogOut,
+  CheckCircle2, Sparkles
 } from 'lucide-react';
 import { apiFetch, assetUrl, errorMessage, getPublic } from '../../lib/api';
 import { yen } from '../../lib/format';
@@ -138,7 +139,7 @@ export default function DineInOrderExperience({
   selectedStore,
   onSwitchToTakeout,
 }: DineInOrderExperienceProps) {
-  const { customer } = useCustomer();
+  const { customer, signIn, signOut } = useCustomer();
 
   // Settings & state - Japanese is default
   const [tableNumber, setTableNumber] = useState<string>(() => initialTableNumber || '1');
@@ -199,7 +200,17 @@ export default function DineInOrderExperience({
   const [showCallStaffModal, setShowCallStaffModal] = useState<boolean>(false);
   const [showCheckoutModal, setShowCheckoutModal] = useState<boolean>(false);
   const [showTableEditModal, setShowTableEditModal] = useState<boolean>(false);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [newTableInput, setNewTableInput] = useState<string>(tableNumber);
+
+  // Auth modal states (Optional Login & Registration)
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authEmail, setAuthEmail] = useState<string>('');
+  const [authPassword, setAuthPassword] = useState<string>('');
+  const [authName, setAuthName] = useState<string>('');
+  const [authPhone, setAuthPhone] = useState<string>('');
+  const [authSubmitting, setAuthSubmitting] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string>('');
 
   // Item customization modal
   const [customizingItem, setCustomizingItem] = useState<QuickMenuItem | null>(null);
@@ -217,6 +228,56 @@ export default function DineInOrderExperience({
   const [requestingBill, setRequestingBill] = useState<boolean>(false);
   const [isTablePaid, setIsTablePaid] = useState<boolean>(false);
 
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSubmitting(true);
+    try {
+      const isRegister = authMode === 'register';
+      const body = isRegister
+        ? { name: authName.trim(), email: authEmail.trim(), phone: authPhone.trim(), password: authPassword }
+        : { email: authEmail.trim(), password: authPassword };
+
+      const res = await apiFetch(`/api/v1/customers/${isRegister ? 'register' : 'login'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        setAuthError(await errorMessage(res, isRegister ? (lang === 'ja' ? '登録できませんでした。入力内容をご確認ください。' : 'Registration failed.') : (lang === 'ja' ? 'ログインできませんでした。メールアドレスとパスワードをご確認ください。' : 'Login failed.')));
+        return;
+      }
+
+      const data = await res.json();
+      if (data.token) {
+        localStorage.setItem('kalpana_customer_token', data.token);
+      }
+      if (data.customer) {
+        signIn(data.customer);
+      }
+      setShowAuthModal(false);
+      setAuthPassword('');
+      toast.success(
+        isRegister
+          ? (lang === 'ja' ? `会員登録が完了しました！ようこそ、${data.customer?.name || ''}様` : `Registered successfully! Welcome, ${data.customer?.name || ''}`)
+          : (lang === 'ja' ? `ログインしました（${data.customer?.name || ''}様）` : `Logged in as ${data.customer?.name || ''}`)
+      );
+    } catch {
+      setAuthError(lang === 'ja' ? '通信エラーが発生しました。もう一度お試しください。' : 'Connection error. Please try again.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (window.confirm(lang === 'ja' ? 'ログアウトしますか？' : 'Do you want to log out?')) {
+      await signOut();
+      setShowAuthModal(false);
+      toast.success(lang === 'ja' ? 'ログアウトしました' : 'Logged out');
+    }
+  };
+
   // Prevent background scrolling when any popup/modal is open
   const isAnyModalOpen = Boolean(
     customizingItem ||
@@ -224,7 +285,8 @@ export default function DineInOrderExperience({
     showHistoryModal ||
     showCallStaffModal ||
     showCheckoutModal ||
-    showTableEditModal
+    showTableEditModal ||
+    showAuthModal
   );
 
   useEffect(() => {
@@ -582,15 +644,30 @@ export default function DineInOrderExperience({
             </button>
           </div>
 
-          <button
-            type="button"
-            className="dio-flag-pill"
-            onClick={toggleLang}
-            title={lang === 'ja' ? 'Switch to English' : '日本語に切り替え'}
-          >
-            <span>{lang === 'ja' ? '🇯🇵 日本語' : '🇬🇧 EN'}</span>
-            <ChevronDown size={13} color="#4b5563" />
-          </button>
+          <div className="dio-header-right">
+            <button
+              type="button"
+              className={`dio-user-pill ${customer ? 'is-logged-in' : ''}`}
+              onClick={() => setShowAuthModal(true)}
+              title={customer ? (lang === 'ja' ? `${customer.name}様 会員情報` : `${customer.name} Member Info`) : (lang === 'ja' ? '会員ログイン・新規登録（任意）' : 'Member Login (Optional)')}
+            >
+              <User size={14} />
+              <span>{customer ? (customer.name.length > 5 ? customer.name.slice(0, 5) + '…' : customer.name) : (lang === 'ja' ? 'ログイン' : 'Login')}</span>
+              {customer && customer.points > 0 && (
+                <span className="dio-user-pill-pts">{customer.points}pt</span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              className="dio-flag-pill"
+              onClick={toggleLang}
+              title={lang === 'ja' ? 'Switch to English' : '日本語に切り替え'}
+            >
+              <span>{lang === 'ja' ? '🇯🇵 日本語' : '🇬🇧 EN'}</span>
+              <ChevronDown size={13} color="#4b5563" />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -956,6 +1033,58 @@ export default function DineInOrderExperience({
                       <span style={{ color: 'var(--dio-primary)' }}>{yen(trayGrandTotal)}</span>
                     </div>
                   </div>
+
+                  {/* Optional member loyalty banner */}
+                  {customer ? (
+                    <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: '10px 14px', marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', fontWeight: 700, color: '#166534' }}>
+                        <CheckCircle2 size={16} color="#16a34a" />
+                        <span>{lang === 'ja' ? `${customer.name} 様として注文` : `Ordering as ${customer.name}`}</span>
+                      </div>
+                      <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--dio-primary)', background: '#fff', padding: '2px 8px', borderRadius: 9999, border: '1px solid #fed7aa' }}>
+                        +{Math.floor(trayGrandTotal / 100)}pt 獲得予定
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{ background: '#fffbeb', border: '1px solid #fef3c7', borderRadius: 12, padding: '12px 14px', marginTop: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem', fontWeight: 800, color: '#92400e' }}>
+                          <Sparkles size={15} color="#d97706" />
+                          <span>{lang === 'ja' ? '会員ログインでポイント獲得（任意）' : 'Member Login for Points (Optional)'}</span>
+                        </div>
+                        <span style={{ fontSize: '0.7rem', color: '#78350f', background: '#fef3c7', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                          {lang === 'ja' ? '任意' : 'Optional'}
+                        </span>
+                      </div>
+                      <p style={{ margin: '0 0 8px', fontSize: '0.76rem', color: '#78350f', lineHeight: 1.4 }}>
+                        {lang === 'ja'
+                          ? 'ログインすると今回のご注文でポイントが貯まります。登録なしでもそのままご注文いただけます。'
+                          : 'Log in to earn points on this order. You can also proceed directly without logging in.'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowAuthModal(true)}
+                        style={{
+                          width: '100%',
+                          padding: '7px 12px',
+                          background: '#ffffff',
+                          border: '1.5px solid #d97706',
+                          borderRadius: 8,
+                          color: '#92400e',
+                          fontSize: '0.82rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        <LogIn size={14} />
+                        <span>{lang === 'ja' ? 'ログイン / 新規登録する' : 'Sign In / Register'}</span>
+                      </button>
+                    </div>
+                  )}
 
                   <button
                     type="button"
@@ -1666,6 +1795,299 @@ export default function DineInOrderExperience({
                 >
                   {lang === 'en' ? 'Switch to Takeout / Delivery' : 'テイクアウト・デリバリーに切り替え'}
                 </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ── MODAL: OPTIONAL CUSTOMER AUTH / PROFILE ── */}
+      {showAuthModal && (
+        <div
+          className="dio-modal-overlay"
+          onClick={() => setShowAuthModal(false)}
+          onTouchMove={e => { if (e.target === e.currentTarget) e.preventDefault(); }}
+        >
+          <div
+            className="dio-modal-sheet"
+            onClick={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+            style={{ maxWidth: 440 }}
+          >
+            <div className="dio-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 34, height: 34, borderRadius: '50%', background: customer ? '#f0fdf4' : '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {customer ? <CheckCircle2 size={18} color="#16a34a" /> : <User size={18} color="var(--dio-primary)" />}
+                </div>
+                <div>
+                  <h3 className="dio-modal-title" style={{ margin: 0, fontSize: '1.05rem' }}>
+                    {customer
+                      ? (lang === 'ja' ? '会員ステータス' : 'Member Profile')
+                      : (lang === 'ja' ? '会員ログイン・新規登録' : 'Member Login / Sign Up')}
+                  </h3>
+                  {!customer && (
+                    <span style={{ fontSize: '0.72rem', color: '#6b7280' }}>
+                      {lang === 'ja' ? '任意（ログインなしでも注文可能）' : 'Optional · Order as guest anytime'}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button type="button" className="dio-modal-close" onClick={() => setShowAuthModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="dio-modal-body">
+              {customer ? (
+                // ── LOGGED IN PROFILE VIEW ──
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ background: '#f9fafb', borderRadius: 14, padding: '16px', border: '1px solid #e5e7eb' }}>
+                    <div style={{ fontSize: '0.78rem', color: '#6b7280', marginBottom: 2 }}>
+                      {lang === 'ja' ? 'ログイン中のお客様' : 'Logged in as'}
+                    </div>
+                    <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--dio-dark)' }}>
+                      {customer.name} <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>様</span>
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#4b5563', marginTop: 2 }}>
+                      {customer.email}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div style={{ background: '#fffbeb', border: '1px solid #fef3c7', borderRadius: 12, padding: '12px' }}>
+                      <div style={{ fontSize: '0.74rem', color: '#92400e', fontWeight: 700 }}>
+                        {lang === 'ja' ? '保有ポイント' : 'Points Balance'}
+                      </div>
+                      <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--dio-primary)', marginTop: 4 }}>
+                        {(customer.points || 0).toLocaleString()} <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>pt</span>
+                      </div>
+                    </div>
+                    <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: '12px' }}>
+                      <div style={{ fontSize: '0.74rem', color: '#166534', fontWeight: 700 }}>
+                        {lang === 'ja' ? '会員コード' : 'Member Code'}
+                      </div>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#15803d', marginTop: 6, letterSpacing: '0.05em' }}>
+                        {customer.memberCode || '—'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <p style={{ margin: '4px 0 0', fontSize: '0.78rem', color: '#6b7280', lineHeight: 1.5 }}>
+                    {lang === 'ja'
+                      ? 'ご注文が完了すると、自動的にお客様のアカウントへポイントが加算されます。'
+                      : 'Points will automatically be credited to your account once your meal is finalized.'}
+                  </p>
+
+                  <button
+                    type="button"
+                    className="dio-send-order-btn"
+                    style={{ marginTop: 4 }}
+                    onClick={() => setShowAuthModal(false)}
+                  >
+                    <span>{lang === 'ja' ? 'メニューに戻って注文する' : 'Back to Menu & Order'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    style={{
+                      background: 'none',
+                      border: '1px solid #fecaca',
+                      borderRadius: 10,
+                      color: '#dc2626',
+                      padding: '10px 14px',
+                      fontSize: '0.84rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <LogOut size={15} />
+                    <span>{lang === 'ja' ? 'ログアウト' : 'Sign Out'}</span>
+                  </button>
+                </div>
+              ) : (
+                // ── NOT LOGGED IN: TABS (LOGIN / REGISTER) ──
+                <div>
+                  <div style={{ background: '#fff7ed', borderRadius: 10, padding: '10px 12px', border: '1px solid #ffedd5', marginBottom: 14 }}>
+                    <div style={{ fontSize: '0.78rem', color: '#9a3412', lineHeight: 1.45 }}>
+                      🎁 {lang === 'ja' ? '会員登録すると¥100ごとにポイント進呈！登録なしでもそのままご注文いただけます。' : 'Earn points on every ¥100 spent! Guest orders are also welcome.'}
+                    </div>
+                  </div>
+
+                  {/* Mode tabs */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', background: '#f3f4f6', borderRadius: 10, padding: 3, marginBottom: 14 }}>
+                    <button
+                      type="button"
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        borderRadius: 8,
+                        fontSize: '0.85rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        background: authMode === 'login' ? '#ffffff' : 'transparent',
+                        color: authMode === 'login' ? 'var(--dio-primary)' : '#6b7280',
+                        boxShadow: authMode === 'login' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                        transition: 'all 0.15s',
+                      }}
+                      onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                    >
+                      {lang === 'ja' ? 'ログイン' : 'Log In'}
+                    </button>
+                    <button
+                      type="button"
+                      style={{
+                        padding: '8px 12px',
+                        border: 'none',
+                        borderRadius: 8,
+                        fontSize: '0.85rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        background: authMode === 'register' ? '#ffffff' : 'transparent',
+                        color: authMode === 'register' ? 'var(--dio-primary)' : '#6b7280',
+                        boxShadow: authMode === 'register' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                        transition: 'all 0.15s',
+                      }}
+                      onClick={() => { setAuthMode('register'); setAuthError(''); }}
+                    >
+                      {lang === 'ja' ? '新規登録（無料）' : 'Register (Free)'}
+                    </button>
+                  </div>
+
+                  {authError && (
+                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', marginBottom: 12, color: '#b91c1c', fontSize: '0.8rem' }}>
+                      {authError}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+                    {authMode === 'register' && (
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
+                          {lang === 'ja' ? 'お名前' : 'Full Name'} <span style={{ color: '#dc2626' }}>*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={authName}
+                          onChange={e => setAuthName(e.target.value)}
+                          placeholder={lang === 'ja' ? '例: 山田 太郎' : 'e.g. John Doe'}
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            border: '1.5px solid #d1d5db',
+                            borderRadius: 8,
+                            fontSize: '0.9rem',
+                            boxSizing: 'border-box',
+                            outline: 'none',
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
+                        {lang === 'ja' ? 'メールアドレス' : 'Email Address'} <span style={{ color: '#dc2626' }}>*</span>
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={authEmail}
+                        onChange={e => setAuthEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          border: '1.5px solid #d1d5db',
+                          borderRadius: 8,
+                          fontSize: '0.9rem',
+                          boxSizing: 'border-box',
+                          outline: 'none',
+                        }}
+                      />
+                    </div>
+
+                    {authMode === 'register' && (
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
+                          {lang === 'ja' ? 'お電話番号（任意）' : 'Phone (Optional)'}
+                        </label>
+                        <input
+                          type="tel"
+                          value={authPhone}
+                          onChange={e => setAuthPhone(e.target.value)}
+                          placeholder="090-1234-5678"
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            border: '1.5px solid #d1d5db',
+                            borderRadius: 8,
+                            fontSize: '0.9rem',
+                            boxSizing: 'border-box',
+                            outline: 'none',
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
+                        {lang === 'ja' ? 'パスワード' : 'Password'} <span style={{ color: '#dc2626' }}>*</span>
+                        {authMode === 'register' && <span style={{ fontSize: '0.72rem', color: '#6b7280', fontWeight: 500, marginLeft: 4 }}>{lang === 'ja' ? '（6文字以上）' : '(min 6 chars)'}</span>}
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        minLength={authMode === 'register' ? 6 : 1}
+                        value={authPassword}
+                        onChange={e => setAuthPassword(e.target.value)}
+                        placeholder="••••••••"
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          border: '1.5px solid #d1d5db',
+                          borderRadius: 8,
+                          fontSize: '0.9rem',
+                          boxSizing: 'border-box',
+                          outline: 'none',
+                        }}
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={authSubmitting}
+                      className="dio-send-order-btn"
+                      style={{ marginTop: 8 }}
+                    >
+                      {authSubmitting
+                        ? (lang === 'ja' ? '処理中…' : 'Processing…')
+                        : authMode === 'register'
+                          ? (lang === 'ja' ? '無料で会員登録する' : 'Sign Up (Free)')
+                          : (lang === 'ja' ? 'ログインする' : 'Log In')}
+                    </button>
+                  </form>
+
+                  <div style={{ textAlign: 'center', marginTop: 14 }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowAuthModal(false)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#6b7280',
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      {lang === 'ja' ? '✕ 登録せずにゲストとして注文を続ける' : '✕ Continue ordering without login'}
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           </div>

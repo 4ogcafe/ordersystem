@@ -28,6 +28,7 @@ export interface Customer {
   preferences: CustomerPreferences;
   newsletterOptIn: boolean;
   points: number;
+  memberCode?: string;
   createdAt: string;
 }
 
