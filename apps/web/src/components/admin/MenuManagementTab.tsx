@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import { ChevronDown, ChevronRight, ChevronUp, Edit2, FileSpreadsheet, GripVertical, Plus, Trash2, X } from 'lucide-react';
 import { apiFetch, assetUrl, errorMessage } from '../../lib/api';
@@ -79,6 +79,7 @@ export default function MenuManagementTab({ intent }: { intent: TabIntent | null
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
+  const [fulfillmentFilter, setFulfillmentFilter] = useState<'all' | 'takeout' | 'dine_in' | 'lunch' | 'sold_out'>('all');
   const [importOpen, setImportOpen] = useState(false);
 
   // Drag & drop for sub-categories
@@ -233,6 +234,47 @@ export default function MenuManagementTab({ intent }: { intent: TabIntent | null
     } else toast.error('Failed to update.');
   };
 
+  // ── Takeout toggle ──
+  const toggleTakeout = async (item: MenuItem) => {
+    const hasTakeout = item.menuTypes.includes('TAKEOUT');
+    const nextMenuTypes = hasTakeout
+      ? item.menuTypes.filter(t => t !== 'TAKEOUT')
+      : [...item.menuTypes, 'TAKEOUT'];
+    const res = await apiFetch(`/api/v1/menu/items/${item.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ menuTypes: nextMenuTypes }),
+    });
+    if (res.ok) {
+      toast.success(!hasTakeout ? `“${item.nameJa || item.nameEn}” をテイクアウト可能に設定しました` : `“${item.nameJa || item.nameEn}” をテイクアウト対象外に設定しました`);
+      fetchAll();
+    } else {
+      toast.error('テイクアウト設定の更新に失敗しました');
+    }
+  };
+
+  // ── Dine-In toggle ──
+  const toggleDineIn = async (item: MenuItem) => {
+    const hasDineIn = item.menuTypes.includes('GRAND') || item.menuTypes.includes('LUNCH');
+    let nextMenuTypes: string[];
+    if (hasDineIn) {
+      nextMenuTypes = item.menuTypes.filter(t => t !== 'GRAND' && t !== 'LUNCH');
+    } else {
+      nextMenuTypes = [...item.menuTypes, 'GRAND'];
+    }
+    const res = await apiFetch(`/api/v1/menu/items/${item.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ menuTypes: nextMenuTypes }),
+    });
+    if (res.ok) {
+      toast.success(!hasDineIn ? `“${item.nameJa || item.nameEn}” を店内メニューに設定しました` : `“${item.nameJa || item.nameEn}” を店内メニュー対象外に設定しました`);
+      fetchAll();
+    } else {
+      toast.error('店内メニュー設定の更新に失敗しました');
+    }
+  };
+
   // ── Active toggle ──
   const toggleActive = async (item: MenuItem) => {
     const res = await apiFetch(`/api/v1/menu/items/${item.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isActive: !item.isActive }) });
@@ -322,13 +364,40 @@ export default function MenuManagementTab({ intent }: { intent: TabIntent | null
     selectedPath.unshift(c.nameEn);
     if (selectedPath.length > 4) break;
   }
-  const filteredItems = items
-    .filter(it => {
-      if (it.categoryId !== selectedCatId) return false;
-      if (search.trim()) return it.nameEn.toLowerCase().includes(search.toLowerCase()) || (it.nameJa ?? '').includes(search);
-      return true;
-    })
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  const catItems = useMemo(() => {
+    return items.filter(it => it.categoryId === selectedCatId);
+  }, [items, selectedCatId]);
+
+  const takeoutCount = useMemo(() => catItems.filter(it => it.menuTypes.includes('TAKEOUT')).length, [catItems]);
+  const dineInCount = useMemo(() => catItems.filter(it => it.menuTypes.includes('GRAND') || it.menuTypes.includes('LUNCH')).length, [catItems]);
+  const lunchCount = useMemo(() => catItems.filter(it => it.menuTypes.includes('LUNCH') || (it.nameJa ?? '').includes('ランチ') || it.nameEn.toLowerCase().includes('lunch')).length, [catItems]);
+  const soldOutCount = useMemo(() => catItems.filter(it => it.isSoldOut).length, [catItems]);
+
+  const filteredItems = useMemo(() => {
+    return catItems
+      .filter(it => {
+        if (search.trim()) {
+          const q = search.toLowerCase();
+          const matchEn = it.nameEn.toLowerCase().includes(q);
+          const matchJa = (it.nameJa ?? '').toLowerCase().includes(q);
+          if (!matchEn && !matchJa) return false;
+        }
+        if (fulfillmentFilter === 'takeout') {
+          return it.menuTypes.includes('TAKEOUT');
+        }
+        if (fulfillmentFilter === 'dine_in') {
+          return it.menuTypes.includes('GRAND') || it.menuTypes.includes('LUNCH');
+        }
+        if (fulfillmentFilter === 'lunch') {
+          return it.menuTypes.includes('LUNCH') || (it.nameJa ?? '').includes('ランチ') || it.nameEn.toLowerCase().includes('lunch');
+        }
+        if (fulfillmentFilter === 'sold_out') {
+          return it.isSoldOut;
+        }
+        return true;
+      })
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  }, [catItems, search, fulfillmentFilter]);
 
   // Category tree helpers
   const rootCats = categories.filter(c => !c.parentId).sort((a, b) => a.sortOrder - b.sortOrder);
@@ -928,6 +997,39 @@ export default function MenuManagementTab({ intent }: { intent: TabIntent | null
               </div>
             )}
 
+            {/* Fulfillment & Availability Filters */}
+            {!isEditing && selectedCat && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '1.25rem', padding: '10px 14px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569', marginRight: '4px' }}>注文対象絞り込み:</span>
+                {[
+                  { key: 'all' as const, label: `すべて (${catItems.length})`, color: '#334155', bg: '#f1f5f9' },
+                  { key: 'takeout' as const, label: `🛍️ テイクアウト対象 (${takeoutCount})`, color: '#c2410c', bg: '#fff7ed' },
+                  { key: 'dine_in' as const, label: `🍽️ 店内対象 (${dineInCount})`, color: '#1d4ed8', bg: '#eff6ff' },
+                  { key: 'lunch' as const, label: `🍱 ランチ (${lunchCount})`, color: '#b45309', bg: '#fef3c7' },
+                  { key: 'sold_out' as const, label: `❌ 売り切れ (${soldOutCount})`, color: '#b91c1c', bg: '#fee2e2' },
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setFulfillmentFilter(tab.key)}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: '9999px',
+                      fontSize: '0.78rem',
+                      fontWeight: fulfillmentFilter === tab.key ? 700 : 500,
+                      cursor: 'pointer',
+                      border: fulfillmentFilter === tab.key ? `1.5px solid ${tab.color}` : '1px solid #cbd5e1',
+                      background: fulfillmentFilter === tab.key ? tab.bg : '#fff',
+                      color: fulfillmentFilter === tab.key ? tab.color : '#64748b',
+                      transition: 'all 0.12s',
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Item list */}
             {!isEditing && !selectedCat && (
               <div style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>Select a category to manage its items.</div>
@@ -1075,7 +1177,19 @@ export default function MenuManagementTab({ intent }: { intent: TabIntent | null
                     </div>
                     {item.descriptionEn && <p style={{ margin: '4px 0 6px', color: '#6b7280', fontSize: '0.85rem', lineHeight: 1.4 }}>{item.descriptionEn}</p>}
                     <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' }}>
-                      {item.menuTypes.map(t => <span key={t} style={badge('#f3f4f6', '#374151')}>{t}</span>)}
+                      {item.menuTypes.includes('TAKEOUT') ? (
+                        <span style={badge('#fff7ed', '#c2410c')}>🛍️ 持帰OK</span>
+                      ) : (
+                        <span style={badge('#f3f4f6', '#9ca3af')}>🛍️ 持帰✕</span>
+                      )}
+                      {(item.menuTypes.includes('GRAND') || item.menuTypes.includes('LUNCH')) ? (
+                        <span style={badge('#eff6ff', '#1d4ed8')}>🍽️ 店内OK</span>
+                      ) : (
+                        <span style={badge('#f3f4f6', '#9ca3af')}>🍽️ 店内✕</span>
+                      )}
+                      {item.menuTypes.includes('LUNCH') && (
+                        <span style={badge('#fef3c7', '#b45309')}>🍱 ランチ</span>
+                      )}
                       {item.spiceLevel > 0 && <span style={{ fontSize: '0.78rem' }}>{spiceIcon(item.spiceLevel)}</span>}
                       {!item.isActive && <span style={badge('#fee2e2', '#b91c1c')}>Hidden</span>}
                       {item.isOrderable === false && <span style={badge('#fee2e2', '#991b1b')}>Order OFF</span>}
@@ -1088,11 +1202,13 @@ export default function MenuManagementTab({ intent }: { intent: TabIntent | null
                     </div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', flexShrink: 0 }}>
-                    <button onClick={() => openEdit(item)} style={{ padding: '0.4rem 0.8rem', border: '1px solid #d1d5db', borderRadius: '6px', background: '#fff', cursor: 'pointer', fontWeight: 500, fontSize: '0.82rem', color: '#374151' }}>Edit</button>
-                    <button onClick={() => toggleOrderable(item)} style={{ padding: '0.4rem 0.8rem', border: '1px solid #d1d5db', borderRadius: '6px', background: item.isOrderable !== false ? '#ecfdf5' : '#fef2f2', cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem', color: item.isOrderable !== false ? '#065f46' : '#991b1b' }}>{item.isOrderable !== false ? 'Order: ON' : 'Order: OFF'}</button>
-                    <button onClick={() => toggleSoldOut(item)} style={{ padding: '0.4rem 0.8rem', border: '1px solid #d1d5db', borderRadius: '6px', background: '#fff', cursor: 'pointer', fontWeight: 500, fontSize: '0.82rem', color: item.isSoldOut ? '#059669' : '#b45309' }}>{item.isSoldOut ? 'In stock' : 'Sold out'}</button>
-                    <button onClick={() => toggleActive(item)} style={{ padding: '0.4rem 0.8rem', border: '1px solid #d1d5db', borderRadius: '6px', background: '#fff', cursor: 'pointer', fontWeight: 500, fontSize: '0.82rem', color: item.isActive ? '#6b7280' : '#059669' }}>{item.isActive ? 'Hide' : 'Show'}</button>
-                    <button onClick={() => deleteItem(item.id)} style={{ padding: '0.4rem 0.8rem', border: '1px solid #fca5a5', borderRadius: '6px', background: '#fee2e2', cursor: 'pointer', fontWeight: 500, fontSize: '0.82rem', color: '#ef4444' }}>Delete</button>
+                    <button type="button" onClick={() => openEdit(item)} style={{ padding: '0.35rem 0.75rem', border: '1px solid #d1d5db', borderRadius: '6px', background: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', color: '#374151' }}>Edit</button>
+                    <button type="button" onClick={() => toggleTakeout(item)} title="テイクアウト注文での表示/非表示を即座に切り替え" style={{ padding: '0.35rem 0.75rem', border: '1px solid', borderColor: item.menuTypes.includes('TAKEOUT') ? '#fed7aa' : '#e5e7eb', borderRadius: '6px', background: item.menuTypes.includes('TAKEOUT') ? '#fff7ed' : '#f9fafb', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', color: item.menuTypes.includes('TAKEOUT') ? '#c2410c' : '#9ca3af' }}>{item.menuTypes.includes('TAKEOUT') ? '🛍️ 持帰: ON' : '🛍️ 持帰: OFF'}</button>
+                    <button type="button" onClick={() => toggleDineIn(item)} title="店内注文での表示/非表示を即座に切り替え" style={{ padding: '0.35rem 0.75rem', border: '1px solid', borderColor: (item.menuTypes.includes('GRAND') || item.menuTypes.includes('LUNCH')) ? '#bfdbfe' : '#e5e7eb', borderRadius: '6px', background: (item.menuTypes.includes('GRAND') || item.menuTypes.includes('LUNCH')) ? '#eff6ff' : '#f9fafb', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', color: (item.menuTypes.includes('GRAND') || item.menuTypes.includes('LUNCH')) ? '#1d4ed8' : '#9ca3af' }}>{(item.menuTypes.includes('GRAND') || item.menuTypes.includes('LUNCH')) ? '🍽️ 店内: ON' : '🍽️ 店内: OFF'}</button>
+                    <button type="button" onClick={() => toggleOrderable(item)} style={{ padding: '0.35rem 0.75rem', border: '1px solid #d1d5db', borderRadius: '6px', background: item.isOrderable !== false ? '#ecfdf5' : '#fef2f2', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', color: item.isOrderable !== false ? '#065f46' : '#991b1b' }}>{item.isOrderable !== false ? 'Order: ON' : 'Order: OFF'}</button>
+                    <button type="button" onClick={() => toggleSoldOut(item)} style={{ padding: '0.35rem 0.75rem', border: '1px solid #d1d5db', borderRadius: '6px', background: '#fff', cursor: 'pointer', fontWeight: 500, fontSize: '0.8rem', color: item.isSoldOut ? '#059669' : '#b45309' }}>{item.isSoldOut ? 'In stock' : 'Sold out'}</button>
+                    <button type="button" onClick={() => toggleActive(item)} style={{ padding: '0.35rem 0.75rem', border: '1px solid #d1d5db', borderRadius: '6px', background: '#fff', cursor: 'pointer', fontWeight: 500, fontSize: '0.8rem', color: item.isActive ? '#6b7280' : '#059669' }}>{item.isActive ? 'Hide' : 'Show'}</button>
+                    <button type="button" onClick={() => deleteItem(item.id)} style={{ padding: '0.35rem 0.75rem', border: '1px solid #fca5a5', borderRadius: '6px', background: '#fee2e2', cursor: 'pointer', fontWeight: 500, fontSize: '0.8rem', color: '#ef4444' }}>Delete</button>
                   </div>
                 </div>
               );
@@ -1187,15 +1303,18 @@ export default function MenuManagementTab({ intent }: { intent: TabIntent | null
 
                 {/* Menu types */}
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <div style={{ ...lbl, marginBottom: '8px' }}>Appears on menu(s)</div>
+                  <div style={{ ...lbl, marginBottom: '8px' }}>Appears on menu(s) / 注文受付種別</div>
                   <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                     {MENU_TYPES.map(t => (
-                      <label key={t} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer', padding: '6px 14px', border: `1.5px solid ${form.menuTypes.includes(t) ? '#111827' : '#d1d5db'}`, borderRadius: '8px', background: form.menuTypes.includes(t) ? '#111827' : '#fff', color: form.menuTypes.includes(t) ? '#fff' : '#374151', transition: 'all 0.12s' }}>
+                      <label key={t} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer', padding: '8px 16px', border: `1.5px solid ${form.menuTypes.includes(t) ? (t === 'TAKEOUT' ? '#ea580c' : '#1d4ed8') : '#d1d5db'}`, borderRadius: '8px', background: form.menuTypes.includes(t) ? (t === 'TAKEOUT' ? '#fff7ed' : '#eff6ff') : '#fff', color: form.menuTypes.includes(t) ? (t === 'TAKEOUT' ? '#c2410c' : '#1e40af') : '#4b5563', transition: 'all 0.12s' }}>
                         <input type="checkbox" checked={form.menuTypes.includes(t)} onChange={e => set({ menuTypes: e.target.checked ? [...form.menuTypes, t] : form.menuTypes.filter(x => x !== t) })} style={{ display: 'none' }} />
-                        {t === 'LUNCH' ? '🍱 Lunch' : t === 'TAKEOUT' ? '🛍 Takeout' : '🍽 Grand'}
+                        {t === 'TAKEOUT' ? '🛍️ テイクアウト (Takeout / 8% 軽減税率)' : t === 'LUNCH' ? '🍱 ランチセット (Lunch Set / 店内限定)' : '🍽️ 店内飲食 (Dine-In / 10% 標準税率)'}
                       </label>
                     ))}
                   </div>
+                  <p style={{ margin: '6px 0 0', fontSize: '0.8rem', color: '#6b7280' }}>
+                    ※ テイクアウトにチェックを入れるとお持ち帰り注文画面に表示されます。ランチセット等はテイクアウト時には自動的に非表示になります。
+                  </p>
                 </div>
 
                 {/* Spice level */}
