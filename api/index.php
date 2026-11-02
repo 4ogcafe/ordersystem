@@ -1223,6 +1223,19 @@ if ($method === 'GET' && preg_match('#^/uploads/([a-zA-Z0-9_.-]+)$#', $subPath, 
         exit;
     }
 
+    // Default fallback image if requested upload file is missing
+    $fallbackDefault = dirname(__DIR__) . '/uploads/1792268440842-f33c95588ddc7e21.webp';
+    if (!is_file($fallbackDefault)) {
+        $fallbackDefault = dirname(__DIR__) . '/uploads/bg-hero-img.webp';
+    }
+    if (is_file($fallbackDefault)) {
+        header('Content-Type: image/webp');
+        header('Cache-Control: public, max-age=86400');
+        header('Content-Length: ' . filesize($fallbackDefault));
+        readfile($fallbackDefault);
+        exit;
+    }
+
     http_response_code(404);
     header('Content-Type: text/plain; charset=utf-8');
     header('Cache-Control: no-store');

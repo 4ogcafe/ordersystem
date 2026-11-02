@@ -42,11 +42,11 @@
 .dio-header-inner {
   max-width: 800px;
   margin: 0 auto;
-  padding: 10px 16px;
+  padding: 8px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .dio-header-logo-wrap {
@@ -69,61 +69,77 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   text-align: center;
   flex: 1;
+  min-width: 0;
 }
 
 .dio-header-brand {
   font-size: 1.25rem;
   font-weight: 900;
   color: var(--dio-primary);
-  line-height: 1.1;
+  line-height: 1.15;
   letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
 .dio-header-branch {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 800;
   color: var(--dio-primary);
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .dio-table-pill {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   background: #fef2f2;
   border: 1px solid #fecaca;
   color: var(--dio-primary);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   font-weight: 700;
-  padding: 1px 8px;
+  padding: 2px 10px;
   border-radius: 9999px;
   margin-top: 3px;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.25;
+  box-shadow: 0 1px 2px rgba(184, 46, 31, 0.08);
+  transition: all 0.15s ease;
+}
+
+.dio-table-pill:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
 }
 
 .dio-header-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .dio-user-pill {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   border: 1.5px solid var(--dio-border);
   border-radius: 9999px;
-  padding: 6px 11px;
+  padding: 5px 9px;
   background: #ffffff;
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 700;
   color: var(--dio-dark);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   flex-shrink: 0;
+  white-space: nowrap;
   transition: all 0.15s;
 }
 
@@ -151,15 +167,17 @@
 .dio-flag-pill {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   border: 1.5px solid var(--dio-border);
   border-radius: 9999px;
-  padding: 6px 12px;
+  padding: 5px 9px;
   background: #ffffff;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 0.82rem;
+  font-weight: 600;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   flex-shrink: 0;
+  white-space: nowrap;
   transition: all 0.15s;
 }
 
@@ -170,7 +188,7 @@
 
 @media (max-width: 400px) {
   .dio-header-inner {
-    padding: 8px 10px;
+    padding: 6px 8px;
     gap: 6px;
   }
   .dio-header-logo {
@@ -181,18 +199,47 @@
     font-size: 1.15rem;
   }
   .dio-header-branch {
-    font-size: 0.98rem;
+    font-size: 0.96rem;
+  }
+  .dio-table-pill {
+    font-size: 0.7rem;
+    padding: 2px 8px;
   }
   .dio-header-right {
     gap: 4px;
   }
   .dio-user-pill {
-    padding: 5px 8px;
-    font-size: 0.75rem;
+    padding: 4px 7px;
+    font-size: 0.74rem;
   }
   .dio-flag-pill {
-    padding: 5px 8px;
-    font-size: 0.82rem;
+    padding: 4px 7px;
+    font-size: 0.78rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .dio-header-logo {
+    height: 32px;
+    width: 32px;
+  }
+  .dio-header-brand {
+    font-size: 1.02rem;
+  }
+  .dio-header-branch {
+    font-size: 0.88rem;
+  }
+  .dio-table-pill {
+    font-size: 0.68rem;
+    padding: 1px 6px;
+  }
+  .dio-user-pill {
+    padding: 3px 6px;
+    font-size: 0.7rem;
+  }
+  .dio-flag-pill {
+    padding: 3px 6px;
+    font-size: 0.72rem;
   }
 }
 
@@ -230,6 +277,22 @@
   cursor: pointer;
   transition: all 0.15s ease;
   user-select: none;
+}
+
+.dio-cat-chip-switch {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #c2410c;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  box-shadow: 0 1px 3px rgba(194, 65, 12, 0.08);
+}
+
+.dio-cat-chip-switch:hover {
+  background: #ffedd5;
+  border-color: #fdba74;
 }
 
 .dio-cat-chip:hover {
@@ -368,7 +431,7 @@
   height: 90px;
   border-radius: 14px;
   overflow: hidden;
-  background: #f3f4f6;
+  background: #f8fafc;
   flex-shrink: 0;
   box-shadow: 0 2px 4px rgba(0,0,0,0.06);
 }
@@ -377,6 +440,16 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
+}
+
+.dio-item-thumb-fallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #fef3c7 0%, #fee2e2 100%);
+  color: #d97706;
 }
 
 .dio-item-fav-heart {

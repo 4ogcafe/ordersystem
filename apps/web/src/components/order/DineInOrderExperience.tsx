@@ -169,6 +169,7 @@ export default function DineInOrderExperience({
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showCategoryDropdown, setShowCategoryDropdown] = useState<boolean>(false);
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
 
   // Favorites
   const [favorites, setFavorites] = useState<Set<string>>(() => {
@@ -632,48 +633,21 @@ export default function DineInOrderExperience({
           <div className="dio-header-center">
             <span className="dio-header-brand">{lang === 'ja' ? 'アダルサ' : 'Adarsha'}</span>
             <span className="dio-header-branch">{branchDisplayName}</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
-              <button
-                type="button"
-                className="dio-table-pill"
-                onClick={() => {
+            <button
+              type="button"
+              className="dio-table-pill"
+              onClick={() => {
+                if (onOpenChoiceModal) onOpenChoiceModal();
+                else {
                   setNewTableInput(tableNumber);
                   setShowTableEditModal(true);
-                }}
-                title={lang === 'ja' ? 'お席番号の変更' : 'Change table number'}
-              >
-                <span>{lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}</span>
-                <ChevronDown size={11} />
-              </button>
-
-              {(onOpenChoiceModal || onSwitchToTakeout) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onOpenChoiceModal) onOpenChoiceModal();
-                    else if (onSwitchToTakeout) onSwitchToTakeout();
-                  }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 3,
-                    background: '#f8fafc',
-                    border: '1px solid #cbd5e1',
-                    color: '#475569',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    padding: '1px 8px',
-                    borderRadius: 9999,
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-                  }}
-                  title={lang === 'ja' ? '注文方法を変更（テイクアウト／店内飲食）' : 'Switch between Takeout and Dine-In'}
-                >
-                  <ShoppingBag size={11} />
-                  <span>{lang === 'ja' ? '持帰切替' : 'To Go'}</span>
-                </button>
-              )}
-            </div>
+                }
+              }}
+              title={lang === 'ja' ? 'お席番号・注文方法の変更' : 'Change table / order type'}
+            >
+              <span>{lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}</span>
+              <ChevronDown size={11} />
+            </button>
           </div>
 
           <div className="dio-header-right">
@@ -705,6 +679,20 @@ export default function DineInOrderExperience({
 
       {/* ── HORIZONTAL CATEGORY SCROLLING BAR ── */}
       <div className="dio-categories-bar">
+        {(onOpenChoiceModal || onSwitchToTakeout) && (
+          <button
+            type="button"
+            className="dio-cat-chip dio-cat-chip-switch"
+            onClick={() => {
+              if (onOpenChoiceModal) onOpenChoiceModal();
+              else if (onSwitchToTakeout) onSwitchToTakeout();
+            }}
+            title={lang === 'ja' ? 'テイクアウト（お持ち帰り）に切り替え' : 'Switch to Takeout'}
+          >
+            <ShoppingBag size={13} />
+            <span>{lang === 'ja' ? '持帰へ切替' : 'To Go'}</span>
+          </button>
+        )}
         <button
           type="button"
           className={`dio-cat-chip ${selectedCategoryId === 'all' ? 'is-active' : ''}`}
@@ -850,16 +838,23 @@ export default function DineInOrderExperience({
               >
                 {/* Food Photo Left */}
                 <div className="dio-item-thumb-wrap">
-                  {item.imageUrl ? (
+                  {item.imageUrl && !failedImages.has(item.id) ? (
                     <img
                       src={assetUrl(item.imageUrl)}
-                      alt={item.nameEn}
+                      alt=""
                       className="dio-item-thumb"
                       loading="lazy"
+                      onError={() => {
+                        setFailedImages(prev => {
+                          const next = new Set(prev);
+                          next.add(item.id);
+                          return next;
+                        });
+                      }}
                     />
                   ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', background: '#fef3c7' }}>
-                      <ChefHat size={32} color="#d97706" />
+                    <div className="dio-item-thumb-fallback">
+                      <ChefHat size={30} color="#d97706" />
                     </div>
                   )}
 
