@@ -3984,7 +3984,8 @@ if ($method === 'GET' && ($subPath === '/reviews' || $subPath === '/reviews/')) 
     $manual = !empty($settings['storeReviewScore']) ? (float)$settings['storeReviewScore'] : 4.4;
     $count = !empty($settings['storeReviewCount']) ? (int)$settings['storeReviewCount'] : 325;
     $mapsUrl = $cache['mapsUrl'] ?? ($settings['storeReviewLink'] ?? $settings['googleMapsLink'] ?? 'https://maps.app.goo.gl/92p48n6Zc4X9Nq518');
-    $writeReviewUrl = 'https://search.google.com/local/writereview?placeid=' . rawurlencode($placeId ?: 'ChIJ4ZgAFpzvGGAR1xleOL3HwcQ');
+    $effectivePlaceId = (!empty($placeId) && $placeId !== 'ChIJaRMiFpzvGGARz6Sg35cldUo') ? $placeId : 'ChIJ4ZgAFpzvGGAR1xleOL3HwcQ';
+    $writeReviewUrl = 'https://search.google.com/local/writereview?placeid=' . rawurlencode($effectivePlaceId);
 
     $cachedReviews = is_array($cache['reviews'] ?? null) ? $cache['reviews'] : [];
     $filtered = array_values(array_filter($cachedReviews, function ($r) use ($minRating) {
