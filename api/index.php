@@ -1247,10 +1247,11 @@ function runDatabaseMigrations(PDO $pdo): array {
     ];
 }
 
-// Auto-run migrations if Settings or BlogPost table is missing
+// Auto-run migrations if Settings, BlogPost, or new columns are missing
 try {
     $pdo->query('SELECT 1 FROM `Settings` LIMIT 1');
     $pdo->query('SELECT 1 FROM `BlogPost` LIMIT 1');
+    $pdo->query('SELECT `isEmailVerified` FROM `Customer` LIMIT 1');
 } catch (Exception $e) {
     runDatabaseMigrations($pdo);
 }
