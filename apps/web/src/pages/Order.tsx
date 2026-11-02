@@ -233,19 +233,21 @@ export default function Order() {
   const { quote, problem } = useOrderQuote(items, savings, Boolean(customer), fulfillment);
 
   const handleSelectDineIn = () => {
+    const table = effectiveTable || tableNumber || '1';
+    setTableNumber(table);
     setFulfillment('DINE_IN');
     setShowQrChoice(false);
     try {
       sessionStorage.setItem('adarsha_qr_choice', 'DINE_IN');
       sessionStorage.setItem('adarsha_table_session', JSON.stringify({
-        table: effectiveTable || tableNumber || '1',
+        table,
         storeId: selectedStoreId,
         fulfillment: 'DINE_IN',
       }));
     } catch {}
     setSearchParams(params => {
       params.set('fulfillment', 'DINE_IN');
-      if (effectiveTable) params.set('table', effectiveTable);
+      params.set('table', table);
       return params;
     }, { replace: true });
   };
@@ -467,6 +469,10 @@ export default function Order() {
       });
 
   const chooseFulfillment = (type: Fulfillment) => {
+    if (type === 'DINE_IN') {
+      handleSelectDineIn();
+      return;
+    }
     setFulfillment(type);
     setForm(prev => ({ ...prev, pickupAt: '' }));
     setErrors(prev => ({ ...prev, pickupAt: undefined }));

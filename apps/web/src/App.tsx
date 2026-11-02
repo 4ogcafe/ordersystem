@@ -37,8 +37,16 @@ function AppContent() {
     location.pathname.startsWith('/table') || (
       location.pathname === '/order' && (
         searchParams.get('fulfillment')?.toUpperCase() === 'DINE_IN' ||
-        searchParams.has('table') ||
-        Boolean(sessionStorage.getItem('adarsha_table_session'))
+        (searchParams.has('table') && searchParams.get('fulfillment')?.toUpperCase() !== 'PICKUP') ||
+        (() => {
+          try {
+            const raw = sessionStorage.getItem('adarsha_table_session');
+            const data = raw ? JSON.parse(raw) : null;
+            return data?.fulfillment === 'DINE_IN';
+          } catch {
+            return false;
+          }
+        })()
       )
     );
 
