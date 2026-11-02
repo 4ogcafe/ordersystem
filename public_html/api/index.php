@@ -1234,6 +1234,7 @@ if ($method === 'GET' && preg_match('#^/uploads/([a-zA-Z0-9_.-]+)$#', $subPath, 
 // Endpoint: GET|POST /migrate (Execute complete DB migrations)
 // -------------------------------------------------------------
 if (($method === 'GET' || $method === 'POST') && ($subPath === '/migrate' || $subPath === '/migrate/')) {
+    requireAdminUser($jwtSecret, $pdo);
     $result = runDatabaseMigrations($pdo);
     echo json_encode([
         'success' => true,
@@ -2523,7 +2524,8 @@ function computeOrderQuote(PDO $pdo, array $input, ?array $customer, array $sett
         $qty = max(1, min(20, (int)($req['quantity'] ?? 1)));
         $quantities[$itemId] = ($quantities[$itemId] ?? 0) + $qty;
         if (isset($req['optionAdjust'])) {
-            $optionAdjusts[$itemId] = (int)$req['optionAdjust'];
+            // Option adjustments cannot be negative (prevent client price tampering)
+            $optionAdjusts[$itemId] = max(0, (int)$req['optionAdjust']);
         }
         if (isset($req['options']) && is_array($req['options'])) {
             $optionsByItemId[$itemId] = $req['options'];
@@ -2556,7 +2558,9 @@ function computeOrderQuote(PDO $pdo, array $input, ?array $customer, array $sett
             throw new Exception("「{$name}」は現在ご注文いただけません。カートから削除してください。", 409);
         }
 
-        $unitPrice = (int)$it['price'] + ($optionAdjusts[$id] ?? 0);
+        // Unit price cannot be lower than the base price
+        $optAdj = max(0, (int)($optionAdjusts[$id] ?? 0));
+        $unitPrice = max((int)$it['price'], (int)$it['price'] + $optAdj);
         $lineTotal = $unitPrice * $qty;
         $subtotal += $lineTotal;
 
@@ -3151,6 +3155,7 @@ if ($method === 'GET' && ($subPath === '/orders/table' || $subPath === '/orders/
 // Endpoint: POST /tables/reset (Free up / auto-reset table session)
 // -------------------------------------------------------------
 if ($method === 'POST' && ($subPath === '/tables/reset' || $subPath === '/tables/reset/')) {
+    $user = requireStaffUser($jwtSecret, $pdo);
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $tableNum = trim((string)($input['tableNumber'] ?? ''));
     $storeId = trim((string)($input['storeId'] ?? ''));
@@ -5503,7 +5508,16 @@ if ($method === 'PUT' && ($subPath === '/customers/me' || $subPath === '/custome
 
     $preferences = is_string($customer['preferences'] ?? null) ? json_decode($customer['preferences'], true) : ($customer['preferences'] ?? []);
     if (isset($input['preferences']) && is_array($input['preferences'])) {
-        $preferences = array_merge(is_array($preferences) ? $preferences : [], $input['preferences']);
+        $allowedPrefs = $input['preferences'];
+        // Strip sensitive internal/system keys to prevent game play / cooldown bypass
+        unset(
+            $allowedPrefs['gamePlaysUsed'],
+            $allowedPrefs['lastGamePlayAt'],
+            $allowedPrefs['totalPlays'],
+            $allowedPrefs['points'],
+            $allowedPrefs['stampCount']
+        );
+        $preferences = array_merge(is_array($preferences) ? $preferences : [], $allowedPrefs);
     }
 
     $upd = $pdo->prepare('UPDATE Customer SET name = ?, nameKana = ?, phone = ?, birthDate = ?, address = ?, preferences = ?, newsletterOptIn = ?, updatedAt = NOW() WHERE id = ?');
