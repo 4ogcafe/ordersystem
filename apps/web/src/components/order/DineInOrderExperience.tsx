@@ -4,8 +4,9 @@ import {
   Search, Plus, ShoppingCart, History,
   ChefHat, X, ChevronDown, Bell, Heart,
   Receipt, RotateCcw, User, LogIn, LogOut,
-  CheckCircle2, Sparkles, ShoppingBag
+  CheckCircle2, Sparkles, ShoppingBag, UtensilsCrossed, Phone
 } from 'lucide-react';
+import type { Fulfillment } from './fulfillment';
 import { apiFetch, assetUrl, errorMessage, getPublic } from '../../lib/api';
 import { yen } from '../../lib/format';
 import { type StoreLocation } from '../../lib/stores';
@@ -76,7 +77,9 @@ interface DineInOrderExperienceProps {
   initialTableNumber: string;
   selectedStore: StoreLocation;
   stores?: StoreLocation[];
+  fulfillment?: Fulfillment;
   onSwitchToTakeout?: () => void;
+  onSwitchToDineIn?: () => void;
   onOpenChoiceModal?: () => void;
 }
 
@@ -139,13 +142,18 @@ const DRINK_OPTIONS: CustomOptionItem[] = [
 export default function DineInOrderExperience({
   initialTableNumber,
   selectedStore,
+  fulfillment = 'DINE_IN',
   onSwitchToTakeout,
+  onSwitchToDineIn,
   onOpenChoiceModal,
 }: DineInOrderExperienceProps) {
   const { customer, signIn, signOut } = useCustomer();
+  const isTakeout = fulfillment === 'PICKUP' || fulfillment === 'DELIVERY';
 
   // Settings & state - Japanese is default
   const [tableNumber, setTableNumber] = useState<string>(() => initialTableNumber || '1');
+  const [takeoutCustomerName, setTakeoutCustomerName] = useState<string>(() => customer?.name || '');
+  const [takeoutCustomerPhone, setTakeoutCustomerPhone] = useState<string>(() => customer?.phone || '');
   const [lang, setLang] = useState<'ja' | 'en'>(() => {
     try {
       const saved = localStorage.getItem('adarsha_dine_lang');
@@ -337,9 +345,10 @@ export default function DineInOrderExperience({
     } catch {}
   }, [tray, tableNumber]);
 
-  // Load menu items & categories (dynamically for Dine-In)
+  // Load menu items & categories (dynamically for Dine-In vs Takeout)
   useEffect(() => {
-    getPublic<QuickMenuItem[]>('/api/v1/menu/items?fulfillment=DINE_IN')
+    const fQuery = isTakeout ? 'TAKEOUT' : 'DINE_IN';
+    getPublic<QuickMenuItem[]>(`/api/v1/menu/items?fulfillment=${fQuery}`)
       .then(items => {
         if (Array.isArray(items)) {
           setMenuItems(items.filter(it => it.isOrderable !== false && !it.isSoldOut));
@@ -347,12 +356,12 @@ export default function DineInOrderExperience({
       })
       .catch(() => {});
 
-    getPublic<QuickCategory[]>('/api/v1/menu/categories?fulfillment=DINE_IN')
+    getPublic<QuickCategory[]>(`/api/v1/menu/categories?fulfillment=${fQuery}`)
       .then(cats => {
         if (Array.isArray(cats)) setCategories(cats);
       })
       .catch(() => {});
-  }, []);
+  }, [isTakeout]);
 
   // Poll / fetch active table orders
   const loadTableOrders = async () => {
@@ -425,61 +434,94 @@ export default function DineInOrderExperience({
     });
   };
 
-  // Dine-in visible categories: filter out Takeout categories and empty top-level containers
+  // Visible categories according to mode (Dine-In vs Takeout)
   const visibleCategories = useMemo(() => {
     return categories.filter(cat => {
       const id = (cat.id || '').toLowerCase();
       const en = (cat.nameEn || '').toLowerCase();
       const ja = cat.nameJa || '';
-      if (
-        id === 'cat_takeout' ||
-        id.includes('takeout') ||
-        en.includes('takeout') ||
-        ja.includes('テイクアウト') ||
-        ja.includes('お持ち帰り') ||
-        id === 'cat_grand' ||
-        id === 'cat_lunch'
-      ) {
-        return false;
+
+      if (id === 'cat_grand' || id === 'cat_lunch') return false;
+
+      if (isTakeout) {
+        // In Takeout mode: hide Lunch Set and Dinner Set categories
+        if (
+          id.includes('lunch_set') ||
+          id.includes('dinner_set') ||
+          en.includes('lunch set') ||
+          en.includes('dinner set') ||
+          ja.includes('ランチセット') ||
+          ja.includes('ディナーセット')
+        ) {
+          return false;
+        }
+      } else {
+        // In Dine-In mode: hide Takeout categories
+        if (
+          id === 'cat_takeout' ||
+          id.includes('takeout') ||
+          en.includes('takeout') ||
+          ja.includes('テイクアウト') ||
+          ja.includes('お持ち帰り')
+        ) {
+          return false;
+        }
       }
       return true;
     });
-  }, [categories]);
+  }, [categories, isTakeout]);
 
-  // Filtered menu items for Dine-In (excludes takeout-only items)
+  // Filtered menu items for Dine-In vs Takeout
   const filteredItems = useMemo(() => {
     return menuItems.filter(item => {
-      // Dine-in mode: do NOT show takeout-only items
-      const catId = item.categoryId || item.category?.id || '';
+      const catId = (item.categoryId || item.category?.id || '').toLowerCase();
       const catNameEn = (item.category?.nameEn || '').toLowerCase();
       const catNameJa = item.category?.nameJa || '';
       const nameEn = (item.nameEn || '').toLowerCase();
       const nameJa = item.nameJa || '';
       const types = Array.isArray(item.menuTypes) ? item.menuTypes : [];
 
-      // Category is Takeout
-      if (
-        catId === 'cat_takeout' ||
-        catId.includes('takeout') ||
-        catNameEn.includes('takeout') ||
-        catNameJa.includes('テイクアウト') ||
-        catNameJa.includes('お持ち帰り')
-      ) {
-        return false;
-      }
+      if (isTakeout) {
+        // Takeout mode: DO NOT SHOW Lunch Sets and Dinner Sets
+        const isLunchSet =
+          catId.includes('lunch_set') ||
+          catNameEn.includes('lunch set') ||
+          catNameJa.includes('ランチセット') ||
+          nameEn.includes('lunch set') ||
+          nameJa.includes('ランチセット');
+        const isDinnerSet =
+          catId.includes('dinner_set') ||
+          catNameEn.includes('dinner set') ||
+          catNameJa.includes('ディナーセット') ||
+          nameEn.includes('dinner set') ||
+          nameJa.includes('ディナーセット');
+        if (isLunchSet || isDinnerSet) return false;
 
-      // Name indicates Takeout-only
-      if (
-        nameJa.includes('テイクアウト専用') ||
-        nameJa.includes('お持ち帰り専用') ||
-        nameEn.includes('takeout only')
-      ) {
-        return false;
-      }
-
-      // If item has menuTypes and it's ONLY TAKEOUT (exclusive to takeout)
-      if (types.length > 0 && types.includes('TAKEOUT') && !types.includes('GRAND') && !types.includes('LUNCH')) {
-        return false;
+        // In Takeout mode: item must be allowed for takeout if menuTypes specified
+        if (types.length > 0 && !types.includes('TAKEOUT')) {
+          return false;
+        }
+      } else {
+        // Dine-In mode: DO NOT SHOW Takeout-only items
+        if (
+          catId === 'cat_takeout' ||
+          catId.includes('takeout') ||
+          catNameEn.includes('takeout') ||
+          catNameJa.includes('テイクアウト') ||
+          catNameJa.includes('お持ち帰り')
+        ) {
+          return false;
+        }
+        if (
+          nameJa.includes('テイクアウト専用') ||
+          nameJa.includes('お持ち帰り専用') ||
+          nameEn.includes('takeout only')
+        ) {
+          return false;
+        }
+        if (types.length > 0 && types.includes('TAKEOUT') && !types.includes('GRAND') && !types.includes('LUNCH')) {
+          return false;
+        }
       }
 
       if (selectedCategoryId !== 'all') {
@@ -495,7 +537,7 @@ export default function DineInOrderExperience({
       }
       return true;
     });
-  }, [menuItems, selectedCategoryId, searchQuery]);
+  }, [menuItems, selectedCategoryId, searchQuery, isTakeout]);
 
   // Active category display title
   const activeCategoryTitle = useMemo(() => {
@@ -556,11 +598,12 @@ export default function DineInOrderExperience({
     return tray.reduce((sum, it) => sum + (it.price + (it.optionPrice || 0)) * it.quantity, 0);
   }, [tray]);
 
-  const trayTax = Math.floor(traySubtotal * 0.1); // 10% dine-in tax
+  const taxRate = isTakeout ? 0.08 : 0.10;
+  const trayTax = Math.floor(traySubtotal * taxRate);
   const trayGrandTotal = traySubtotal + trayTax;
   const trayCount = useMemo(() => tray.reduce((sum, it) => sum + it.quantity, 0), [tray]);
 
-  // Send Order to Kitchen
+  // Send Order to Kitchen or Takeout Counter
   const handleSendOrder = async () => {
     if (tray.length === 0 || submittingOrder) return;
     setSubmittingOrder(true);
@@ -577,16 +620,25 @@ export default function DineInOrderExperience({
         ].filter(Boolean),
       }));
 
+      const finalFulfillment = isTakeout ? 'PICKUP' : 'DINE_IN';
+      const orderName = isTakeout
+        ? (takeoutCustomerName.trim() || customer?.name || (tableNumber ? `お席${tableNumber}様 (持帰)` : 'テイクアウトお客様'))
+        : (customer?.name ? customer.name : `Table ${tableNumber.trim()}`);
+      const orderPhone = customer?.phone || (isTakeout ? takeoutCustomerPhone.trim() : '') || '00-0000-0000';
+      const orderNote = isTakeout
+        ? (tableNumber ? `[テイクアウト: 席${tableNumber}] モバイル持帰注文` : 'モバイルテイクアウト注文')
+        : `[テーブル: ${tableNumber.trim()}] QR Order`;
+
       const res = await apiFetch('/api/v1/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fulfillment: 'DINE_IN',
-          tableNumber: tableNumber.trim(),
-          name: customer?.name ? customer.name : `Table ${tableNumber.trim()}`,
-          phone: customer?.phone || '00-0000-0000',
+          fulfillment: finalFulfillment,
+          tableNumber: isTakeout ? '' : tableNumber.trim(),
+          name: orderName,
+          phone: orderPhone,
           email: customer?.email || '',
-          note: `[テーブル: ${tableNumber.trim()}] QR Order`,
+          note: orderNote,
           storeId: selectedStore.id,
           storeName: selectedStore.name,
           items: itemsPayload,
@@ -596,7 +648,12 @@ export default function DineInOrderExperience({
       if (res.ok) {
         const data = await res.json();
         readyChime();
-        toast.success(lang === 'en' ? 'Order sent to the kitchen!' : '厨房へ注文を送信しました！', { duration: 4000 });
+        toast.success(
+          lang === 'en'
+            ? (isTakeout ? 'Takeout order received! We are preparing it for pickup.' : 'Order sent to the kitchen!')
+            : (isTakeout ? 'テイクアウトのご注文を受け付けました！出来上がり次第お渡しします。' : '厨房へ注文を送信しました！'),
+          { duration: 4000, icon: isTakeout ? '🛍️' : '👨‍🍳' }
+        );
         if (data.token) {
           addSessionToken(data.token);
         }
@@ -692,35 +749,73 @@ export default function DineInOrderExperience({
                 <span className="dio-header-branch">{branchDisplayName}</span>
               </div>
               <div className="dio-header-pills-row">
-                <button
-                  type="button"
-                  className="dio-table-pill"
-                  onClick={() => {
-                    if (onOpenChoiceModal) onOpenChoiceModal();
-                    else {
-                      setNewTableInput(tableNumber);
-                      setShowTableEditModal(true);
-                    }
-                  }}
-                  title={lang === 'ja' ? 'お席番号・注文方法の変更' : 'Change table / order type'}
-                >
-                  <span>{lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}</span>
-                  <ChevronDown size={11} />
-                </button>
+                {isTakeout ? (
+                  <>
+                    <button
+                      type="button"
+                      className="dio-table-pill"
+                      style={{
+                        background: '#fff7ed',
+                        borderColor: '#fed7aa',
+                        color: '#c2410c',
+                      }}
+                      onClick={() => {
+                        if (onOpenChoiceModal) onOpenChoiceModal();
+                      }}
+                      title={lang === 'ja' ? 'お持ち帰り（店頭受取）' : 'Takeout / To Go'}
+                    >
+                      <span>{lang === 'ja' ? '🛍️ お持帰り' : '🛍️ Takeout'}</span>
+                      <ChevronDown size={11} />
+                    </button>
 
-                {(onOpenChoiceModal || onSwitchToTakeout) && (
-                  <button
-                    type="button"
-                    className="dio-switch-pill"
-                    onClick={() => {
-                      if (onOpenChoiceModal) onOpenChoiceModal();
-                      else if (onSwitchToTakeout) onSwitchToTakeout();
-                    }}
-                    title={lang === 'ja' ? 'テイクアウト（お持ち帰り）に切り替え' : 'Switch to Takeout'}
-                  >
-                    <ShoppingBag size={11} />
-                    <span>{lang === 'ja' ? '持帰切替' : 'To Go'}</span>
-                  </button>
+                    {(onOpenChoiceModal || onSwitchToDineIn) && (
+                      <button
+                        type="button"
+                        className="dio-switch-pill"
+                        onClick={() => {
+                          if (onSwitchToDineIn) onSwitchToDineIn();
+                          else if (onOpenChoiceModal) onOpenChoiceModal();
+                        }}
+                        title={lang === 'ja' ? '店内飲食（お席でご注文）に切り替え' : 'Switch to Dine-In'}
+                      >
+                        <UtensilsCrossed size={11} />
+                        <span>{lang === 'ja' ? (tableNumber ? `席${tableNumber}へ` : '店内切替') : 'Dine-In'}</span>
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="dio-table-pill"
+                      onClick={() => {
+                        if (onOpenChoiceModal) onOpenChoiceModal();
+                        else {
+                          setNewTableInput(tableNumber);
+                          setShowTableEditModal(true);
+                        }
+                      }}
+                      title={lang === 'ja' ? 'お席番号・注文方法の変更' : 'Change table / order type'}
+                    >
+                      <span>{lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}</span>
+                      <ChevronDown size={11} />
+                    </button>
+
+                    {(onOpenChoiceModal || onSwitchToTakeout) && (
+                      <button
+                        type="button"
+                        className="dio-switch-pill"
+                        onClick={() => {
+                          if (onOpenChoiceModal) onOpenChoiceModal();
+                          else if (onSwitchToTakeout) onSwitchToTakeout();
+                        }}
+                        title={lang === 'ja' ? 'テイクアウト（お持ち帰り）に切り替え' : 'Switch to Takeout'}
+                      >
+                        <ShoppingBag size={11} />
+                        <span>{lang === 'ja' ? '持帰切替' : 'To Go'}</span>
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -755,19 +850,36 @@ export default function DineInOrderExperience({
 
       {/* ── HORIZONTAL CATEGORY SCROLLING BAR ── */}
       <div className="dio-categories-bar">
-        {(onOpenChoiceModal || onSwitchToTakeout) && (
-          <button
-            type="button"
-            className="dio-cat-chip dio-cat-chip-switch"
-            onClick={() => {
-              if (onOpenChoiceModal) onOpenChoiceModal();
-              else if (onSwitchToTakeout) onSwitchToTakeout();
-            }}
-            title={lang === 'ja' ? 'テイクアウト（お持ち帰り）に切り替え' : 'Switch to Takeout'}
-          >
-            <ShoppingBag size={13} />
-            <span>{lang === 'ja' ? '持帰へ切替' : 'To Go'}</span>
-          </button>
+        {isTakeout ? (
+          (onOpenChoiceModal || onSwitchToDineIn) && (
+            <button
+              type="button"
+              className="dio-cat-chip dio-cat-chip-switch"
+              onClick={() => {
+                if (onSwitchToDineIn) onSwitchToDineIn();
+                else if (onOpenChoiceModal) onOpenChoiceModal();
+              }}
+              title={lang === 'ja' ? '店内飲食（お席でご注文）に切り替え' : 'Switch to Dine-In'}
+            >
+              <UtensilsCrossed size={13} />
+              <span>{lang === 'ja' ? (tableNumber ? `席${tableNumber}で食事` : '店内へ切替') : 'Dine-In'}</span>
+            </button>
+          )
+        ) : (
+          (onOpenChoiceModal || onSwitchToTakeout) && (
+            <button
+              type="button"
+              className="dio-cat-chip dio-cat-chip-switch"
+              onClick={() => {
+                if (onOpenChoiceModal) onOpenChoiceModal();
+                else if (onSwitchToTakeout) onSwitchToTakeout();
+              }}
+              title={lang === 'ja' ? 'テイクアウト（お持ち帰り）に切り替え' : 'Switch to Takeout'}
+            >
+              <ShoppingBag size={13} />
+              <span>{lang === 'ja' ? '持帰へ切替' : 'To Go'}</span>
+            </button>
+          )
         )}
         <button
           type="button"
@@ -1030,19 +1142,37 @@ export default function DineInOrderExperience({
             <span className="dio-center-cart-label">{lang === 'en' ? 'Cart' : 'カート'}</span>
           </button>
 
-          {/* Right: Staff Call */}
-          <button
-            type="button"
-            className="dio-bottom-nav-item"
-            onClick={() => setShowCallStaffModal(true)}
-          >
-            <Bell size={20} />
-            <span>{lang === 'en' ? 'Call Staff' : '店員呼出'}</span>
-          </button>
+          {/* Right: Staff Call (Dine-In) or Store Call (Takeout) */}
+          {isTakeout ? (
+            <button
+              type="button"
+              className="dio-bottom-nav-item"
+              onClick={() => {
+                if (selectedStore.phone) {
+                  window.location.href = `tel:${selectedStore.phone}`;
+                } else {
+                  toast(lang === 'ja' ? `${selectedStore.name}: 営業中` : `${selectedStore.name}: Open`, { icon: '📍' });
+                }
+              }}
+              title={lang === 'ja' ? '店舗へお電話' : 'Call store'}
+            >
+              <Phone size={20} />
+              <span>{lang === 'en' ? 'Call Store' : '店舗連絡'}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="dio-bottom-nav-item"
+              onClick={() => setShowCallStaffModal(true)}
+            >
+              <Bell size={20} />
+              <span>{lang === 'en' ? 'Call Staff' : '店員呼出'}</span>
+            </button>
+          )}
         </div>
       </footer>
 
-      {/* ── MODAL: CART TRAY (Send Order to Kitchen) ── */}
+      {/* ── MODAL: CART TRAY (Send Order to Kitchen or Takeout Counter) ── */}
       {showCartModal && (
         <div
           className="dio-modal-overlay"
@@ -1078,7 +1208,9 @@ export default function DineInOrderExperience({
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 10, borderBottom: '1px solid #e5e7eb', marginBottom: 12 }}>
                     <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
-                      {lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}
+                      {isTakeout
+                        ? (lang === 'ja' ? '🛍️ テイクアウト（店頭受取）' : '🛍️ Takeout / To Go')
+                        : (lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`)}
                     </span>
                     <button
                       type="button"
@@ -1090,6 +1222,34 @@ export default function DineInOrderExperience({
                       {lang === 'ja' ? 'トレイを空にする' : 'Clear Tray'}
                     </button>
                   </div>
+
+                  {isTakeout && (
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '12px 14px', marginBottom: 14 }}>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#0f172a', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <ShoppingBag size={14} color="#ea580c" />
+                        <span>{lang === 'ja' ? 'お受取情報（店頭レジ受取）' : 'Pickup Info'}</span>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <input
+                          type="text"
+                          placeholder={lang === 'ja' ? 'お名前 (呼出用)' : 'Your Name'}
+                          value={takeoutCustomerName}
+                          onChange={e => setTakeoutCustomerName(e.target.value)}
+                          style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', width: '100%', boxSizing: 'border-box' }}
+                        />
+                        <input
+                          type="tel"
+                          placeholder={lang === 'ja' ? 'お電話番号 (任意)' : 'Phone Number'}
+                          value={takeoutCustomerPhone}
+                          onChange={e => setTakeoutCustomerPhone(e.target.value)}
+                          style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.82rem', width: '100%', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: 6 }}>
+                        {lang === 'ja' ? '受取目安: ご注文後 約15〜20分で店頭レジにてお渡し' : 'Estimated pickup: 15-20 min after ordering'}
+                      </div>
+                    </div>
+                  )}
 
                   {tray.map(item => (
                     <div key={item.id} className="dio-tray-item">
@@ -1128,7 +1288,7 @@ export default function DineInOrderExperience({
                       <span>{yen(traySubtotal)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem', color: 'var(--dio-gray)', marginBottom: 6 }}>
-                      <span>{lang === 'ja' ? '消費税 (10%)' : 'Tax (10%)'}</span>
+                      <span>{lang === 'ja' ? `消費税 (${isTakeout ? '8% 軽減税率' : '10%'})` : `Tax (${isTakeout ? '8%' : '10%'})`}</span>
                       <span>{yen(trayTax)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.2rem', fontWeight: 900, borderTop: '1.5px solid #e5e7eb', paddingTop: 8, marginTop: 8 }}>
@@ -1194,12 +1354,13 @@ export default function DineInOrderExperience({
                     className="dio-send-order-btn"
                     disabled={submittingOrder}
                     onClick={handleSendOrder}
+                    style={isTakeout ? { background: '#ea580c' } : undefined}
                   >
-                    <ChefHat size={20} />
+                    {isTakeout ? <ShoppingBag size={20} /> : <ChefHat size={20} />}
                     <span>
                       {submittingOrder
-                        ? (lang === 'ja' ? '厨房へ送信中…' : 'Sending to Kitchen…')
-                        : (lang === 'ja' ? '厨房へ注文を送信する' : 'Send Order to Kitchen')}
+                        ? (lang === 'ja' ? (isTakeout ? '注文送信中…' : '厨房へ送信中…') : 'Submitting…')
+                        : (lang === 'ja' ? (isTakeout ? 'テイクアウト注文を確定する' : '厨房へ注文を送信する') : (isTakeout ? 'Confirm Takeout Order' : 'Send Order to Kitchen'))}
                     </span>
                   </button>
                 </div>

@@ -767,14 +767,16 @@ export default function Order() {
   const phoneLink = activePhone ? <a href={`tel:${activePhone}`} style={{ color: 'var(--spice)', fontWeight: 'bold' }}>{activePhone}</a> : null;
   const subtotal = lines.reduce((sum, line) => sum + line.price * line.quantity, 0);
 
-  if (isDineIn && !placed) {
+  if (!placed) {
     return (
       <>
         <DineInOrderExperience
           initialTableNumber={tableNumber || queryTable || '1'}
           selectedStore={selectedStore}
           stores={stores}
+          fulfillment={fulfillment}
           onSwitchToTakeout={handleSelectTakeout}
+          onSwitchToDineIn={handleSelectDineIn}
           onOpenChoiceModal={() => setShowQrChoice(true)}
         />
         <QrFulfillmentChoiceModal
