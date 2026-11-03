@@ -68,6 +68,19 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     headers.set('Authorization', `Bearer ${token}`);
   }
 
+  // Attach verified QR session token if available for dine-in authorization
+  try {
+    if (typeof window !== 'undefined' && !headers.has('X-QR-Session')) {
+      const rawQr = sessionStorage.getItem('adarsha_qr_session');
+      if (rawQr) {
+        const parsed = JSON.parse(rawQr);
+        if (parsed?.sessionToken) {
+          headers.set('X-QR-Session', parsed.sessionToken);
+        }
+      }
+    }
+  } catch {}
+
   const res = await fetch(`${API_BASE}${path}`, {
     cache: 'no-store',
     credentials: 'include',

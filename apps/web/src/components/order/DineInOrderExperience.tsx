@@ -13,6 +13,7 @@ import { type StoreLocation } from '../../lib/stores';
 import { useCustomer } from '../../lib/customer-context';
 import { setCustomerSession } from '../../lib/auth-storage';
 import { readyChime } from '../../lib/push';
+import { getStoredQrSession, clearQrSession, type QrSession } from '../../lib/qr-session';
 import QrScanPreloader from './QrScanPreloader';
 import '../../pages/dining-order.css';
 
@@ -80,9 +81,11 @@ interface DineInOrderExperienceProps {
   selectedStore: StoreLocation;
   stores?: StoreLocation[];
   fulfillment?: Fulfillment;
+  qrSession?: QrSession | null;
   onSwitchToTakeout?: () => void;
   onSwitchToDineIn?: () => void;
   onOpenChoiceModal?: () => void;
+  onExitTable?: () => void;
 }
 
 export interface CustomOptionItem {
@@ -145,9 +148,11 @@ export default function DineInOrderExperience({
   initialTableNumber,
   selectedStore,
   fulfillment = 'DINE_IN',
+  qrSession,
   onSwitchToTakeout,
   onSwitchToDineIn,
   onOpenChoiceModal,
+  onExitTable,
 }: DineInOrderExperienceProps) {
   const { customer, signIn, signOut } = useCustomer();
   const isTakeout = fulfillment === 'PICKUP' || fulfillment === 'DELIVERY';
@@ -781,6 +786,7 @@ export default function DineInOrderExperience({
           storeId: selectedStore.id,
           storeName: selectedStore.name,
           items: itemsPayload,
+          qrSessionToken: qrSession?.sessionToken || getStoredQrSession()?.sessionToken,
         }),
       });
 
@@ -2228,6 +2234,38 @@ export default function DineInOrderExperience({
                   <span>{lang === 'en' ? 'Switch to Takeout (To Go)' : 'テイクアウト（お持ち帰り）に切り替え'}</span>
                 </button>
               )}
+
+              <button
+                type="button"
+                style={{
+                  width: '100%',
+                  marginTop: 10,
+                  padding: '11px 14px',
+                  borderRadius: 12,
+                  border: '1px solid #fee2e2',
+                  background: '#fef2f2',
+                  color: '#991b1b',
+                  fontWeight: 700,
+                  fontSize: '0.84rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+                onClick={() => {
+                  setShowTableEditModal(false);
+                  if (onExitTable) {
+                    onExitTable();
+                  } else {
+                    clearQrSession();
+                    window.location.href = '/order';
+                  }
+                }}
+              >
+                <LogOut size={16} />
+                <span>{lang === 'en' ? 'Exit Table / Finish Dine-In' : 'お席を終了する / 通常注文に戻る'}</span>
+              </button>
             </div>
           </div>
         </div>

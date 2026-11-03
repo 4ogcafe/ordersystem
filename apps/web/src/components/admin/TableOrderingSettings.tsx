@@ -18,6 +18,16 @@ interface TableOrderingForm {
   dineInNoteJa: string;
 }
 
+interface TableQrItem {
+  id: string;
+  storeId: string;
+  tableNumber: string;
+  qrCode: string;
+  isActive: boolean;
+  expiresAt?: string;
+  lastScannedAt?: string;
+}
+
 const DEFAULT_TABLE_NAMES = '1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, カウンター1, カウンター2, カウンター3';
 
 export default function TableOrderingSettings({ onSaved }: { onSaved?: () => void }) {
@@ -26,15 +36,20 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
   const [stores, setStores] = useState<StoreLocation[]>(DEFAULT_STORE_LOCATIONS);
   const [previewStoreId, setPreviewStoreId] = useState<string>('musashisakai');
   const [previewTable, setPreviewTable] = useState<string>('1');
+  const [tableQrs, setTableQrs] = useState<TableQrItem[]>([]);
 
   useEffect(() => {
     Promise.all([
       apiFetch('/api/v1/settings').then(r => r.json()).catch(() => ({})),
       apiFetch('/api/v1/stores').then(r => r.json()).catch(() => DEFAULT_STORE_LOCATIONS),
-    ]).then(([settings, storeList]) => {
+      apiFetch('/api/v1/admin/tables/qr').then(r => r.json()).catch(() => []),
+    ]).then(([settings, storeList, qrList]) => {
       if (Array.isArray(storeList) && storeList.length > 0) {
         setStores(storeList);
         setPreviewStoreId(storeList[0].id);
+      }
+      if (Array.isArray(qrList)) {
+        setTableQrs(qrList);
       }
       setForm({
         dineInHours: settings.dineInHours || settings.pickupHours || '11:00-15:00, 17:00-22:30',
@@ -64,6 +79,10 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
 
   const getTableOrderUrl = (tableNum: string, storeId = previewStoreId) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://pnglike.com';
+    const found = tableQrs.find(q => q.storeId === storeId && String(q.tableNumber) === String(tableNum));
+    if (found?.qrCode) {
+      return `${origin}/order?qr=${encodeURIComponent(found.qrCode)}&store=${encodeURIComponent(storeId)}&table=${encodeURIComponent(tableNum)}`;
+    }
     return `${origin}/order?fulfillment=DINE_IN&store=${encodeURIComponent(storeId)}&table=${encodeURIComponent(tableNum)}`;
   };
 

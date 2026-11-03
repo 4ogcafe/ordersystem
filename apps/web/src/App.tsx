@@ -33,26 +33,27 @@ const BlogPost = lazy(() => import('./pages/BlogPost'));
 function AppContent() {
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
-  const isDineIn = location.pathname.startsWith('/dine-in') ||
-    location.pathname.startsWith('/table') || (
-      location.pathname === '/order' && (
-        searchParams.get('fulfillment')?.toUpperCase() === 'DINE_IN' ||
-        (searchParams.has('table') && searchParams.get('fulfillment')?.toUpperCase() !== 'PICKUP') ||
-        (() => {
-          try {
-            const raw = sessionStorage.getItem('adarsha_table_session');
-            const data = raw ? JSON.parse(raw) : null;
-            return data?.fulfillment === 'DINE_IN';
-          } catch {
-            return false;
-          }
-        })()
-      )
-    );
 
-  // Hide regular website Navbar, Footer, and CartDrawer for app-like screens
-  const appRoutes = ['/login', '/admin', '/kitchen', '/cash-counter', '/cashier', '/account', '/order', '/dine-in', '/table'];
-  const hideNavAndFooter = appRoutes.some(route => location.pathname === route || location.pathname.startsWith(route + '/'));
+  // Check if visitor has an active verified QR Dine-In session
+  const isDineIn = (() => {
+    try {
+      const raw = sessionStorage.getItem('adarsha_qr_session');
+      const session = raw ? JSON.parse(raw) : null;
+      return Boolean(session?.valid && session?.sessionToken);
+    } catch {
+      return false;
+    }
+  })();
+
+  const isQrUrl = location.pathname.startsWith('/qr') || searchParams.has('qr');
+  // Dedicated QR preview UI is active if scanning/opening QR route or in active QR session with Dine-In
+  const isTableApp = isQrUrl || (isDineIn && searchParams.get('fulfillment')?.toUpperCase() !== 'PICKUP');
+
+  // Hide regular website Navbar, Footer, and CartDrawer for internal staff apps and active table QR diners
+  // Normal website visitors to /order will see the complete website Navbar & Footer!
+  const internalRoutes = ['/login', '/admin', '/kitchen', '/cash-counter', '/cashier', '/account'];
+  const isInternal = internalRoutes.some(route => location.pathname === route || location.pathname.startsWith(route + '/'));
+  const hideNavAndFooter = isInternal || isTableApp;
 
   return (
     <div className={hideNavAndFooter ? 'antialiased app-screen' : 'antialiased'}>
@@ -64,6 +65,8 @@ function AppContent() {
           <Route path="/contact" element={<Contact />} />
           <Route path="/menu/:type" element={<Menu />} />
           <Route path="/order" element={<Order />} />
+          <Route path="/qr" element={<Order />} />
+          <Route path="/qr/:qrCode" element={<Order />} />
           <Route path="/dine-in" element={<Order />} />
           <Route path="/dine-in/:tableNum" element={<Order />} />
           <Route path="/table" element={<Order />} />

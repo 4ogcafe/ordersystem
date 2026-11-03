@@ -494,6 +494,62 @@ function ensureDefaultDatabaseData(PDO $pdo): array {
     return $seeded;
 }
 
+// Ensure unique, active QR codes for each restaurant branch and table
+function ensureStoreTableQrCodes(PDO $pdo, string $jwtSecret): int {
+    $now = date('Y-m-d H:i:s');
+    $createdCount = 0;
+
+    $stores = [
+        ['id' => 'musashisakai', 'name' => '武蔵境店'],
+        ['id' => 'kumagaya', 'name' => '熊谷店'],
+        ['id' => 'gyoda', 'name' => '行田店'],
+    ];
+
+    try {
+        $stStmt = $pdo->query('SELECT storeLocations, dineInTableNames FROM Settings LIMIT 1');
+        $sRow = $stStmt ? $stStmt->fetch() : null;
+        if (!empty($sRow['storeLocations'])) {
+            $parsed = json_decode($sRow['storeLocations'], true);
+            if (is_array($parsed) && count($parsed) > 0) {
+                $stores = $parsed;
+            }
+        }
+        $tableNamesStr = !empty($sRow['dineInTableNames']) ? $sRow['dineInTableNames'] : '';
+    } catch (Exception $e) {
+        $tableNamesStr = '';
+    }
+
+    $defaultTables = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '14', '15', 'カウンター1', 'カウンター2', 'カウンター3'];
+    if (!empty($tableNamesStr)) {
+        $customTables = array_filter(array_map('trim', preg_split('/[,、\n]+/', $tableNamesStr)));
+        if (!empty($customTables)) {
+            $defaultTables = array_values(array_unique(array_merge($defaultTables, $customTables)));
+        }
+    }
+
+    foreach ($stores as $store) {
+        $storeId = is_array($store) ? ($store['id'] ?? '') : (string)$store;
+        if (empty($storeId)) continue;
+
+        foreach ($defaultTables as $tableNumber) {
+            $stmt = $pdo->prepare('SELECT id FROM TableQrCode WHERE storeId = ? AND tableNumber = ? LIMIT 1');
+            $stmt->execute([$storeId, $tableNumber]);
+            if (!$stmt->fetch()) {
+                $id = 'tqr_' . bin2hex(random_bytes(10));
+                // Deterministic initial salt for table
+                $hash = substr(hash_hmac('sha256', "table_qr:{$storeId}:{$tableNumber}", $jwtSecret), 0, 16);
+                $qrCode = "qr_{$storeId}_{$tableNumber}_{$hash}";
+
+                $ins = $pdo->prepare('INSERT INTO TableQrCode (id, storeId, tableNumber, qrCode, isActive, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, ?, ?)');
+                $ins->execute([$id, $storeId, $tableNumber, $qrCode, $now, $now]);
+                $createdCount++;
+            }
+        }
+    }
+
+    return $createdCount;
+}
+
 // Full database migration runner: idempotent table creation and schema sync
 function runDatabaseMigrations(PDO $pdo): array {
     $tables = [
@@ -1000,6 +1056,22 @@ function runDatabaseMigrations(PDO $pdo): array {
             `blockedUntil` DATETIME(3) NULL,
             PRIMARY KEY (`keyStr`),
             INDEX `RateLimit_blockedUntil_idx` (`blockedUntil`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;",
+
+        'TableQrCode' => "CREATE TABLE IF NOT EXISTS `TableQrCode` (
+            `id` VARCHAR(191) NOT NULL,
+            `storeId` VARCHAR(191) NOT NULL,
+            `tableNumber` VARCHAR(191) NOT NULL,
+            `qrCode` VARCHAR(191) NOT NULL,
+            `isActive` BOOLEAN NOT NULL DEFAULT 1,
+            `expiresAt` DATETIME(3) NULL,
+            `lastScannedAt` DATETIME(3) NULL,
+            `createdAt` DATETIME(3) NOT NULL,
+            `updatedAt` DATETIME(3) NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `TableQrCode_qrCode_key` (`qrCode`),
+            INDEX `TableQrCode_store_table_idx` (`storeId`, `tableNumber`),
+            INDEX `TableQrCode_isActive_idx` (`isActive`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
     ];
 
@@ -1012,6 +1084,11 @@ function runDatabaseMigrations(PDO $pdo): array {
             $created[] = "{$name} (error: " . $e->getMessage() . ")";
         }
     }
+
+    // Auto-seed table QR codes for all branches
+    try {
+        ensureStoreTableQrCodes($pdo, $GLOBALS['jwtSecret'] ?? 'adarsha_qr_secret_salt_2026');
+    } catch (Exception $e) {}
 
     // Drop legacy dining tables if they exist
     try { $pdo->exec("DROP TABLE IF EXISTS `_CustomerToTableSession`"); } catch (Exception $e) {}
@@ -3141,6 +3218,64 @@ if ($method === 'POST' && ($subPath === '/orders' || $subPath === '/orders/')) {
     $phone = trim((string)($input['phone'] ?? ''));
 
     if ($isDineIn) {
+        $qrToken = trim((string)($input['qrSessionToken'] ?? $input['qrToken'] ?? ''));
+        if (empty($qrToken)) {
+            $qrToken = getBearerOrCookie('kalpana_qr_session');
+        }
+        if (empty($qrToken) && !empty($_SERVER['HTTP_X_QR_SESSION'])) {
+            $qrToken = trim($_SERVER['HTTP_X_QR_SESSION']);
+        }
+
+        $qrPayload = !empty($qrToken) ? verifyJwt($qrToken, $jwtSecret) : null;
+        if (!$qrPayload || ($qrPayload['typ'] ?? '') !== 'qr_session') {
+            http_response_code(403);
+            echo json_encode([
+                'error' => [
+                    'code' => 'DINE_IN_UNAUTHORIZED',
+                    'message' => '店内テーブル注文をご利用いただくには、お席のQRコードの読み取りが必要です。'
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        // Table number must match the cryptographically signed token
+        if ($tableNumber === '' || $qrPayload['tableNumber'] !== $tableNumber) {
+            http_response_code(403);
+            echo json_encode([
+                'error' => [
+                    'code' => 'TABLE_MISMATCH',
+                    'message' => 'ご注文のお席番号がQRコードと一致しません。'
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        if (!empty($input['storeId']) && $qrPayload['storeId'] !== $input['storeId']) {
+            http_response_code(403);
+            echo json_encode([
+                'error' => [
+                    'code' => 'STORE_MISMATCH',
+                    'message' => 'ご注文の店舗情報がQRコードと一致しません。'
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        // Verify the QR record is still active in DB
+        $tStmt = $pdo->prepare('SELECT isActive FROM TableQrCode WHERE qrCode = ? LIMIT 1');
+        $tStmt->execute([$qrPayload['qrCode']]);
+        $tRow = $tStmt->fetch();
+        if ($tRow && empty($tRow['isActive'])) {
+            http_response_code(403);
+            echo json_encode([
+                'error' => [
+                    'code' => 'QR_DISABLED',
+                    'message' => 'このお席のQRコードは現在無効化されています。店員にお声がけください。'
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
         if ($name === '') {
             $name = $tableNumber !== '' ? "テーブル {$tableNumber}" : '店内客';
         }
@@ -3545,6 +3680,250 @@ if ($method === 'POST' && ($subPath === '/tables/request-bill' || $subPath === '
         'success' => true,
         'message' => "お会計の準備を進めております。伝票をお持ちになり、レジカウンターへお越しください。",
     ]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: POST /qr/validate (Validate scanned Table QR code & issue secure QR session)
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/qr/validate' || $subPath === '/qr/validate/')) {
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $rawCode = trim((string)($input['qrCode'] ?? $input['qr'] ?? $_GET['qr'] ?? ''));
+    $storeId = trim((string)($input['storeId'] ?? $input['store'] ?? $_GET['store'] ?? ''));
+    $tableNumber = trim((string)($input['tableNumber'] ?? $input['table'] ?? $_GET['table'] ?? ''));
+
+    // Normalize QR code if passed as full or partial URL
+    $qrCode = $rawCode;
+    if (preg_match('/[?&]qr=([a-zA-Z0-9_\-]+)/', $rawCode, $m)) {
+        $qrCode = $m[1];
+    } elseif (preg_match('/\/qr\/([a-zA-Z0-9_\-]+)/', $rawCode, $m)) {
+        $qrCode = $m[1];
+    }
+
+    $row = null;
+    if (!empty($qrCode)) {
+        $stmt = $pdo->prepare('SELECT * FROM TableQrCode WHERE qrCode = ? LIMIT 1');
+        $stmt->execute([$qrCode]);
+        $row = $stmt->fetch();
+    }
+
+    // Fallback: If storeId and tableNumber are provided and valid
+    if (!$row && !empty($storeId) && !empty($tableNumber)) {
+        $stmt = $pdo->prepare('SELECT * FROM TableQrCode WHERE storeId = ? AND tableNumber = ? LIMIT 1');
+        $stmt->execute([$storeId, $tableNumber]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            ensureStoreTableQrCodes($pdo, $jwtSecret);
+            $stmt->execute([$storeId, $tableNumber]);
+            $row = $stmt->fetch();
+        }
+    }
+
+    if (!$row) {
+        http_response_code(404);
+        echo json_encode([
+            'valid' => false,
+            'error' => [
+                'code' => 'INVALID_QR',
+                'message' => '無効なQRコードです。お席のQRコードをご確認ください。'
+            ]
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if (empty($row['isActive'])) {
+        http_response_code(403);
+        echo json_encode([
+            'valid' => false,
+            'error' => [
+                'code' => 'QR_DISABLED',
+                'message' => 'このお席のQRコードは現在無効化されています。店員にお声がけください。'
+            ]
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if (!empty($row['expiresAt']) && strtotime($row['expiresAt']) < time()) {
+        http_response_code(403);
+        echo json_encode([
+            'valid' => false,
+            'error' => [
+                'code' => 'QR_EXPIRED',
+                'message' => 'QRコードの有効期限が切れています。新しいQRコードをお確かめください。'
+            ]
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    // Update lastScannedAt
+    try {
+        $pdo->prepare('UPDATE TableQrCode SET lastScannedAt = NOW(), updatedAt = NOW() WHERE id = ?')
+            ->execute([$row['id']]);
+    } catch (Exception $e) {}
+
+    // Generate cryptographically signed QR session token (valid 4 hours for dine-in session)
+    $sessionTtl = 14400; // 4 hours
+    $sessionPayload = [
+        'typ' => 'qr_session',
+        'qrId' => $row['id'],
+        'storeId' => $row['storeId'],
+        'tableNumber' => $row['tableNumber'],
+        'qrCode' => $row['qrCode'],
+        'iat' => time(),
+        'exp' => time() + $sessionTtl,
+    ];
+    $qrSessionToken = createJwt($sessionPayload, $jwtSecret, $sessionTtl);
+
+    // Set Session Cookie (expires => 0: deleted when browser is closed or reset)
+    setcookie('kalpana_qr_session', $qrSessionToken, [
+        'expires' => 0,
+        'path' => '/',
+        'domain' => '',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+
+    // Find store details
+    $storeInfo = [
+        'id' => $row['storeId'],
+        'name' => $row['storeId'] === 'musashisakai' ? '武蔵境店' : ($row['storeId'] === 'kumagaya' ? '熊谷店' : '行田店'),
+    ];
+    try {
+        $stStmt = $pdo->query('SELECT storeLocations FROM Settings LIMIT 1');
+        $sRow = $stStmt ? $stStmt->fetch() : null;
+        if (!empty($sRow['storeLocations'])) {
+            $stores = json_decode($sRow['storeLocations'], true);
+            if (is_array($stores)) {
+                foreach ($stores as $s) {
+                    if (($s['id'] ?? '') === $row['storeId']) {
+                        $storeInfo = $s;
+                        break;
+                    }
+                }
+            }
+        }
+    } catch (Exception $e) {}
+
+    echo json_encode([
+        'valid' => true,
+        'sessionToken' => $qrSessionToken,
+        'storeId' => $row['storeId'],
+        'tableNumber' => $row['tableNumber'],
+        'qrCode' => $row['qrCode'],
+        'store' => $storeInfo,
+        'restaurantName' => 'Adarsha (アダルサ)',
+        'expiresAt' => time() + $sessionTtl,
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: GET /qr/session (Check current active QR session)
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/qr/session' || $subPath === '/qr/session/')) {
+    $token = getBearerOrCookie('kalpana_qr_session');
+    if (empty($token) && !empty($_SERVER['HTTP_X_QR_SESSION'])) {
+        $token = trim($_SERVER['HTTP_X_QR_SESSION']);
+    }
+
+    if (empty($token)) {
+        echo json_encode(['valid' => false]);
+        exit;
+    }
+
+    $payload = verifyJwt($token, $jwtSecret);
+    if (!$payload || ($payload['typ'] ?? '') !== 'qr_session') {
+        echo json_encode(['valid' => false]);
+        exit;
+    }
+
+    $stmt = $pdo->prepare('SELECT * FROM TableQrCode WHERE qrCode = ? AND isActive = 1 LIMIT 1');
+    $stmt->execute([$payload['qrCode']]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        echo json_encode(['valid' => false]);
+        exit;
+    }
+
+    echo json_encode([
+        'valid' => true,
+        'sessionToken' => $token,
+        'storeId' => $payload['storeId'],
+        'tableNumber' => $payload['tableNumber'],
+        'qrCode' => $payload['qrCode'],
+        'expiresAt' => $payload['exp'],
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: POST /qr/clear (Clear QR session)
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/qr/clear' || $subPath === '/qr/clear/')) {
+    setcookie('kalpana_qr_session', '', [
+        'expires' => time() - 3600,
+        'path' => '/',
+        'domain' => '',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    echo json_encode(['cleared' => true]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: GET /admin/tables/qr (List all table QR codes)
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/admin/tables/qr' || $subPath === '/admin/tables/qr/')) {
+    requireStaffUser($jwtSecret, $pdo);
+    ensureStoreTableQrCodes($pdo, $jwtSecret);
+
+    $stmt = $pdo->query('SELECT * FROM TableQrCode ORDER BY storeId ASC, LENGTH(tableNumber) ASC, tableNumber ASC');
+    $rows = $stmt ? $stmt->fetchAll() : [];
+    echo json_encode(['tables' => $rows], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: POST /admin/tables/qr/regenerate (Regenerate QR token for a table)
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/admin/tables/qr/regenerate' || $subPath === '/admin/tables/qr/regenerate/')) {
+    requireStaffUser($jwtSecret, $pdo);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $storeId = trim((string)($input['storeId'] ?? ''));
+    $tableNumber = trim((string)($input['tableNumber'] ?? ''));
+
+    if (empty($storeId) || empty($tableNumber)) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'PARAMS_REQUIRED', 'message' => '店舗とテーブル番号を指定してください。']]);
+        exit;
+    }
+
+    $newHash = bin2hex(random_bytes(8));
+    $newQrCode = "qr_{$storeId}_{$tableNumber}_{$newHash}";
+
+    $stmt = $pdo->prepare('UPDATE TableQrCode SET qrCode = ?, updatedAt = NOW() WHERE storeId = ? AND tableNumber = ?');
+    $stmt->execute([$newQrCode, $storeId, $tableNumber]);
+
+    echo json_encode(['success' => true, 'qrCode' => $newQrCode], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: POST /admin/tables/qr/toggle (Toggle active status of a table QR)
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/admin/tables/qr/toggle' || $subPath === '/admin/tables/qr/toggle/')) {
+    requireStaffUser($jwtSecret, $pdo);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $id = trim((string)($input['id'] ?? ''));
+    $isActive = !empty($input['isActive']) ? 1 : 0;
+
+    $stmt = $pdo->prepare('UPDATE TableQrCode SET isActive = ?, updatedAt = NOW() WHERE id = ?');
+    $stmt->execute([$isActive, $id]);
+
+    echo json_encode(['success' => true, 'isActive' => (bool)$isActive], JSON_UNESCAPED_UNICODE);
     exit;
 }
 

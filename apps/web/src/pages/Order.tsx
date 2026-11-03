@@ -34,6 +34,7 @@ import type { BuyNowState } from '../components/order/OrderButtons';
 import { useOrderQuote, type Savings } from '../components/order/useOrderQuote';
 import DineInOrderExperience from '../components/order/DineInOrderExperience';
 import QrFulfillmentChoiceModal from '../components/order/QrFulfillmentChoiceModal';
+import { clearQrSession, getStoredQrSession, validateQrCodeApi, type QrSession } from '../lib/qr-session';
 
 interface Slot {
   date: string;
@@ -186,39 +187,36 @@ export default function Order() {
   const [placed, setPlaced] = useState(false);
   const [asGuest, setAsGuest] = useState(false);
   const [savings, setSavings] = useState<Savings>({ offerId: '', offerIds: [], rewardId: '', pointsToUse: 0 });
-  const { tableNum } = useParams<{ tableNum?: string }>();
+  const { tableNum, qrCode: routeQrCode } = useParams<{ tableNum?: string; qrCode?: string }>();
+  const [qrSession, setQrSession] = useState<QrSession | null>(() => getStoredQrSession());
+  const [isValidatingQr, setIsValidatingQr] = useState<boolean>(false);
+
+  const queryQr = searchParams.get('qr') || routeQrCode || '';
   const queryTable = searchParams.get('table') || tableNum || '';
+  const queryStore = searchParams.get('store') || '';
   const queryFulfillment = searchParams.get('fulfillment') || '';
-  const isDineInPath = location.pathname.startsWith('/dine-in') || location.pathname.startsWith('/table');
 
-  const savedSession = useMemo(() => {
-    try {
-      const raw = sessionStorage.getItem('adarsha_table_session');
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  }, []);
+  // Dine-In is ONLY authorized when verified by backend QR session
+  const isQrActive = Boolean(qrSession && qrSession.valid && qrSession.sessionToken);
+  const effectiveTable = qrSession?.tableNumber || '';
 
-  const effectiveTable = queryTable || savedSession?.table || '';
-  const isDineInInit = Boolean(queryTable || isDineInPath || queryFulfillment.toUpperCase() === 'DINE_IN' || savedSession?.fulfillment === 'DINE_IN');
-  const initialFulfillment: Fulfillment = isDineInInit ? 'DINE_IN' : 'PICKUP';
+  const initialFulfillment: Fulfillment = (isQrActive && queryFulfillment.toUpperCase() !== 'PICKUP')
+    ? 'DINE_IN'
+    : 'PICKUP';
 
-  const isQrScan = Boolean(queryTable || isDineInPath || searchParams.has('qr'));
-
-  // QR choice modal: shown on QR scan so customer can choose Dine-In vs Takeout
+  // QR choice modal: shown only on active QR session if user hasn't explicitly chosen
   const [showQrChoice, setShowQrChoice] = useState<boolean>(() => {
-    if (!isQrScan) return false;
+    if (!isQrActive) return false;
     try {
       const explicitChoice = sessionStorage.getItem('adarsha_qr_choice');
       return !explicitChoice;
     } catch {
-      return true;
+      return false;
     }
   });
 
   const [fulfillment, setFulfillment] = useState<Fulfillment>(initialFulfillment);
-  const [tableNumber, setTableNumber] = useState<string>(effectiveTable);
+  const [tableNumber, setTableNumber] = useState<string>(() => qrSession?.tableNumber || '');
   const [address, setAddress] = useState<DeliveryAddress>(EMPTY_ADDRESS);
   const [addressErrors, setAddressErrors] = useState<AddressErrors>({});
   const [saveAddress, setSaveAddress] = useState(false);
@@ -228,26 +226,25 @@ export default function Order() {
     fulfillmentRef.current = fulfillment;
   }, [fulfillment]);
   const isDelivery = fulfillment === 'DELIVERY';
-  const isDineIn = fulfillment === 'DINE_IN';
+  const isDineIn = isQrActive && fulfillment === 'DINE_IN';
   const word = timeWord(fulfillment);
   const { quote, problem } = useOrderQuote(items, savings, Boolean(customer), fulfillment);
 
   const handleSelectDineIn = () => {
-    const table = effectiveTable || tableNumber || '1';
+    if (!qrSession || !qrSession.valid) {
+      toast.error('店内飲食はお席のQRコードをスキャンした場合のみご利用いただけます。');
+      setFulfillment('PICKUP');
+      return;
+    }
+    const table = qrSession.tableNumber || tableNumber || '1';
     setTableNumber(table);
     setFulfillment('DINE_IN');
     setShowQrChoice(false);
     try {
       sessionStorage.setItem('adarsha_qr_choice', 'DINE_IN');
-      sessionStorage.setItem('adarsha_table_session', JSON.stringify({
-        table,
-        storeId: selectedStoreId,
-        fulfillment: 'DINE_IN',
-      }));
     } catch {}
     setSearchParams(params => {
       params.set('fulfillment', 'DINE_IN');
-      params.set('table', table);
       return params;
     }, { replace: true });
   };
@@ -257,11 +254,6 @@ export default function Order() {
     setShowQrChoice(false);
     try {
       sessionStorage.setItem('adarsha_qr_choice', 'PICKUP');
-      sessionStorage.setItem('adarsha_table_session', JSON.stringify({
-        table: effectiveTable || tableNumber || '1',
-        storeId: selectedStoreId,
-        fulfillment: 'PICKUP',
-      }));
     } catch {}
     setSearchParams(params => {
       params.set('fulfillment', 'PICKUP');
@@ -269,18 +261,86 @@ export default function Order() {
     }, { replace: true });
   };
 
-  // Preserve table order session across reloads and menu browsing
+  const handleExitTable = () => {
+    clearQrSession();
+    setQrSession(null);
+    setTableNumber('');
+    setFulfillment('PICKUP');
+    setShowQrChoice(false);
+    setSearchParams(params => {
+      params.delete('qr');
+      params.delete('table');
+      params.delete('store');
+      params.set('fulfillment', 'PICKUP');
+      return params;
+    }, { replace: true });
+    toast('お席のセッションを終了しました。通常のテイクアウト画面を表示します。', { icon: '👋' });
+  };
+
+  // Secure dynamic QR validation effect
   useEffect(() => {
-    if (queryTable || queryFulfillment.toUpperCase() === 'DINE_IN' || isDineIn) {
-      try {
-        sessionStorage.setItem('adarsha_table_session', JSON.stringify({
-          table: queryTable || tableNumber,
-          storeId: queryStoreId || selectedStoreId,
-          fulfillment: 'DINE_IN',
-        }));
-      } catch {}
+    if (queryQr || queryTable) {
+      setIsValidatingQr(true);
+      validateQrCodeApi({
+        qrCode: queryQr || undefined,
+        storeId: queryStore || undefined,
+        tableNumber: queryTable || undefined,
+      }).then(session => {
+        if (session && session.valid) {
+          setQrSession(session);
+          setTableNumber(session.tableNumber);
+          if (session.storeId) {
+            setSelectedStoreId(session.storeId);
+            saveOrderStoreId(session.storeId);
+          }
+          setFulfillment('DINE_IN');
+          toast.success(`🍽️ 【${session.restaurantName || 'Adarsha'}】テーブル ${session.tableNumber} へようこそ！`, {
+            id: 'qr-welcome',
+            duration: 3500,
+          });
+        } else {
+          clearQrSession();
+          setQrSession(null);
+          setTableNumber('');
+          setFulfillment('PICKUP');
+          toast.error('無効または期限切れのお席QRコードです。通常のテイクアウト注文をご利用いただけます。', {
+            id: 'qr-invalid',
+            duration: 5000,
+          });
+          setSearchParams(p => {
+            p.delete('qr');
+            p.delete('table');
+            p.delete('store');
+            p.set('fulfillment', 'PICKUP');
+            return p;
+          }, { replace: true });
+        }
+      }).catch(() => {
+        clearQrSession();
+        setQrSession(null);
+        setTableNumber('');
+        setFulfillment('PICKUP');
+      }).finally(() => {
+        setIsValidatingQr(false);
+      });
+    } else {
+      // Normal website access or restored session
+      const stored = getStoredQrSession();
+      if (stored && stored.valid) {
+        setQrSession(stored);
+        setTableNumber(stored.tableNumber);
+        if (stored.storeId) {
+          setSelectedStoreId(stored.storeId);
+        }
+      } else {
+        setQrSession(null);
+        setTableNumber('');
+        if (fulfillment === 'DINE_IN') {
+          setFulfillment('PICKUP');
+        }
+      }
     }
-  }, [queryTable, queryFulfillment, isDineIn, queryStoreId, selectedStoreId, tableNumber]);
+  }, [queryQr, queryTable, queryStore]);
 
   // Fetch dynamic store locations & menu items
   useEffect(() => {
@@ -727,6 +787,7 @@ export default function Order() {
           storeAddress: selectedStore.address,
           storePhone: selectedStore.phone,
           store: storeSnapshot,
+          qrSessionToken: qrSession?.sessionToken,
           ...(isDelivery ? { deliveryAddress: address } : {}),
         }),
       });
@@ -767,21 +828,34 @@ export default function Order() {
   const phoneLink = activePhone ? <a href={`tel:${activePhone}`} style={{ color: 'var(--spice)', fontWeight: 'bold' }}>{activePhone}</a> : null;
   const subtotal = lines.reduce((sum, line) => sum + line.price * line.quantity, 0);
 
-  if (!placed) {
+  if (isValidatingQr) {
+    return (
+      <main style={{ minHeight: '80vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+        <div style={{ width: 44, height: 44, border: '4px solid #fed7aa', borderTopColor: '#ea580c', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <p style={{ fontWeight: 700, color: '#431407', fontSize: '1rem', margin: 0 }}>お席のQRコードを確認しています...</p>
+      </main>
+    );
+  }
+
+  // ── CONDITIONAL RENDERING: QR DINE-IN PREVIEW UI vs NORMAL WEBSITE ACCESS ──
+  // The QR preview UI (DineInOrderExperience) must ONLY appear when a valid QR-based session exists!
+  if (!placed && isQrActive && fulfillment === 'DINE_IN') {
     return (
       <>
         <DineInOrderExperience
-          initialTableNumber={tableNumber || queryTable || '1'}
+          initialTableNumber={tableNumber || qrSession?.tableNumber || '1'}
           selectedStore={selectedStore}
           stores={stores}
           fulfillment={fulfillment}
+          qrSession={qrSession}
           onSwitchToTakeout={handleSelectTakeout}
           onSwitchToDineIn={handleSelectDineIn}
           onOpenChoiceModal={() => setShowQrChoice(true)}
+          onExitTable={handleExitTable}
         />
         <QrFulfillmentChoiceModal
           open={showQrChoice}
-          tableNumber={effectiveTable || tableNumber || '1'}
+          tableNumber={tableNumber || qrSession?.tableNumber || '1'}
           store={selectedStore}
           onSelectDineIn={handleSelectDineIn}
           onSelectTakeout={handleSelectTakeout}
@@ -805,7 +879,7 @@ export default function Order() {
           </div>
 
           {/* ── QR SWITCHER BANNER (When customer arrived via table QR but is viewing takeout) ── */}
-          {effectiveTable && !isDineIn && !placed && (
+          {isQrActive && !isDineIn && !placed && (
             <section
               style={{
                 ...cardStyle,
@@ -872,7 +946,7 @@ export default function Order() {
           )}
 
           {/* ── TABLE ORDER HEADER (When scanning table QR or ordering dine-in) ── */}
-          {!placed && isDineIn && (
+          {!placed && isQrActive && isDineIn && (
             <section
               style={{
                 ...cardStyle,
@@ -1612,16 +1686,16 @@ export default function Order() {
                           )}
                         </div>
                         <StepIndicator />
-                        {(slotsData.pickup.enabled || slotsData.delivery.enabled || slotsData.dineIn?.enabled) && (
+                        {(slotsData.pickup.enabled || slotsData.delivery.enabled || (isQrActive && slotsData.dineIn?.enabled)) && (
                           <FulfillmentPicker
                             value={fulfillment}
                             onChange={chooseFulfillment}
                             pickupEnabled={slotsData.pickup.enabled}
                             delivery={slotsData.delivery}
-                            dineIn={slotsData.dineIn}
+                            dineIn={isQrActive ? slotsData.dineIn : { enabled: false }}
                           />
                         )}
-                        {isDineIn && (
+                        {isQrActive && isDineIn && (
                           <FieldBox id="tableNumber" label="ご利用テーブル番号 / お席" required={slotsData.dineIn?.requireTableNumber !== false} error={errors.tableNumber}>
                             <input
                               id="order-tableNumber"
@@ -1733,7 +1807,7 @@ export default function Order() {
         </div>
       </div>
       <QrFulfillmentChoiceModal
-        open={showQrChoice}
+        open={isQrActive && showQrChoice}
         tableNumber={effectiveTable || tableNumber || '1'}
         store={selectedStore}
         onSelectDineIn={handleSelectDineIn}
