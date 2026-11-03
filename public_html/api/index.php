@@ -2498,9 +2498,11 @@ if ($method === 'GET' && ($subPath === '/carousels' || $subPath === '/carousels/
             if (($s['placement'] ?? 'HOME') === 'CONTACT') {
                 $s['imageUrl'] = '/uploads/1792268012355-415729a8b06aa65e.webp';
             } elseif ((int)($s['sortOrder'] ?? 0) === 0) {
-                $s['imageUrl'] = '/uploads/1792484379649-8d372e4a42c3ddf9.jpg';
+                $s['imageUrl'] = '/uploads/1793707743-0d3ca7b4cb55a2c2.webp';
+            } elseif ((int)($s['sortOrder'] ?? 0) === 1) {
+                $s['imageUrl'] = '/uploads/1793707859-11e753d772ddb0d5.webp';
             } else {
-                $s['imageUrl'] = '/uploads/1792268554871-2f79adbc5cc35dfe.webp';
+                $s['imageUrl'] = '/uploads/1793707977-52b4ff533e02d77d.webp';
             }
         }
         return $s;

@@ -9,7 +9,9 @@ import EmphasisText from '../components/EmphasisText';
 import { DEFAULT_STORE_LOCATIONS, saveOrderStoreId, type StoreLocation } from '../lib/stores';
 
 const DEFAULT_HERO_IMAGES = [
-  "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1920&q=80",
+  '/uploads/1793707743-0d3ca7b4cb55a2c2.webp',
+  '/uploads/1793707859-11e753d772ddb0d5.webp',
+  '/uploads/1793707977-52b4ff533e02d77d.webp',
 ];
 
 const UNSPLASH_WIDTHS = [640, 1080, 1920];
@@ -28,8 +30,8 @@ export default function Home() {
   const [newsletterEmail, setNewsletterEmail] = useState('');
   const [submittingNewsletter, setSubmittingNewsletter] = useState(false);
   const [menuSlideIndex, setMenuSlideIndex] = useState(0);
-  // Only slides that have been shown (plus the next one) are mounted, so hidden hero images don't compete with the first one.
-  const [loadedSlides, setLoadedSlides] = useState(1);
+  const [isPaused, setIsPaused] = useState(false);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const [stores, setStores] = useState<StoreLocation[]>(DEFAULT_STORE_LOCATIONS);
   const [selectedStoreId, setSelectedStoreId] = useState<string>('musashisakai');
   const selectedStore = stores.find(s => s.id === selectedStoreId) || stores[0] || DEFAULT_STORE_LOCATIONS[0];
@@ -139,16 +141,12 @@ export default function Home() {
   }, [regularItems.length]);
 
   useEffect(() => {
-    setLoadedSlides(prev => Math.max(prev, Math.min(currentSlide + 2, heroImages.length)));
-  }, [currentSlide, heroImages.length]);
-
-  useEffect(() => {
-    if (heroImages.length <= 1 || prefersReducedMotion()) return;
+    if (heroImages.length <= 1 || prefersReducedMotion() || isPaused) return;
     const timer = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % heroImages.length);
     }, 5000);
     return () => clearInterval(timer);
-  }, [heroImages.length]);
+  }, [heroImages.length, isPaused]);
 
   return (
     <main>
@@ -165,20 +163,49 @@ export default function Home() {
       <meta name="twitter:description" content="埼玉・熊谷の本格インド料理店アダルサ。ランチ、テイクアウト、グランドメニューをご案内します。" />
       <meta name="twitter:image" content="https://pnglike.com/bg-hero-img.webp" />
       {/* Hero Slider */}
-      <div className="home-hero">
-        {heroImages.slice(0, loadedSlides).map((img, index) => (
+      <div 
+        className="home-hero"
+        onMouseEnter={() => setIsPaused(true)}
+        onMouseLeave={() => setIsPaused(false)}
+        onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
+        onTouchEnd={(e) => {
+          if (touchStartX === null) return;
+          const diff = touchStartX - e.changedTouches[0].clientX;
+          if (Math.abs(diff) > 40) {
+            if (diff > 0) {
+              setCurrentSlide((prev) => (prev + 1) % heroImages.length);
+            } else {
+              setCurrentSlide((prev) => (prev - 1 + heroImages.length) % heroImages.length);
+            }
+          }
+          setTouchStartX(null);
+        }}
+      >
+        {heroImages.map((img, index) => (
           <img 
             key={index}
             src={img} 
             srcSet={responsiveSrcSet(img)}
             sizes="100vw"
-            alt=""
+            alt={carousels[index]?.altJa || carousels[index]?.titleJa || 'Adarsha インド料理'}
             fetchPriority={index === 0 ? 'high' : 'low'}
             decoding="async" 
             className="slide-bg-img" 
+            onError={(e) => {
+              const target = e.currentTarget;
+              if (target.src.includes('1793707743') || target.src.includes('0d3ca7b4cb55a2c2')) {
+                target.src = '/uploads/1791677310137-913474746.png';
+              } else if (target.src.includes('1793707859') || target.src.includes('11e753d772ddb0d5')) {
+                target.src = '/uploads/1791677360469-260447463.png';
+              } else if (target.src.includes('1793707977') || target.src.includes('52b4ff533e02d77d')) {
+                target.src = '/uploads/1791677400636-307273037.png';
+              } else if (!target.src.endsWith('/bg-hero-img.webp')) {
+                target.src = '/bg-hero-img.webp';
+              }
+            }}
             style={{ 
-              opacity: currentSlide === index ? 0.6 : 0, 
-              transition: 'opacity 1s ease-in-out',
+              opacity: currentSlide === index ? 1 : 0, 
+              transition: 'opacity 0.8s ease-in-out',
               position: 'absolute',
               top: 0,
               left: 0,
@@ -188,19 +215,42 @@ export default function Home() {
             }} 
           />
         ))}
+
+        {/* Subtle vignette scrim to guarantee text legibility while letting banner colors shine */}
+        <div 
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'linear-gradient(180deg, rgba(20,14,10,0.2) 0%, rgba(20,14,10,0.35) 50%, rgba(20,14,10,0.68) 100%)',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        />
         
         {/* Member offers (Admin → Stamps, Offers & Points): a bouncing gift on the banner */}
         <OfferSticker />
 
-        <div className="hero-content">
-          <div className="hero-tag">{settings.heroTagJa || '埼玉・熊谷で味わう、本場のインド料理'}</div>
-          <h1 className="hero-title">{carousels[currentSlide]?.titleJa || 'インドの香りを、そのままに'}</h1>
-          <p className="hero-sub" style={{ whiteSpace: 'pre-line' }}>{settings.heroSubJa || <>愛とスパイス、そして伝統に彩られた数世紀にわたるレシピを。<br/>Adarsha Indian Cuisineで皆様をお待ちしております。</>}</p>
+        <div className="hero-content" style={{ zIndex: 10 }}>
+          <div className="hero-tag" style={{ textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}>
+            {settings.heroTagJa || '埼玉・熊谷で味わう、本場のインド料理'}
+          </div>
+          <h1 className="hero-title" style={{ textShadow: '0 3px 12px rgba(0,0,0,0.85)' }}>
+            {carousels[currentSlide]?.titleJa || 'インドの香りを、そのままに'}
+          </h1>
+          <p className="hero-sub" style={{ whiteSpace: 'pre-line', textShadow: '0 2px 8px rgba(0,0,0,0.75)' }}>
+            {settings.heroSubJa || <>愛とスパイス、そして伝統に彩られた数世紀にわたるレシピを。<br/>Adarsha Indian Cuisineで皆様をお待ちしております。</>}
+          </p>
           <div className="hero-btns">
             <Link to="/menu/lunch" style={{ textDecoration: 'none' }}>
-              <button className="btn-warm">ランチメニューを見る</button>
+              <button className="btn-warm" style={{ boxShadow: '0 4px 14px rgba(0,0,0,0.3)' }}>ランチメニューを見る</button>
             </Link>
-            <button className="btn-outline-warm" onClick={() => document.getElementById('locations')?.scrollIntoView({ behavior: 'smooth' })}>店舗案内</button>
+            <button 
+              className="btn-outline-warm" 
+              onClick={() => document.getElementById('locations')?.scrollIntoView({ behavior: 'smooth' })}
+              style={{ backdropFilter: 'blur(4px)', background: 'rgba(255,255,255,0.1)' }}
+            >
+              店舗案内
+            </button>
           </div>
         </div>
         
@@ -213,26 +263,26 @@ export default function Home() {
               aria-label="Previous slide"
               style={{
                 position: 'absolute',
-                left: '20px',
+                left: '16px',
                 top: '50%',
                 transform: 'translateY(-50%)',
                 zIndex: 20,
-                width: '44px',
-                height: '44px',
+                width: '46px',
+                height: '46px',
                 borderRadius: '50%',
-                background: 'rgba(0, 0, 0, 0.35)',
+                background: 'rgba(0, 0, 0, 0.45)',
                 color: '#fff',
-                border: '1px solid rgba(255, 255, 255, 0.3)',
+                border: '1px solid rgba(255, 255, 255, 0.4)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
-                backdropFilter: 'blur(4px)',
+                backdropFilter: 'blur(6px)',
                 transition: 'all 0.2s',
-                fontSize: '18px',
+                fontSize: '20px',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0, 0, 0, 0.65)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0, 0, 0, 0.35)')}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0, 0, 0, 0.75)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0, 0, 0, 0.45)')}
             >
               ❮
             </button>
@@ -242,42 +292,48 @@ export default function Home() {
               aria-label="Next slide"
               style={{
                 position: 'absolute',
-                right: '20px',
+                right: '16px',
                 top: '50%',
                 transform: 'translateY(-50%)',
                 zIndex: 20,
-                width: '44px',
-                height: '44px',
+                width: '46px',
+                height: '46px',
                 borderRadius: '50%',
-                background: 'rgba(0, 0, 0, 0.35)',
+                background: 'rgba(0, 0, 0, 0.45)',
                 color: '#fff',
-                border: '1px solid rgba(255, 255, 255, 0.3)',
+                border: '1px solid rgba(255, 255, 255, 0.4)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
-                backdropFilter: 'blur(4px)',
+                backdropFilter: 'blur(6px)',
                 transition: 'all 0.2s',
-                fontSize: '18px',
+                fontSize: '20px',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0, 0, 0, 0.65)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0, 0, 0, 0.35)')}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0, 0, 0, 0.75)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0, 0, 0, 0.45)')}
             >
               ❯
             </button>
           </>
         )}
 
-        {/* Slider Indicators */}
-        <div style={{ position: 'absolute', bottom: '30px', display: 'flex', gap: '10px', zIndex: 20 }}>
+        {/* Slider Indicators (Active Pill Style) */}
+        <div style={{ position: 'absolute', bottom: '24px', display: 'flex', gap: '8px', zIndex: 20, alignItems: 'center' }}>
           {heroImages.map((_, idx) => (
             <button 
               key={idx}
               onClick={() => setCurrentSlide(idx)}
               style={{
-                width: '12px', height: '12px', borderRadius: '50%', border: 'none', cursor: 'pointer',
-                backgroundColor: currentSlide === idx ? 'var(--gold)' : 'rgba(255,255,255,0.5)',
-                transition: 'background-color 0.3s'
+                width: currentSlide === idx ? '28px' : '10px',
+                height: '10px',
+                borderRadius: '9999px',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: currentSlide === idx ? 'var(--gold, #d97706)' : 'rgba(255,255,255,0.55)',
+                transition: 'all 0.3s ease',
+                padding: 0,
+                boxShadow: currentSlide === idx ? '0 2px 8px rgba(217, 119, 6, 0.6)' : 'none',
               }}
               aria-label={`Go to slide ${idx + 1}`}
             />
