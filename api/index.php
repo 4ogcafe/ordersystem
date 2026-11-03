@@ -3725,12 +3725,376 @@ if ($method === 'POST' && ($subPath === '/orders/kitchen/pause' || $subPath === 
 }
 
 // -------------------------------------------------------------
-// Endpoint: GET /offers
+// Helper: Serialize offer for JSON response
+// -------------------------------------------------------------
+function serializeOfferItem(array $offer, int $uses = 0): array {
+    $startsAt = null;
+    if (!empty($offer['startsAt'])) {
+        try {
+            $startsAt = (new DateTime($offer['startsAt']))->format('c');
+        } catch (Throwable $e) {
+            $startsAt = (string)$offer['startsAt'];
+        }
+    }
+    $endsAt = null;
+    if (!empty($offer['endsAt'])) {
+        try {
+            $endsAt = (new DateTime($offer['endsAt']))->format('c');
+        } catch (Throwable $e) {
+            $endsAt = (string)$offer['endsAt'];
+        }
+    }
+    $createdAt = null;
+    if (!empty($offer['createdAt'])) {
+        try {
+            $createdAt = (new DateTime($offer['createdAt']))->format('c');
+        } catch (Throwable $e) {
+            $createdAt = (string)$offer['createdAt'];
+        }
+    }
+    $updatedAt = null;
+    if (!empty($offer['updatedAt'])) {
+        try {
+            $updatedAt = (new DateTime($offer['updatedAt']))->format('c');
+        } catch (Throwable $e) {
+            $updatedAt = (string)$offer['updatedAt'];
+        }
+    }
+
+    return [
+        'id' => (string)$offer['id'],
+        'titleJa' => (string)($offer['titleJa'] ?? ''),
+        'descriptionJa' => (string)($offer['descriptionJa'] ?? ''),
+        'imageUrl' => (string)($offer['imageUrl'] ?? ''),
+        'discountType' => (string)$offer['discountType'],
+        'discountValue' => (int)$offer['discountValue'],
+        'minSubtotal' => (int)($offer['minSubtotal'] ?? 0),
+        'startsAt' => $startsAt,
+        'endsAt' => $endsAt,
+        'oncePerCustomer' => !empty($offer['oncePerCustomer']),
+        'isActive' => !empty($offer['isActive']),
+        'createdAt' => $createdAt,
+        'updatedAt' => $updatedAt,
+        'uses' => $uses,
+    ];
+}
+
+// -------------------------------------------------------------
+// Endpoint: GET /offers/all (Admin list with usage count)
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/offers/all' || $subPath === '/offers/all/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $stmt = $pdo->query('SELECT * FROM Offer ORDER BY createdAt DESC');
+    $offers = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+
+    $uses = [];
+    try {
+        $ordersStmt = $pdo->query("SELECT offer FROM PickupOrder WHERE status != 'CANCELLED' AND offer IS NOT NULL");
+        while ($row = $ordersStmt->fetch(PDO::FETCH_ASSOC)) {
+            $raw = $row['offer'];
+            $offerData = is_string($raw) ? json_decode($raw, true) : $raw;
+            if (!empty($offerData['id'])) {
+                $ids = array_map('trim', explode(',', (string)$offerData['id']));
+                foreach ($ids as $oid) {
+                    if ($oid !== '') {
+                        $uses[$oid] = ($uses[$oid] ?? 0) + 1;
+                    }
+                }
+            }
+        }
+    } catch (Throwable $e) {}
+
+    $result = array_map(function ($o) use ($uses) {
+        return serializeOfferItem($o, (int)($uses[$o['id']] ?? 0));
+    }, $offers);
+
+    header('Cache-Control: no-store');
+    echo json_encode($result);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: GET /offers (Public live offers)
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/offers' || $subPath === '/offers/')) {
     $stmt = $pdo->query('SELECT * FROM Offer WHERE isActive = 1 ORDER BY createdAt DESC');
-    $offers = $stmt->fetchAll();
-    echo json_encode($offers);
+    $offers = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+    $now = new DateTime();
+    $liveOffers = [];
+
+    foreach ($offers as $offer) {
+        if (!empty($offer['startsAt'])) {
+            try {
+                if (new DateTime($offer['startsAt']) > $now) continue;
+            } catch (Throwable $e) {}
+        }
+        if (!empty($offer['endsAt'])) {
+            try {
+                if (new DateTime($offer['endsAt']) < $now) continue;
+            } catch (Throwable $e) {}
+        }
+        $liveOffers[] = [
+            'id' => (string)$offer['id'],
+            'titleJa' => (string)($offer['titleJa'] ?? ''),
+            'descriptionJa' => (string)($offer['descriptionJa'] ?? ''),
+            'imageUrl' => (string)($offer['imageUrl'] ?? ''),
+            'discountType' => (string)$offer['discountType'],
+            'discountValue' => (int)$offer['discountValue'],
+            'minSubtotal' => (int)($offer['minSubtotal'] ?? 0),
+            'endsAt' => !empty($offer['endsAt']) ? (new DateTime($offer['endsAt']))->format('c') : null,
+        ];
+    }
+
+    header('Cache-Control: public, max-age=60');
+    echo json_encode($liveOffers);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: POST /offers (Admin create offer)
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/offers' || $subPath === '/offers/')) {
+    $admin = requireAdminUser($jwtSecret, $pdo);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+
+    $titleJa = trim((string)($input['titleJa'] ?? ''));
+    if ($titleJa === '') {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '特典タイトルを入力してください。']]);
+        exit;
+    }
+
+    $discountType = strtoupper(trim((string)($input['discountType'] ?? 'AMOUNT')));
+    if ($discountType !== 'PERCENT' && $discountType !== 'AMOUNT') {
+        $discountType = 'AMOUNT';
+    }
+
+    $discountValue = max(1, (int)($input['discountValue'] ?? 0));
+    if ($discountType === 'PERCENT' && $discountValue > 100) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '割引率は100%以下で入力してください。']]);
+        exit;
+    }
+
+    $minSubtotal = max(0, (int)($input['minSubtotal'] ?? 0));
+
+    $startsAt = null;
+    if (!empty($input['startsAt'])) {
+        try {
+            $dt = new DateTime($input['startsAt']);
+            $startsAt = $dt->format('Y-m-d H:i:s');
+        } catch (Throwable $e) {}
+    }
+
+    $endsAt = null;
+    if (!empty($input['endsAt'])) {
+        try {
+            $dt = new DateTime($input['endsAt']);
+            $endsAt = $dt->format('Y-m-d H:i:s');
+        } catch (Throwable $e) {}
+    }
+
+    if ($startsAt && $endsAt && $startsAt >= $endsAt) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '終了日時は開始日時より後に設定してください。']]);
+        exit;
+    }
+
+    $descriptionJa = isset($input['descriptionJa']) && trim((string)$input['descriptionJa']) !== ''
+        ? trim((string)$input['descriptionJa'])
+        : null;
+
+    $imageUrl = isset($input['imageUrl']) && trim((string)$input['imageUrl']) !== ''
+        ? trim((string)$input['imageUrl'])
+        : null;
+
+    $oncePerCustomer = !empty($input['oncePerCustomer']) ? 1 : 0;
+    $isActive = isset($input['isActive']) ? (!empty($input['isActive']) ? 1 : 0) : 1;
+
+    $id = generateUuidV4();
+    $ins = $pdo->prepare('INSERT INTO Offer (id, titleJa, descriptionJa, imageUrl, discountType, discountValue, minSubtotal, startsAt, endsAt, oncePerCustomer, isActive, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))');
+    $ins->execute([
+        $id,
+        $titleJa,
+        $descriptionJa,
+        $imageUrl,
+        $discountType,
+        $discountValue,
+        $minSubtotal,
+        $startsAt,
+        $endsAt,
+        $oncePerCustomer,
+        $isActive
+    ]);
+
+    $fetch = $pdo->prepare('SELECT * FROM Offer WHERE id = ?');
+    $fetch->execute([$id]);
+    $newOffer = $fetch->fetch(PDO::FETCH_ASSOC);
+
+    http_response_code(201);
+    echo json_encode(serializeOfferItem($newOffer ?: [
+        'id' => $id,
+        'titleJa' => $titleJa,
+        'descriptionJa' => $descriptionJa,
+        'imageUrl' => $imageUrl,
+        'discountType' => $discountType,
+        'discountValue' => $discountValue,
+        'minSubtotal' => $minSubtotal,
+        'startsAt' => $startsAt,
+        'endsAt' => $endsAt,
+        'oncePerCustomer' => $oncePerCustomer,
+        'isActive' => $isActive,
+        'createdAt' => date('c'),
+        'updatedAt' => date('c'),
+    ]));
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: PATCH /offers/:id/toggle (Admin toggle active status)
+// -------------------------------------------------------------
+if ($method === 'PATCH' && preg_match('#^/offers/([a-zA-Z0-9_-]+)/toggle/?$#', $subPath, $toggleMatches)) {
+    requireAdminUser($jwtSecret, $pdo);
+    $offerId = $toggleMatches[1];
+
+    $stmt = $pdo->prepare('SELECT * FROM Offer WHERE id = ?');
+    $stmt->execute([$offerId]);
+    $current = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$current) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => '特典が見つかりませんでした。']]);
+        exit;
+    }
+
+    $nextActive = !empty($current['isActive']) ? 0 : 1;
+    $upd = $pdo->prepare('UPDATE Offer SET isActive = ?, updatedAt = NOW(3) WHERE id = ?');
+    $upd->execute([$nextActive, $offerId]);
+
+    echo json_encode(['success' => true, 'isActive' => (bool)$nextActive]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: PUT /offers/:id (Admin update offer)
+// -------------------------------------------------------------
+if ($method === 'PUT' && preg_match('#^/offers/([a-zA-Z0-9_-]+)/?$#', $subPath, $putMatches)) {
+    requireAdminUser($jwtSecret, $pdo);
+    $offerId = $putMatches[1];
+
+    $stmt = $pdo->prepare('SELECT * FROM Offer WHERE id = ?');
+    $stmt->execute([$offerId]);
+    $current = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$current) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => '特典が見つかりませんでした。']]);
+        exit;
+    }
+
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+
+    $titleJa = trim((string)($input['titleJa'] ?? $current['titleJa']));
+    if ($titleJa === '') {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '特典タイトルを入力してください。']]);
+        exit;
+    }
+
+    $discountType = strtoupper(trim((string)($input['discountType'] ?? $current['discountType'])));
+    if ($discountType !== 'PERCENT' && $discountType !== 'AMOUNT') {
+        $discountType = 'AMOUNT';
+    }
+
+    $discountValue = max(1, (int)($input['discountValue'] ?? $current['discountValue']));
+    if ($discountType === 'PERCENT' && $discountValue > 100) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '割引率は100%以下で入力してください。']]);
+        exit;
+    }
+
+    $minSubtotal = max(0, (int)($input['minSubtotal'] ?? $current['minSubtotal']));
+
+    $startsAt = null;
+    if (array_key_exists('startsAt', $input)) {
+        if (!empty($input['startsAt'])) {
+            try {
+                $startsAt = (new DateTime($input['startsAt']))->format('Y-m-d H:i:s');
+            } catch (Throwable $e) {}
+        }
+    } else {
+        $startsAt = $current['startsAt'];
+    }
+
+    $endsAt = null;
+    if (array_key_exists('endsAt', $input)) {
+        if (!empty($input['endsAt'])) {
+            try {
+                $endsAt = (new DateTime($input['endsAt']))->format('Y-m-d H:i:s');
+            } catch (Throwable $e) {}
+        }
+    } else {
+        $endsAt = $current['endsAt'];
+    }
+
+    if ($startsAt && $endsAt && $startsAt >= $endsAt) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '終了日時は開始日時より後に設定してください。']]);
+        exit;
+    }
+
+    $descriptionJa = array_key_exists('descriptionJa', $input)
+        ? (trim((string)$input['descriptionJa']) !== '' ? trim((string)$input['descriptionJa']) : null)
+        : $current['descriptionJa'];
+
+    $imageUrl = array_key_exists('imageUrl', $input)
+        ? (trim((string)$input['imageUrl']) !== '' ? trim((string)$input['imageUrl']) : null)
+        : $current['imageUrl'];
+
+    $oncePerCustomer = array_key_exists('oncePerCustomer', $input)
+        ? (!empty($input['oncePerCustomer']) ? 1 : 0)
+        : (!empty($current['oncePerCustomer']) ? 1 : 0);
+
+    $isActive = array_key_exists('isActive', $input)
+        ? (!empty($input['isActive']) ? 1 : 0)
+        : (!empty($current['isActive']) ? 1 : 0);
+
+    $upd = $pdo->prepare('UPDATE Offer SET titleJa = ?, descriptionJa = ?, imageUrl = ?, discountType = ?, discountValue = ?, minSubtotal = ?, startsAt = ?, endsAt = ?, oncePerCustomer = ?, isActive = ?, updatedAt = NOW(3) WHERE id = ?');
+    $upd->execute([
+        $titleJa,
+        $descriptionJa,
+        $imageUrl,
+        $discountType,
+        $discountValue,
+        $minSubtotal,
+        $startsAt,
+        $endsAt,
+        $oncePerCustomer,
+        $isActive,
+        $offerId
+    ]);
+
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: DELETE /offers/:id (Admin delete offer)
+// -------------------------------------------------------------
+if ($method === 'DELETE' && preg_match('#^/offers/([a-zA-Z0-9_-]+)/?$#', $subPath, $delMatches)) {
+    requireAdminUser($jwtSecret, $pdo);
+    $offerId = $delMatches[1];
+
+    $stmt = $pdo->prepare('SELECT id FROM Offer WHERE id = ?');
+    $stmt->execute([$offerId]);
+    if (!$stmt->fetch()) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => '特典が見つかりませんでした。']]);
+        exit;
+    }
+
+    $del = $pdo->prepare('DELETE FROM Offer WHERE id = ?');
+    $del->execute([$offerId]);
+
+    echo json_encode(['success' => true]);
     exit;
 }
 
