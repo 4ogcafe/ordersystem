@@ -1180,10 +1180,11 @@ function runDatabaseMigrations(PDO $pdo): array {
     // Restore CarouselSlide, Settings, and MenuItem images in isolated try/catch blocks
     try {
         // Restore CarouselSlide images to verified Adarsha tri-color promotional banners
-        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1793707743-0d3ca7b4cb55a2c2.webp' WHERE `placement` = 'HOME' AND `sortOrder` = 0");
-        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1793707859-11e753d772ddb0d5.webp' WHERE `placement` = 'HOME' AND `sortOrder` = 1");
-        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1793707977-52b4ff533e02d77d.webp' WHERE `placement` = 'HOME' AND `sortOrder` >= 2");
+        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/hero-slide-1-special-set-v2.webp' WHERE `placement` = 'HOME' AND `sortOrder` = 0");
+        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/hero-slide-2-garlic-naan-v2.webp' WHERE `placement` = 'HOME' AND `sortOrder` = 1");
+        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/hero-slide-3-green-salad-v2.webp' WHERE `placement` = 'HOME' AND `sortOrder` >= 2");
         $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1792268012355-415729a8b06aa65e.webp' WHERE `placement` = 'CONTACT'");
+        $pdo->exec("UPDATE `Settings` SET `heroSubJa` = REPLACE(`heroSubJa`, 'Kalpna Indian Cuisine', 'Adarsha Indian Cuisine') WHERE `heroSubJa` LIKE '%Kalpna%'");
         $pdo->exec("UPDATE `BlogPost` SET `coverImage` = '/uploads/1792268627977-04a9cb4d784139f9.jpg' WHERE `coverImage` LIKE '%1517248135467%' OR `coverImage` LIKE '%bg-hero-img%'");
     } catch (Exception $e) {}
 
@@ -2494,12 +2495,12 @@ if ($method === 'GET' && ($subPath === '/carousels' || $subPath === '/carousels/
         $img = (string)($s['imageUrl'] ?? '');
         if (($s['placement'] ?? 'HOME') === 'CONTACT') {
             $s['imageUrl'] = '/uploads/1792268012355-415729a8b06aa65e.webp';
-        } elseif (strpos($img, '1793707743') !== false || (int)($s['sortOrder'] ?? 0) === 0) {
-            $s['imageUrl'] = '/uploads/1791677310137-913474746.png';
-        } elseif (strpos($img, '1793707859') !== false || (int)($s['sortOrder'] ?? 0) === 1) {
-            $s['imageUrl'] = '/uploads/1791677360469-260447463.png';
+        } elseif (strpos($img, 'hero-slide-1') !== false || strpos($img, '1793707743') !== false || strpos($img, '1791677310137') !== false || (int)($s['sortOrder'] ?? 0) === 0) {
+            $s['imageUrl'] = '/uploads/hero-slide-1-special-set-v2.webp';
+        } elseif (strpos($img, 'hero-slide-2') !== false || strpos($img, '1793707859') !== false || strpos($img, '1791677360469') !== false || (int)($s['sortOrder'] ?? 0) === 1) {
+            $s['imageUrl'] = '/uploads/hero-slide-2-garlic-naan-v2.webp';
         } else {
-            $s['imageUrl'] = '/uploads/1791677400636-307273037.png';
+            $s['imageUrl'] = '/uploads/hero-slide-3-green-salad-v2.webp';
         }
         return $s;
     }, $slides);

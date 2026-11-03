@@ -9,9 +9,9 @@ import EmphasisText from '../components/EmphasisText';
 import { DEFAULT_STORE_LOCATIONS, saveOrderStoreId, type StoreLocation } from '../lib/stores';
 
 const DEFAULT_HERO_IMAGES = [
-  '/uploads/1791677310137-913474746.png',
-  '/uploads/1791677360469-260447463.png',
-  '/uploads/1791677400636-307273037.png',
+  '/uploads/hero-slide-1-special-set-v2.webp',
+  '/uploads/hero-slide-2-garlic-naan-v2.webp',
+  '/uploads/hero-slide-3-green-salad-v2.webp',
 ];
 
 const UNSPLASH_WIDTHS = [640, 1080, 1920];
@@ -193,14 +193,12 @@ export default function Home() {
             className="slide-bg-img" 
             onError={(e) => {
               const target = e.currentTarget;
-              if (target.src.includes('1793707743') || target.src.includes('0d3ca7b4cb55a2c2')) {
-                target.src = '/uploads/1791677310137-913474746.png';
-              } else if (target.src.includes('1793707859') || target.src.includes('11e753d772ddb0d5')) {
-                target.src = '/uploads/1791677360469-260447463.png';
-              } else if (target.src.includes('1793707977') || target.src.includes('52b4ff533e02d77d')) {
-                target.src = '/uploads/1791677400636-307273037.png';
-              } else if (!target.src.endsWith('/uploads/1791677310137-913474746.png')) {
-                target.src = '/uploads/1791677310137-913474746.png';
+              if (target.src.includes('hero-slide-2') || target.src.includes('1793707859') || target.src.includes('1791677360469')) {
+                target.src = '/uploads/hero-slide-2-garlic-naan-v2.webp';
+              } else if (target.src.includes('hero-slide-3') || target.src.includes('1793707977') || target.src.includes('1791677400636')) {
+                target.src = '/uploads/hero-slide-3-green-salad-v2.webp';
+              } else if (!target.src.endsWith('/uploads/hero-slide-1-special-set-v2.webp')) {
+                target.src = '/uploads/hero-slide-1-special-set-v2.webp';
               }
             }}
             style={{ 

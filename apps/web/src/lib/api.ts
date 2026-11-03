@@ -33,15 +33,15 @@ export function assetUrl(url: string | null | undefined): string {
     path = path.replace(/^\/?public/, '');
   }
 
-  // 3b. Remap stale / transparent webp carousel files to the authentic high-res promotional banners
-  if (path.includes('1793707743') || path.includes('0d3ca7b4cb55a2c2')) {
-    return `${API_BASE}/uploads/1791677310137-913474746.png`;
+  // 3b. Map carousel slide images to clean versioned banners
+  if (path.includes('hero-slide-1') || path.includes('1793707743') || path.includes('0d3ca7b4cb55a2c2') || path.includes('1791677310137')) {
+    return `${API_BASE}/uploads/hero-slide-1-special-set-v2.webp`;
   }
-  if (path.includes('1793707859') || path.includes('11e753d772ddb0d5')) {
-    return `${API_BASE}/uploads/1791677360469-260447463.png`;
+  if (path.includes('hero-slide-2') || path.includes('1793707859') || path.includes('11e753d772ddb0d5') || path.includes('1791677360469')) {
+    return `${API_BASE}/uploads/hero-slide-2-garlic-naan-v2.webp`;
   }
-  if (path.includes('1793707977') || path.includes('52b4ff533e02d77d')) {
-    return `${API_BASE}/uploads/1791677400636-307273037.png`;
+  if (path.includes('hero-slide-3') || path.includes('1793707977') || path.includes('52b4ff533e02d77d') || path.includes('1791677400636')) {
+    return `${API_BASE}/uploads/hero-slide-3-green-salad-v2.webp`;
   }
 
   // 4. If path starts with /uploads/
