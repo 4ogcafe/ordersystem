@@ -1179,14 +1179,11 @@ function runDatabaseMigrations(PDO $pdo): array {
 
     // Restore CarouselSlide, Settings, and MenuItem images in isolated try/catch blocks
     try {
-        // Restore CarouselSlide images if empty or broken or using removed bg-hero-img or stock interior photo
-        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1792484379649-8d372e4a42c3ddf9.jpg' WHERE `id` = 'a94a4c65-902a-4431-813d-ac205b285cac' AND (`imageUrl` IS NULL OR `imageUrl` = '' OR `imageUrl` LIKE '%bg-hero-img%' OR `imageUrl` LIKE '%1517248135467%')");
-        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1792268554871-2f79adbc5cc35dfe.webp' WHERE `id` = '3d689f0f-63c2-4f7d-9d78-30defb0408b9' AND (`imageUrl` IS NULL OR `imageUrl` = '' OR `imageUrl` LIKE '%bg-hero-img%' OR `imageUrl` LIKE '%1517248135467%')");
-        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1792268012355-415729a8b06aa65e.webp' WHERE `id` = '5bf7701a-6ea0-4e0f-92a1-90dc84bb19fd' AND (`imageUrl` IS NULL OR `imageUrl` = '' OR `imageUrl` LIKE '%bg-hero-img%' OR `imageUrl` LIKE '%1517248135467%')");
-        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1792268627977-04a9cb4d784139f9.jpg' WHERE `id` = '89c95ac1-a093-47a5-98e4-e8514ee55bc5' AND (`imageUrl` IS NULL OR `imageUrl` = '' OR `imageUrl` LIKE '%bg-hero-img%' OR `imageUrl` LIKE '%1517248135467%')");
-        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1792484379649-8d372e4a42c3ddf9.jpg' WHERE `placement` = 'HOME' AND (`imageUrl` IS NULL OR `imageUrl` = '' OR `imageUrl` LIKE '%bg-hero-img%' OR `imageUrl` LIKE '%1517248135467%') AND `sortOrder` <= 1");
-        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1792268554871-2f79adbc5cc35dfe.webp' WHERE `placement` = 'HOME' AND (`imageUrl` IS NULL OR `imageUrl` = '' OR `imageUrl` LIKE '%bg-hero-img%' OR `imageUrl` LIKE '%1517248135467%')");
-        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1792268012355-415729a8b06aa65e.webp' WHERE `placement` = 'CONTACT' AND (`imageUrl` IS NULL OR `imageUrl` = '' OR `imageUrl` LIKE '%bg-hero-img%' OR `imageUrl` LIKE '%1517248135467%')");
+        // Restore CarouselSlide images to verified Adarsha tri-color promotional banners
+        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1793707743-0d3ca7b4cb55a2c2.webp' WHERE `placement` = 'HOME' AND `sortOrder` = 0");
+        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1793707859-11e753d772ddb0d5.webp' WHERE `placement` = 'HOME' AND `sortOrder` = 1");
+        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1793707977-52b4ff533e02d77d.webp' WHERE `placement` = 'HOME' AND `sortOrder` >= 2");
+        $pdo->exec("UPDATE `CarouselSlide` SET `imageUrl` = '/uploads/1792268012355-415729a8b06aa65e.webp' WHERE `placement` = 'CONTACT'");
         $pdo->exec("UPDATE `BlogPost` SET `coverImage` = '/uploads/1792268627977-04a9cb4d784139f9.jpg' WHERE `coverImage` LIKE '%1517248135467%' OR `coverImage` LIKE '%bg-hero-img%'");
     } catch (Exception $e) {}
 

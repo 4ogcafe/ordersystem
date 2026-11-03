@@ -199,8 +199,8 @@ export default function Home() {
                 target.src = '/uploads/1791677360469-260447463.png';
               } else if (target.src.includes('1793707977') || target.src.includes('52b4ff533e02d77d')) {
                 target.src = '/uploads/1791677400636-307273037.png';
-              } else if (!target.src.endsWith('/bg-hero-img.webp')) {
-                target.src = '/bg-hero-img.webp';
+              } else if (!target.src.endsWith('/uploads/1791677310137-913474746.png')) {
+                target.src = '/uploads/1791677310137-913474746.png';
               }
             }}
             style={{ 
