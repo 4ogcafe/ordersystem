@@ -5,12 +5,36 @@ import { useCustomer } from '../lib/customer-context';
 import { setCustomerSession } from '../lib/auth-storage';
 import { offerLabel, toHalfWidth, yen } from '../lib/format';
 import { cardStyle, inputStyle, labelStyle, mutedStyle } from '../components/account/styles';
-import { CheckCircle2, Mail, RefreshCw, ShieldCheck, Info } from 'lucide-react';
+import {
+  CheckCircle2,
+  Mail,
+  RefreshCw,
+  ShieldCheck,
+  Info,
+  Eye,
+  EyeOff,
+  ChevronLeft,
+  Ticket,
+  Coins,
+  Award,
+  History,
+  Zap,
+  Gift,
+  LogIn,
+  UserPlus,
+  Sparkles,
+  HelpCircle,
+  Lock,
+  User,
+  Phone,
+} from 'lucide-react';
 
-interface Benefit {
-  icon: string;
-  text: string;
-  strong?: boolean;
+interface BenefitItem {
+  iconType: 'coupon' | 'bonus' | 'points' | 'stamps' | 'history' | 'speed';
+  title: string;
+  subtitle?: string;
+  badge?: string;
+  highlight?: boolean;
 }
 
 interface PublicSettings {
@@ -24,7 +48,7 @@ interface PublicSettings {
 }
 
 /** The benefits list, built from the live settings and offers (Admin → Stamps, Offers & Points). */
-function useBenefits(): Benefit[] {
+function useBenefits(): BenefitItem[] {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [offers, setOffers] = useState<{ id: string; titleJa: string; discountType: 'PERCENT' | 'AMOUNT'; discountValue: number; minSubtotal: number }[]>([]);
   useEffect(() => {
@@ -32,25 +56,104 @@ function useBenefits(): Benefit[] {
     fetch('/api/v1/offers').then(res => (res.ok ? res.json() : [])).then(setOffers).catch(() => setOffers([]));
   }, []);
 
-  const list: Benefit[] = [];
+  const list: BenefitItem[] = [];
   const bonus = settings?.signupBonusPoints ?? 0;
   const pointsOn = settings?.pointsEnabled !== false;
-  if (pointsOn && bonus > 0) list.push({ icon: '🎉', text: `今なら会員登録で ${bonus.toLocaleString('ja-JP')}pt プレゼント`, strong: true });
-  for (const offer of offers.slice(0, 3)) {
-    list.push({ icon: '🏷️', text: `会員限定：${offer.titleJa}（${offerLabel(offer)}${offer.minSubtotal > 0 ? `・${yen(offer.minSubtotal)}以上` : ''}）`, strong: true });
-  }
-  if (pointsOn) list.push({ icon: '🎁', text: `¥100ごとに${settings?.pointsPer100Yen ?? 1}ptが貯まり、次回のお支払いに使えます` });
-  if (settings?.stampCardEnabled !== false && settings) {
-    const firstReward = [...(settings.stampRewards ?? [])].sort((a, b) => a.at - b.at)[0];
+
+  if (pointsOn && bonus > 0) {
     list.push({
-      icon: '🟥',
-      text: `${yen(settings.stampMinAmount ?? 1000)}以上のご注文でスタンプ1個${firstReward ? `。${firstReward.at}個で「${firstReward.titleJa}」` : ''}`,
+      iconType: 'bonus',
+      title: `新規入会特典：${bonus.toLocaleString('ja-JP')}pt プレゼント`,
+      subtitle: '登録完了後、初回のご注文からすぐにお値引きに使えます',
+      badge: '入会記念',
+      highlight: true,
     });
   }
-  if (offers.length === 0) list.push({ icon: '🏷️', text: '会員限定のお得な特典をご利用いただけます' });
-  list.push({ icon: '🧾', text: '注文履歴から、いつものメニューをワンタップで再注文' });
-  list.push({ icon: '⚡', text: 'お名前・電話番号の入力が不要になり、注文がスムーズに' });
+
+  for (const offer of offers.slice(0, 2)) {
+    list.push({
+      iconType: 'coupon',
+      title: `会員限定：${offer.titleJa}`,
+      subtitle: `${offerLabel(offer)}${offer.minSubtotal > 0 ? `（${yen(offer.minSubtotal)}以上のご注文）` : ''}`,
+      badge: '特別クーポン',
+      highlight: true,
+    });
+  }
+
+  if (pointsOn) {
+    list.push({
+      iconType: 'points',
+      title: `ご利用¥100ごとに${settings?.pointsPer100Yen ?? 1}pt貯まる`,
+      subtitle: '1pt＝1円として、次回テイクアウトや店内飲食で使えます',
+      badge: 'ポイント還元',
+    });
+  }
+
+  if (settings?.stampCardEnabled !== false) {
+    const minAmt = settings?.stampMinAmount ?? 1000;
+    const firstReward = [...(settings?.stampRewards ?? [])].sort((a, b) => a.at - b.at)[0];
+    list.push({
+      iconType: 'stamps',
+      title: `${yen(minAmt)}以上のご注文でスタンプ1個`,
+      subtitle: firstReward ? `${firstReward.at}個達成で「${firstReward.titleJa}」を無料進呈！` : 'スタンプを貯めて豪華無料プレゼントを獲得',
+      badge: 'スタンプカード',
+    });
+  }
+
+  list.push({
+    iconType: 'history',
+    title: '注文履歴からワンタップで再注文',
+    subtitle: 'いつものカレーやナンをお気に入りのカスタマイズで簡単注文',
+  });
+
+  list.push({
+    iconType: 'speed',
+    title: 'お名前・電話番号の入力が不要に',
+    subtitle: '事前WEB注文やテイクアウトが最短数タップで完了します',
+  });
+
   return list;
+}
+
+function BenefitIcon({ type }: { type: BenefitItem['iconType'] }) {
+  switch (type) {
+    case 'bonus':
+      return (
+        <div style={{ width: 36, height: 36, borderRadius: '10px', background: 'linear-gradient(135deg, #f97316, #ea580c)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 6px rgba(234,88,12,0.25)' }}>
+          <Gift size={18} />
+        </div>
+      );
+    case 'coupon':
+      return (
+        <div style={{ width: 36, height: 36, borderRadius: '10px', background: 'linear-gradient(135deg, #b3471c, #9a3412)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 6px rgba(179,71,28,0.25)' }}>
+          <Ticket size={18} />
+        </div>
+      );
+    case 'points':
+      return (
+        <div style={{ width: 36, height: 36, borderRadius: '10px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 6px rgba(217,119,6,0.25)' }}>
+          <Coins size={18} />
+        </div>
+      );
+    case 'stamps':
+      return (
+        <div style={{ width: 36, height: 36, borderRadius: '10px', background: 'linear-gradient(135deg, #ef4444, #dc2626)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 6px rgba(220,38,38,0.25)' }}>
+          <Award size={18} />
+        </div>
+      );
+    case 'history':
+      return (
+        <div style={{ width: 36, height: 36, borderRadius: '10px', background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 6px rgba(37,99,235,0.25)' }}>
+          <History size={18} />
+        </div>
+      );
+    case 'speed':
+      return (
+        <div style={{ width: 36, height: 36, borderRadius: '10px', background: 'linear-gradient(135deg, #10b981, #059669)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 6px rgba(5,150,105,0.25)' }}>
+          <Zap size={18} />
+        </div>
+      );
+  }
 }
 
 /** Only same-site paths are followed after login, so ?next= can't send people to another website. */
@@ -66,6 +169,8 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
   const [step, setStep] = useState<'form' | 'verify'>(mode === 'verify' ? 'verify' : 'form');
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: '' });
   const [rememberMe, setRememberMe] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showForgotHelp, setShowForgotHelp] = useState(false);
   const [verifyingEmail, setVerifyingEmail] = useState<string>(params.get('email') || '');
   const [verificationCode, setVerificationCode] = useState<string>('');
   const [error, setError] = useState('');
@@ -103,7 +208,7 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
         })
         .finally(() => setSubmitting(false));
     }
-  }, [params, next, signIn]);
+  }, [params, next, signIn, rememberMe]);
 
   // Resend cooldown timer
   useEffect(() => {
@@ -232,28 +337,56 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
 
   return (
     <main>
-      <title>{`${step === 'verify' ? 'メール認証' : isRegister ? '会員登録' : 'ログイン'} | Adarsha (アダルサ)`}</title>
+      <title>{`${step === 'verify' ? 'メール認証' : isRegister ? '会員登録' : '会員ログイン'} | Adarsha (アダルサ)`}</title>
       <meta name="robots" content="noindex" />
-      <div className="section" style={{ backgroundColor: 'var(--cream)', paddingTop: '120px', minHeight: '70vh' }}>
-        <div style={{ maxWidth: '960px', margin: '0 auto', padding: '0 16px' }}>
+      <div className="section" style={{ backgroundColor: 'var(--cream)', paddingTop: '96px', paddingBottom: '80px', minHeight: '80vh' }}>
+        <div style={{ maxWidth: '980px', margin: '0 auto', padding: '0 16px' }}>
+          
+          {/* Breadcrumb / Return to Top */}
+          <div style={{ marginBottom: '22px' }}>
+            <Link
+              to="/"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '0.86rem',
+                color: '#8c786a',
+                textDecoration: 'none',
+                fontWeight: 600,
+                transition: 'color 0.15s ease'
+              }}
+              onMouseEnter={e => (e.currentTarget.style.color = '#b3471c')}
+              onMouseLeave={e => (e.currentTarget.style.color = '#8c786a')}
+            >
+              <ChevronLeft size={16} />
+              ホーム（トップページ）へ戻る
+            </Link>
+          </div>
+
           <div className="centered" style={{ marginBottom: '32px' }}>
-            <div className="section-label">MEMBERS</div>
-            <h1 className="section-title">
+            <div className="section-label" style={{ letterSpacing: '2px', color: '#b3471c' }}>ADARSHA MEMBERS CLUB</div>
+            <h1 className="section-title" style={{ marginTop: '4px', marginBottom: '8px' }}>
               {step === 'verify' ? (
                 <>メール<em>認証</em></>
               ) : isRegister ? (
-                <>会員<em>登録</em></>
+                <>新規<em>会員登録</em></>
               ) : (
                 <>会員<em>ログイン</em></>
               )}
             </h1>
-            <div className="divider"></div>
+            <p style={{ margin: 0, color: '#6b7280', fontSize: '0.94rem' }}>
+              {isRegister
+                ? '簡単30秒で登録完了！今すぐ使えるお得なクーポンやポイントを進呈中'
+                : 'ログインしてポイント残高の確認や特別クーポンをご利用ください'}
+            </p>
+            <div className="divider" style={{ marginTop: '16px' }}></div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '24px', alignItems: 'start' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '28px', alignItems: 'start' }}>
             {step === 'verify' ? (
-              <form onSubmit={handleVerifySubmit} style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff7ed', border: '1px solid #fed7aa', padding: '12px 14px', borderRadius: 8 }}>
+              <form onSubmit={handleVerifySubmit} style={{ ...cardStyle, boxShadow: '0 4px 20px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff7ed', border: '1px solid #fed7aa', padding: '12px 14px', borderRadius: 10 }}>
                   <Mail size={24} color="#ea580c" />
                   <div style={{ fontSize: '0.86rem', color: '#7c2d12', lineHeight: 1.5 }}>
                     <strong>確認コードを送信しました</strong>
@@ -300,7 +433,7 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
                   />
                 </label>
 
-                <button type="submit" className="btn-warm" disabled={submitting || verificationCode.length < 6} style={{ opacity: submitting || verificationCode.length < 6 ? 0.7 : 1 }}>
+                <button type="submit" className="btn-warm" disabled={submitting || verificationCode.length < 6} style={{ opacity: submitting || verificationCode.length < 6 ? 0.7 : 1, padding: '14px', fontSize: '1rem', fontWeight: 700 }}>
                   {submitting ? '認証中…' : '認証を完了してログイン'}
                 </button>
 
@@ -322,7 +455,7 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
                       padding: 0,
                     }}
                   >
-                    <RefreshCw size={14} className={resendCooldown > 0 ? '' : ''} />
+                    <RefreshCw size={14} />
                     {resendCooldown > 0 ? `再送信まで（${resendCooldown}秒）` : 'コードを再送信'}
                   </button>
 
@@ -344,81 +477,315 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
                 </div>
               </form>
             ) : (
-              <form onSubmit={handleSubmit} style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <form onSubmit={handleSubmit} style={{ ...cardStyle, boxShadow: '0 4px 20px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                
+                {/* Mode Switcher Tabs */}
+                <div style={{ display: 'flex', background: '#f3efe8', padding: '4px', borderRadius: '12px', gap: '4px', marginBottom: '4px' }}>
+                  <Link
+                    to={`/account/login${params.get('next') ? `?next=${encodeURIComponent(next)}` : ''}`}
+                    style={{
+                      flex: 1,
+                      textAlign: 'center',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      fontSize: '0.92rem',
+                      textDecoration: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      transition: 'all 0.15s ease',
+                      background: !isRegister ? '#ffffff' : 'transparent',
+                      color: !isRegister ? '#b3471c' : '#6b7280',
+                      boxShadow: !isRegister ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
+                    }}
+                  >
+                    <LogIn size={16} /> ログイン
+                  </Link>
+                  <Link
+                    to={`/account/register${params.get('next') ? `?next=${encodeURIComponent(next)}` : ''}`}
+                    style={{
+                      flex: 1,
+                      textAlign: 'center',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      fontSize: '0.92rem',
+                      textDecoration: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      transition: 'all 0.15s ease',
+                      background: isRegister ? '#ffffff' : 'transparent',
+                      color: isRegister ? '#b3471c' : '#6b7280',
+                      boxShadow: isRegister ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
+                    }}
+                  >
+                    <UserPlus size={16} /> 新規登録（無料）
+                  </Link>
+                </div>
+
                 {reason === 'idle_timeout' && (
-                  <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#92400e', backgroundColor: '#fef3c7', border: '1px solid #fde68a', padding: '0.65rem 0.75rem', borderRadius: '6px', fontSize: '0.85rem', lineHeight: 1.4 }}>
+                  <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#92400e', backgroundColor: '#fef3c7', border: '1px solid #fde68a', padding: '0.65rem 0.75rem', borderRadius: '8px', fontSize: '0.85rem', lineHeight: 1.4 }}>
                     <Info size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
                     <div>一定時間操作がなかったため、セキュリティ保護のため安全に自動ログアウトしました。</div>
                   </div>
                 )}
                 {reason === 'session_expired' && (
-                  <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#1e40af', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', padding: '0.65rem 0.75rem', borderRadius: '6px', fontSize: '0.85rem', lineHeight: 1.4 }}>
+                  <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#1e40af', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', padding: '0.65rem 0.75rem', borderRadius: '8px', fontSize: '0.85rem', lineHeight: 1.4 }}>
                     <Info size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
                     <div>セッションが終了しました。再度ログインしてください。</div>
                   </div>
                 )}
-                {isRegister && (
-                  <label style={labelStyle}>
-                    お名前
-                    <input name="name" required maxLength={100} autoComplete="name" value={form.name} onChange={handleChange} style={inputStyle} />
-                  </label>
-                )}
-                <label style={labelStyle}>
-                  メールアドレス
-                  <input name="email" type="email" required maxLength={254} autoComplete="email" value={form.email} onChange={handleChange} style={inputStyle} />
-                </label>
-                {isRegister && (
-                  <label style={labelStyle}>
-                    電話番号（任意・ご注文時に自動入力）
-                    <input name="phone" type="tel" inputMode="tel" pattern="[\d\s\-\+\(\)]{8,20}" autoComplete="tel" placeholder="090-1234-5678" value={form.phone} onChange={handleChange} style={inputStyle} />
-                  </label>
-                )}
-                <label style={labelStyle}>
-                  パスワード{isRegister && '（6文字以上）'}
-                  <input name="password" type="password" required minLength={isRegister ? 6 : 1} maxLength={200} autoComplete={isRegister ? 'new-password' : 'current-password'} value={form.password} onChange={handleChange} style={inputStyle} />
-                </label>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '2px 0' }}>
+                {isRegister && (
+                  <label style={labelStyle}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <User size={15} style={{ color: '#b3471c' }} /> お名前
+                    </span>
+                    <input
+                      name="name"
+                      required
+                      maxLength={100}
+                      autoComplete="name"
+                      placeholder="例：山田 太郎"
+                      value={form.name}
+                      onChange={handleChange}
+                      style={inputStyle}
+                    />
+                  </label>
+                )}
+
+                <label style={labelStyle}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Mail size={15} style={{ color: '#b3471c' }} /> メールアドレス
+                  </span>
                   <input
-                    id="customer-remember"
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={e => setRememberMe(e.target.checked)}
-                    style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--spice)' }}
+                    name="email"
+                    type="email"
+                    required
+                    maxLength={254}
+                    autoComplete="email"
+                    placeholder="example@email.com"
+                    value={form.email}
+                    onChange={handleChange}
+                    style={inputStyle}
                   />
-                  <label htmlFor="customer-remember" style={{ fontSize: '0.85rem', color: '#374151', cursor: 'pointer', userSelect: 'none' }}>
-                    ログイン状態を保持する（次回から自動ログイン）
+                </label>
+
+                {isRegister && (
+                  <label style={labelStyle}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Phone size={15} style={{ color: '#b3471c' }} /> 電話番号（任意・ご注文時に自動反映）
+                    </span>
+                    <input
+                      name="phone"
+                      type="tel"
+                      inputMode="tel"
+                      pattern="[\d\s\-\+\(\)]{8,20}"
+                      autoComplete="tel"
+                      placeholder="090-1234-5678"
+                      value={form.phone}
+                      onChange={handleChange}
+                      style={inputStyle}
+                    />
                   </label>
+                )}
+
+                <label style={labelStyle}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Lock size={15} style={{ color: '#b3471c' }} /> パスワード{isRegister && '（6文字以上）'}
+                    </span>
+                    {!isRegister && (
+                      <button
+                        type="button"
+                        onClick={() => setShowForgotHelp(prev => !prev)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#b3471c',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 3,
+                          padding: 0
+                        }}
+                      >
+                        <HelpCircle size={13} />
+                        パスワードをお忘れですか？
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      name="password"
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      minLength={isRegister ? 6 : 1}
+                      maxLength={200}
+                      autoComplete={isRegister ? 'new-password' : 'current-password'}
+                      placeholder={isRegister ? '半角英数6文字以上' : 'パスワードを入力'}
+                      value={form.password}
+                      onChange={handleChange}
+                      style={{ ...inputStyle, paddingRight: '44px' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(prev => !prev)}
+                      aria-label={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
+                      style={{
+                        position: 'absolute',
+                        right: '12px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: '#9ca3af',
+                        cursor: 'pointer',
+                        padding: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </label>
+
+                {showForgotHelp && (
+                  <div style={{ background: '#fdfbf7', border: '1.5px solid #fed7aa', borderRadius: '10px', padding: '12px 14px', fontSize: '0.82rem', color: '#7c2d12', lineHeight: 1.6 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <HelpCircle size={15} color="#ea580c" /> パスワードをお忘れのお客様
+                    </div>
+                    ご登録のメールアドレスとお名前をお手元にご用意の上、店頭スタッフにお声がけいただくか、お電話（<a href="tel:0422388991" style={{ color: '#b3471c', fontWeight: 700, textDecoration: 'underline' }}>042-238-8991</a>）または <Link to="/contact" style={{ color: '#b3471c', fontWeight: 700, textDecoration: 'underline' }}>お問い合わせフォーム</Link> よりご連絡ください。安全にアカウント確認およびパスワード再設定をご案内いたします。
+                  </div>
+                )}
+
+                {/* Auto Logout & Remember Me Box */}
+                <div style={{ background: '#faf8f5', border: '1px solid #ebd9c8', borderRadius: '12px', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input
+                      id="customer-remember"
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={e => setRememberMe(e.target.checked)}
+                      style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#b3471c' }}
+                    />
+                    <label htmlFor="customer-remember" style={{ fontSize: '0.88rem', fontWeight: 700, color: '#1f1612', cursor: 'pointer', userSelect: 'none' }}>
+                      ログイン状態を保持する（次回から自動ログイン）
+                    </label>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', fontSize: '0.76rem', color: '#6b7280', lineHeight: 1.45, paddingLeft: '28px' }}>
+                    <ShieldCheck size={14} style={{ color: '#059669', flexShrink: 0, marginTop: '2px' }} />
+                    <span>未選択時はブラウザ終了またはシステム再起動で自動ログアウトされます。共用端末でも安心です。</span>
+                  </div>
                 </div>
 
-                <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#f9fafb', borderRadius: '6px', border: '1px solid #e5e7eb', fontSize: '0.75rem', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <ShieldCheck size={14} style={{ color: '#059669', flexShrink: 0 }} />
-                  <span>未選択時はブラウザ終了またはシステム再起動で自動ログアウトされます。</span>
-                </div>
+                {error && <p role="alert" style={{ margin: 0, color: '#b91c1c', fontSize: '0.88rem', background: '#fef2f2', padding: '8px 12px', borderRadius: '8px', border: '1px solid #fecaca' }}>{error}</p>}
+                {infoMsg && <p style={{ margin: 0, color: '#166534', fontSize: '0.88rem', background: '#f0fdf4', padding: '8px 12px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>{infoMsg}</p>}
 
-                {error && <p role="alert" style={{ margin: 0, color: '#b91c1c', fontSize: '0.9rem' }}>{error}</p>}
-                {infoMsg && <p style={{ margin: 0, color: '#166534', fontSize: '0.9rem' }}>{infoMsg}</p>}
-
-                <button type="submit" className="btn-warm" disabled={submitting} style={{ opacity: submitting ? 0.7 : 1 }}>
-                  {submitting ? '送信中…' : isRegister ? '認証コードを送信して登録' : 'ログイン'}
+                <button
+                  type="submit"
+                  className="btn-warm"
+                  disabled={submitting}
+                  style={{
+                    opacity: submitting ? 0.7 : 1,
+                    padding: '14px',
+                    fontSize: '1rem',
+                    fontWeight: 700,
+                    boxShadow: '0 4px 14px rgba(179,71,28,0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  {isRegister ? <UserPlus size={18} /> : <LogIn size={18} />}
+                  {submitting ? '処理中…' : isRegister ? '認証コードを送信して登録' : 'ログイン'}
                 </button>
-                <p style={{ ...mutedStyle, margin: 0, textAlign: 'center' }}>
-                  {isRegister ? 'すでに会員の方は' : 'はじめての方は'} <Link to={otherLink} style={{ color: 'var(--spice)', fontWeight: 'bold' }}>{isRegister ? 'ログイン' : '会員登録（無料）'}</Link>
+
+                <p style={{ ...mutedStyle, margin: 0, textAlign: 'center', fontSize: '0.88rem' }}>
+                  {isRegister ? 'すでに会員アカウントをお持ちの方は' : 'まだアカウントをお持ちでない方は'}{' '}
+                  <Link to={otherLink} style={{ color: '#b3471c', fontWeight: 'bold', textDecoration: 'underline' }}>
+                    {isRegister ? 'ログイン' : '会員登録（無料）'}
+                  </Link>
                 </p>
-                {!isRegister && <p style={{ ...mutedStyle, margin: 0, textAlign: 'center' }}>パスワードをお忘れの方は店舗までお問い合わせください。</p>}
+
+                <div style={{ borderTop: '1px dashed #e5e7eb', paddingTop: '10px', marginTop: '4px', textAlign: 'center', fontSize: '0.76rem', color: '#9ca3af', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                  <Lock size={12} /> SSL 256bit 暗号化通信により安全に保護されています
+                </div>
               </form>
             )}
 
-            <section style={cardStyle} aria-labelledby="benefits-heading">
-              <h2 id="benefits-heading" style={{ fontSize: '1.2rem', color: 'var(--dark-bark)', marginTop: 0 }}>会員特典</h2>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {benefits.map(benefit => (
-                  <li key={benefit.text} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', lineHeight: 1.6 }}>
-                    <span aria-hidden="true" style={{ fontSize: '1.4rem' }}>{benefit.icon}</span>
-                    <span style={benefit.strong ? { fontWeight: 700, color: 'var(--spice)' } : undefined}>{benefit.text}</span>
-                  </li>
+            {/* Right Side: Member Benefits Card */}
+            <section
+              style={{
+                ...cardStyle,
+                background: 'linear-gradient(180deg, #ffffff 0%, #fffcf8 100%)',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+                border: '1px solid #ebd9c8',
+                padding: '24px',
+              }}
+              aria-labelledby="benefits-heading"
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', paddingBottom: '14px', borderBottom: '1px solid #f0e6dc', flexWrap: 'wrap', gap: '8px' }}>
+                <div>
+                  <h2 id="benefits-heading" style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1f1612', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Sparkles size={20} style={{ color: 'var(--gold)' }} />
+                    会員特典・メリット
+                  </h2>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#8c786a' }}>
+                    アダルサ公式メンバーズクラブ限定の特別優待
+                  </p>
+                </div>
+                <span style={{ fontSize: '0.74rem', fontWeight: 700, padding: '4px 10px', borderRadius: '20px', background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0' }}>
+                  入会金・年会費 ずっと無料
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {benefits.map((b, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'flex',
+                      gap: '12px',
+                      alignItems: 'flex-start',
+                      padding: '11px 13px',
+                      borderRadius: '12px',
+                      background: b.highlight ? '#fff8f3' : '#faf8f5',
+                      border: b.highlight ? '1.5px solid #fed7aa' : '1px solid #f3efe8',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <BenefitIcon type={b.iconType} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.92rem', fontWeight: b.highlight ? 800 : 700, color: b.highlight ? '#b3471c' : '#1f1612', lineHeight: 1.4 }}>
+                          {b.title}
+                        </span>
+                        {b.badge && (
+                          <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: '4px', background: b.highlight ? '#fef3c7' : '#e5e7eb', color: b.highlight ? '#92400e' : '#4b5563', fontWeight: 700 }}>
+                            {b.badge}
+                          </span>
+                        )}
+                      </div>
+                      {b.subtitle && (
+                        <div style={{ fontSize: '0.78rem', color: '#6b7280', marginTop: '3px', lineHeight: 1.45 }}>
+                          {b.subtitle}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 ))}
-              </ul>
+              </div>
+
               {step === 'verify' && (
                 <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #f3f4f6', fontSize: '0.8rem', color: '#6b7280' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#059669', fontWeight: 700, marginBottom: 4 }}>
@@ -427,6 +794,14 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
                   認証完了後、すぐにお持ち帰り・店内注文のポイント還元や特典をご利用いただけます。
                 </div>
               )}
+
+              <div style={{ marginTop: '22px', paddingTop: '16px', borderTop: '1px solid #f0e6dc', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.76rem', color: '#8c786a' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontWeight: 700 }}>
+                  <ShieldCheck size={16} />
+                  <span>SSL 256bit 暗号化通信により、安全に保護されています</span>
+                </div>
+                <div>※ 店内モバイルオーダー・テイクアウト事前WEB注文のどちらでもポイントやクーポンをご利用いただけます。</div>
+              </div>
             </section>
           </div>
         </div>

@@ -50,8 +50,8 @@ function AppContent() {
   const isTableApp = isQrUrl || (isDineIn && searchParams.get('fulfillment')?.toUpperCase() !== 'PICKUP');
 
   // Hide regular website Navbar, Footer, and CartDrawer for internal staff apps and active table QR diners
-  // Normal website visitors to /order will see the complete website Navbar & Footer!
-  const internalRoutes = ['/login', '/admin', '/kitchen', '/cash-counter', '/cashier', '/account'];
+  // Normal website visitors and customer account users will see the complete website Navbar & Footer!
+  const internalRoutes = ['/login', '/admin', '/kitchen', '/cash-counter', '/cashier'];
   const isInternal = internalRoutes.some(route => location.pathname === route || location.pathname.startsWith(route + '/'));
   const hideNavAndFooter = isInternal || isTableApp;
 

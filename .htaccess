@@ -48,10 +48,10 @@ DirectoryIndex index.html index.php
   # ----------------------------------------------------------------------
   RewriteRule ^api(/.*)?$ api/index.php [QSA,L]
 
-  # Fallback between root uploads and public_html/uploads if either exists
+  # Fallback between public_html/uploads and root uploads if either exists
   RewriteCond %{REQUEST_URI} ^/uploads/(.+)$
-  RewriteCond %{DOCUMENT_ROOT}/public_html/uploads/%1 -f
-  RewriteRule ^uploads/(.+)$ public_html/uploads/$1 [L]
+  RewriteCond %{DOCUMENT_ROOT}/uploads/%1 -f
+  RewriteRule ^uploads/(.+)$ uploads/$1 [L]
 
   # ----------------------------------------------------------------------
   # 404 FOR MISSING STATIC ASSETS (PREVENT HTML RETURNED AS IMAGE/CSS)
@@ -77,6 +77,13 @@ DirectoryIndex index.html index.php
 
   # Strictly prevent caching of API requests and dynamic scripts
   <FilesMatch "\.php$">
+    Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+    Header always set Pragma "no-cache"
+    Header always set Expires "Thu, 01 Jan 1970 00:00:00 GMT"
+  </FilesMatch>
+
+  # Strictly prevent caching of HTML shells (index.html) so SPA updates load immediately
+  <FilesMatch "\.(html|htm)$">
     Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
     Header always set Pragma "no-cache"
     Header always set Expires "Thu, 01 Jan 1970 00:00:00 GMT"

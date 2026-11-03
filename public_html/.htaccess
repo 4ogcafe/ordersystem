@@ -81,6 +81,13 @@ DirectoryIndex index.html index.php
     Header always set Pragma "no-cache"
     Header always set Expires "Thu, 01 Jan 1970 00:00:00 GMT"
   </FilesMatch>
+
+  # Strictly prevent caching of HTML shells (index.html) so SPA updates load immediately
+  <FilesMatch "\.(html|htm)$">
+    Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+    Header always set Pragma "no-cache"
+    Header always set Expires "Thu, 01 Jan 1970 00:00:00 GMT"
+  </FilesMatch>
   SetEnvIf Request_URI "^/api" IS_API
   Header always set Cache-Control "no-store, no-cache, must-revalidate, max-age=0" env=IS_API
   Header always set Pragma "no-cache" env=IS_API
