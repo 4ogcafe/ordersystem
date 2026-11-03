@@ -1537,4 +1537,63 @@ body.dio-modal-open {
   line-height: 1;
 }
 
+/* --------------------------------------------------------------------------
+   Scroll to Top Floating Button (最上部へ戻るボタン - QR Scan Menu)
+   -------------------------------------------------------------------------- */
+.dio-scroll-top-btn {
+  position: fixed;
+  bottom: 82px;
+  right: 14px;
+  z-index: 45;
+  width: 46px;
+  height: 48px;
+  background: #ffffff;
+  color: var(--dio-primary);
+  border: 1.5px solid #fed7aa;
+  border-radius: 14px;
+  box-shadow: 0 4px 14px rgba(184, 46, 31, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0px;
+  padding: 4px 0 3px;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(14px) scale(0.88);
+  pointer-events: none;
+  transition: opacity 0.22s ease-out, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.15s, box-shadow 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dio-scroll-top-btn.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.dio-scroll-top-btn:hover,
+.dio-scroll-top-btn:active {
+  background: #fff7ed;
+  color: var(--dio-primary-hover);
+  border-color: #f97316;
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 6px 18px rgba(184, 46, 31, 0.24);
+}
+
+.dio-scroll-top-label {
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  margin-top: -2px;
+}
+
+@media (min-width: 640px) {
+  .dio-scroll-top-btn {
+    right: calc(50% - 280px);
+  }
+}
+
+
 

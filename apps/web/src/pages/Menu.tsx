@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
+import { ChevronUp } from 'lucide-react';
 import { assetUrl, getPublic } from '../lib/api';
 import { useCart } from '../lib/cart-context';
 import { yen } from '../lib/format';
@@ -52,6 +53,23 @@ export default function Menu() {
   const [selectedStoreId, setSelectedStoreId] = useState<string>(() => getSavedOrderStoreId(DEFAULT_STORE_LOCATIONS));
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
   const selectedStore = stores.find(s => s.id === selectedStoreId) ?? stores[0] ?? DEFAULT_STORE_LOCATIONS[0];
+
+  const [showScrollTop, setShowScrollTop] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowScrollTop(window.scrollY > 280);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+  };
 
   useEffect(() => {
     setSelectedCategoryId('all');
@@ -723,6 +741,40 @@ export default function Menu() {
           onOpenCart={() => { setRelatedTrigger(null); cart.openCart(); }}
         />
       )}
+
+      {/* ── SCROLL TO TOP FLOATING BUTTON ── */}
+      <button
+        type="button"
+        className={`menu-scroll-top-btn ${showScrollTop ? 'is-visible' : ''}`}
+        onClick={scrollToTop}
+        aria-label="ページ最上部へ戻る"
+        title="最上部へ戻る"
+        style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '20px',
+          zIndex: 40,
+          width: '46px',
+          height: '48px',
+          background: '#ffffff',
+          color: '#b82e1f',
+          border: '1.5px solid #fed7aa',
+          borderRadius: '14px',
+          boxShadow: '0 4px 16px rgba(184, 46, 31, 0.16)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          opacity: showScrollTop ? 1 : 0,
+          transform: showScrollTop ? 'translateY(0) scale(1)' : 'translateY(14px) scale(0.9)',
+          pointerEvents: showScrollTop ? 'auto' : 'none',
+          transition: 'all 0.22s ease-out',
+        }}
+      >
+        <ChevronUp size={20} strokeWidth={2.8} />
+        <span style={{ fontSize: '0.62rem', fontWeight: 900, marginTop: '-2px' }}>TOP</span>
+      </button>
     </main>
   );
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import {
   Search, Plus, ShoppingCart, History,
-  ChefHat, X, ChevronDown, Bell, Heart,
+  ChefHat, X, ChevronDown, ChevronUp, Bell, Heart,
   Receipt, RotateCcw, User, LogIn, LogOut,
   CheckCircle2, Sparkles, ShoppingBag, UtensilsCrossed, Phone
 } from 'lucide-react';
@@ -176,6 +176,24 @@ export default function DineInOrderExperience({
   // QR Scan Preloader states
   const [loadingMenu, setLoadingMenu] = useState<boolean>(true);
   const [fadeOutPreloader, setFadeOutPreloader] = useState<boolean>(false);
+
+  // Scroll to top floating button state
+  const [showScrollTop, setShowScrollTop] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowScrollTop(window.scrollY > 260);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+  };
 
   // Menu data
   const [menuItems, setMenuItems] = useState<QuickMenuItem[]>([]);
@@ -1241,6 +1259,18 @@ export default function DineInOrderExperience({
           })
         )}
       </div>
+
+      {/* ── SCROLL TO TOP FLOATING BUTTON (Bottom to Top) ── */}
+      <button
+        type="button"
+        className={`dio-scroll-top-btn ${showScrollTop ? 'is-visible' : ''}`}
+        onClick={scrollToTop}
+        aria-label={lang === 'ja' ? '最上部へ戻る' : 'Scroll to top'}
+        title={lang === 'ja' ? '最上部へ戻る' : 'Scroll to top'}
+      >
+        <ChevronUp size={20} strokeWidth={2.8} />
+        <span className="dio-scroll-top-label">TOP</span>
+      </button>
 
       {/* ── STICKY FLOATING BOTTOM CART BAR (Exact screenshot design) ── */}
       <footer className="dio-bottom-bar">
