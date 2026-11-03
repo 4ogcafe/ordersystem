@@ -4,6 +4,8 @@
  * Bridges frontend requests directly to MySQL on Hostinger Shared Hosting
  */
 
+date_default_timezone_set('Asia/Tokyo');
+
 // Global Exception Handler: ensure all uncaught exceptions return JSON, not HTML 500 error pages
 set_exception_handler(function (Throwable $e) {
     http_response_code(500);
@@ -425,6 +427,50 @@ function ensureDefaultDatabaseData(PDO $pdo): array {
                 $postIns->execute($p);
             }
             $seeded['blog_posts'] = count($posts);
+        }
+    } catch (Exception $e) {}
+
+    // 8. Offers (Default baseline coupons)
+    try {
+        $stmt = $pdo->query('SELECT COUNT(*) FROM `Offer`');
+        if ($stmt && (int)$stmt->fetchColumn() === 0) {
+            $offerIns = $pdo->prepare('INSERT INTO `Offer` (
+                id, titleJa, descriptionJa, imageUrl, discountType, discountValue,
+                minSubtotal, startsAt, endsAt, oncePerCustomer, isActive, createdAt, updatedAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)');
+
+            $defaultOffers = [
+                [
+                    'off_welcome_10',
+                    '初回限定 10%OFF クーポン',
+                    'オンライン注文・テイクアウトで使える初回限定の10%割引クーポンです。',
+                    '/uploads/1793235169-18d888af1f82b668.webp',
+                    'PERCENT',
+                    10,
+                    1000,
+                    null,
+                    null,
+                    1,
+                ],
+                [
+                    'off_takeout_100',
+                    'テイクアウト ¥100引き クーポン',
+                    '¥1,500以上のお持ち帰り注文でいつでも何度でも¥100引きになります。',
+                    '/uploads/1792845269-3c46d03a68dd8916.webp',
+                    'AMOUNT',
+                    100,
+                    1500,
+                    null,
+                    null,
+                    0,
+                ],
+            ];
+            foreach ($defaultOffers as $o) {
+                $offerIns->execute([
+                    $o[0], $o[1], $o[2], $o[3], $o[4], $o[5], $o[6], $o[7], $o[8], $o[9], $now, $now
+                ]);
+            }
+            $seeded['offers'] = count($defaultOffers);
         }
     } catch (Exception $e) {}
 
@@ -3819,6 +3865,11 @@ if ($method === 'GET' && ($subPath === '/offers/all' || $subPath === '/offers/al
 if ($method === 'GET' && ($subPath === '/offers' || $subPath === '/offers/')) {
     $stmt = $pdo->query('SELECT * FROM Offer WHERE isActive = 1 ORDER BY createdAt DESC');
     $offers = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+    if (empty($offers)) {
+        ensureDefaultDatabaseData($pdo);
+        $stmt = $pdo->query('SELECT * FROM Offer WHERE isActive = 1 ORDER BY createdAt DESC');
+        $offers = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+    }
     $now = new DateTime();
     $liveOffers = [];
 

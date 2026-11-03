@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
-import { MapPin, Clock, Phone } from 'lucide-react';
+import { MapPin, Clock, Phone, ChevronUp } from 'lucide-react';
 import { apiFetch, assetUrl, getPublic } from '../lib/api';
 import OfferSticker from '../components/MemberOffers';
 import GoogleReviews from '../components/GoogleReviews';
@@ -32,6 +32,24 @@ export default function Home() {
   const [stores, setStores] = useState<StoreLocation[]>(DEFAULT_STORE_LOCATIONS);
   const [selectedStoreId, setSelectedStoreId] = useState<string>('musashisakai');
   const selectedStore = stores.find(s => s.id === selectedStoreId) || stores[0] || DEFAULT_STORE_LOCATIONS[0];
+
+  // Scroll to top floating button state
+  const [showScrollTop, setShowScrollTop] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowScrollTop(window.scrollY > 280);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+  };
 
   const handleNewsletterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -721,6 +739,40 @@ export default function Home() {
           </form>
         </div>
       </div>
+
+      {/* ── SCROLL TO TOP FLOATING BUTTON (Bottom to Top) ── */}
+      <button
+        type="button"
+        className={`home-scroll-top-btn ${showScrollTop ? 'is-visible' : ''}`}
+        onClick={scrollToTop}
+        aria-label="ページ最上部へ戻る"
+        title="最上部へ戻る"
+        style={{
+          position: 'fixed',
+          bottom: '26px',
+          right: '22px',
+          zIndex: 90,
+          width: '46px',
+          height: '48px',
+          background: '#ffffff',
+          color: '#b82e1f',
+          border: '1.5px solid #fed7aa',
+          borderRadius: '14px',
+          boxShadow: '0 4px 16px rgba(184, 46, 31, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          opacity: showScrollTop ? 1 : 0,
+          transform: showScrollTop ? 'translateY(0) scale(1)' : 'translateY(14px) scale(0.9)',
+          pointerEvents: showScrollTop ? 'auto' : 'none',
+          transition: 'all 0.22s ease-out',
+        }}
+      >
+        <ChevronUp size={20} strokeWidth={2.8} />
+        <span style={{ fontSize: '0.62rem', fontWeight: 900, marginTop: '-2px' }}>TOP</span>
+      </button>
     </main>
   );
 }
