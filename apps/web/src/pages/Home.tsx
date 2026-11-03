@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { MapPin, Clock, Phone, ChevronUp } from 'lucide-react';
-import { apiFetch, assetUrl, getPublic } from '../lib/api';
+import { apiFetch, assetUrl, errorMessage, getPublic } from '../lib/api';
 import OfferSticker from '../components/MemberOffers';
 import GoogleReviews from '../components/GoogleReviews';
 import EmphasisText from '../components/EmphasisText';
@@ -26,6 +26,7 @@ export default function Home() {
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>({});
   const [newsletterEmail, setNewsletterEmail] = useState('');
+  const [submittingNewsletter, setSubmittingNewsletter] = useState(false);
   const [menuSlideIndex, setMenuSlideIndex] = useState(0);
   // Only slides that have been shown (plus the next one) are mounted, so hidden hero images don't compete with the first one.
   const [loadedSlides, setLoadedSlides] = useState(1);
@@ -53,26 +54,41 @@ export default function Home() {
 
   const handleNewsletterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newsletterEmail) return;
+    const cleanEmail = newsletterEmail.trim();
+    if (!cleanEmail || submittingNewsletter) return;
+
+    // Email regex validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      toast.error('有効なメールアドレスを入力してください。');
+      return;
+    }
+
+    setSubmittingNewsletter(true);
     try {
       const res = await apiFetch('/api/v1/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: 'Newsletter Subscriber',
-          email: newsletterEmail,
-          message: 'Subscribed to Newsletter',
-          type: 'GENERAL'
+          name: 'ニュースレター購読者',
+          email: cleanEmail,
+          message: 'ニュースレターに登録 (Subscribed to Newsletter)',
+          type: 'GENERAL',
+          isNewsletter: true
         })
       });
+
       if (res.ok) {
-        toast.success('ご登録ありがとうございます！');
+        toast.success('ニュースレターのご登録ありがとうございます！');
         setNewsletterEmail('');
       } else {
-        toast.error('登録に失敗しました。');
+        const errorMsg = await errorMessage(res, '登録に失敗しました。');
+        toast.error(errorMsg);
       }
-    } catch (err) {
-      toast.error('Network error.');
+    } catch {
+      toast.error('通信エラーが発生しました。インターネット接続をご確認ください。');
+    } finally {
+      setSubmittingNewsletter(false);
     }
   };
 
@@ -732,9 +748,35 @@ export default function Home() {
           <p style={{ fontSize: '1.1rem', color: 'rgba(255,255,255,0.8)', marginBottom: '40px', lineHeight: '1.6', whiteSpace: 'pre-line' }}>{settings.newsletterSubJa || <>最新のメニュー、シークレットレシピ、そして限定のお得な情報を<br/>あなたのメールボックスへ直接お届けします。</>}</p>
           
           <form style={{ display: 'flex', gap: '10px', maxWidth: '500px', margin: '0 auto', flexWrap: 'wrap', justifyContent: 'center' }} onSubmit={handleNewsletterSubmit}>
-            <input type="email" aria-label="メールアドレス" value={newsletterEmail} onChange={(e) => setNewsletterEmail(e.target.value)} placeholder="メールアドレスを入力" required style={{ flex: '1', minWidth: '250px', padding: '16px 24px', borderRadius: '50px', border: 'none', fontSize: '1rem', outline: 'none' }} />
-            <button type="submit" style={{ backgroundColor: 'var(--spice)', color: 'white', border: 'none', padding: '16px 36px', borderRadius: '50px', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer', transition: 'all 0.3s', whiteSpace: 'nowrap', boxShadow: '0 4px 15px rgba(181, 69, 27, 0.4)' }}>
-              登録する
+            <input 
+              type="email" 
+              aria-label="メールアドレス" 
+              value={newsletterEmail} 
+              onChange={(e) => setNewsletterEmail(e.target.value)} 
+              placeholder="メールアドレスを入力" 
+              required 
+              disabled={submittingNewsletter}
+              style={{ flex: '1', minWidth: '250px', padding: '16px 24px', borderRadius: '50px', border: 'none', fontSize: '1rem', outline: 'none' }} 
+            />
+            <button 
+              type="submit" 
+              disabled={submittingNewsletter}
+              style={{ 
+                backgroundColor: 'var(--spice)', 
+                color: 'white', 
+                border: 'none', 
+                padding: '16px 36px', 
+                borderRadius: '50px', 
+                fontWeight: 'bold', 
+                fontSize: '1rem', 
+                cursor: submittingNewsletter ? 'not-allowed' : 'pointer', 
+                opacity: submittingNewsletter ? 0.7 : 1,
+                transition: 'all 0.3s', 
+                whiteSpace: 'nowrap', 
+                boxShadow: '0 4px 15px rgba(181, 69, 27, 0.4)' 
+              }}
+            >
+              {submittingNewsletter ? '登録中…' : '登録する'}
             </button>
           </form>
         </div>

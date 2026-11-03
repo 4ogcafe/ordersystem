@@ -474,6 +474,23 @@ function ensureDefaultDatabaseData(PDO $pdo): array {
         }
     } catch (Exception $e) {}
 
+    // 9. Deduplicate historical newsletter ContactMessages (keep earliest per email)
+    try {
+        $pdo->exec('
+            DELETE m1 FROM ContactMessage m1
+            INNER JOIN ContactMessage m2 
+            WHERE m1.id != m2.id 
+              AND LOWER(m1.email) = LOWER(m2.email)
+              AND m1.createdAt > m2.createdAt
+              AND (
+                  LOWER(m1.name) LIKE "%newsletter%" OR LOWER(m1.message) LIKE "%newsletter%" OR m1.name LIKE "%ニュースレター%" OR m1.message LIKE "%ニュースレター%" OR m1.message LIKE "%メルマガ%"
+              )
+              AND (
+                  LOWER(m2.name) LIKE "%newsletter%" OR LOWER(m2.message) LIKE "%newsletter%" OR m2.name LIKE "%ニュースレター%" OR m2.message LIKE "%ニュースレター%" OR m2.message LIKE "%メルマガ%"
+              )
+        ');
+    } catch (Exception $e) {}
+
     return $seeded;
 }
 
@@ -5153,6 +5170,53 @@ if ($method === 'POST' && ($subPath === '/contact' || $subPath === '/contact/'))
         http_response_code(400);
         echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => '名前とメールアドレスは必須です']]);
         exit;
+    }
+
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'INVALID_EMAIL', 'message' => '有効なメールアドレスを入力してください。']]);
+        exit;
+    }
+
+    $isNewsletter = !empty($input['isNewsletter']) || (
+        stripos($name, 'newsletter') !== false ||
+        stripos($message, 'newsletter') !== false ||
+        stripos($name, 'ニュースレター') !== false ||
+        stripos($message, 'ニュースレター') !== false ||
+        stripos($message, 'メルマガ') !== false
+    );
+
+    // Duplicate check for newsletter subscriptions:
+    // Prevent the same email from being subscribed multiple times and return a clear notification.
+    if ($isNewsletter) {
+        $checkStmt = $pdo->prepare('
+            SELECT id FROM ContactMessage 
+            WHERE LOWER(email) = ? 
+              AND (
+                  LOWER(name) LIKE "%newsletter%" 
+                  OR LOWER(message) LIKE "%newsletter%" 
+                  OR name LIKE "%ニュースレター%" 
+                  OR message LIKE "%ニュースレター%" 
+                  OR message LIKE "%メルマガ%"
+              )
+            LIMIT 1
+        ');
+        $checkStmt->execute([$email]);
+        if ($checkStmt->fetch()) {
+            http_response_code(409);
+            echo json_encode([
+                'error' => [
+                    'code' => 'DUPLICATE_EMAIL',
+                    'message' => 'このメールアドレスは既にニュースレターに登録されています。'
+                ]
+            ]);
+            exit;
+        }
+
+        // Keep Customer newsletterOptIn synced if this email belongs to a registered customer
+        try {
+            $pdo->prepare('UPDATE Customer SET newsletterOptIn = 1, newsletterOptInAt = IFNULL(newsletterOptInAt, NOW()) WHERE LOWER(email) = ?')->execute([$email]);
+        } catch (Throwable $e) {}
     }
 
     $id = generateUuidV4();
