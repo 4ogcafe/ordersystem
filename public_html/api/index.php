@@ -5202,13 +5202,19 @@ if ($method === 'POST' && ($subPath === '/contact' || $subPath === '/contact/'))
             LIMIT 1
         ');
         $checkStmt->execute([$email]);
-        if ($checkStmt->fetch()) {
-            http_response_code(409);
+        $existing = $checkStmt->fetch();
+        if ($existing) {
+            // Already subscribed: update existing record so no duplicate row is created, and return positive confirmation
+            try {
+                $upd = $pdo->prepare('UPDATE ContactMessage SET isRead = 0, createdAt = NOW() WHERE id = ?');
+                $upd->execute([$existing['id']]);
+            } catch (Throwable $e) {}
+
+            http_response_code(200);
             echo json_encode([
-                'error' => [
-                    'code' => 'DUPLICATE_EMAIL',
-                    'message' => 'このメールアドレスは既にニュースレターに登録されています。'
-                ]
+                'success' => true,
+                'alreadySubscribed' => true,
+                'message' => '既にニュースレターにご登録いただいております。'
             ]);
             exit;
         }

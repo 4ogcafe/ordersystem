@@ -78,11 +78,16 @@ export default function Home() {
         })
       });
 
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        toast.success('ニュースレターのご登録ありがとうございます！');
+        if (data.alreadySubscribed) {
+          toast.success('既にニュースレターにご登録いただいております。最新情報をお届けします！');
+        } else {
+          toast.success('ニュースレターのご登録ありがとうございます！');
+        }
         setNewsletterEmail('');
       } else {
-        const errorMsg = await errorMessage(res, '登録に失敗しました。');
+        const errorMsg = data?.error?.message || (await errorMessage(res, '登録に失敗しました。'));
         toast.error(errorMsg);
       }
     } catch {
