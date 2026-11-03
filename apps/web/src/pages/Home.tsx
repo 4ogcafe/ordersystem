@@ -9,9 +9,9 @@ import EmphasisText from '../components/EmphasisText';
 import { DEFAULT_STORE_LOCATIONS, saveOrderStoreId, type StoreLocation } from '../lib/stores';
 
 const DEFAULT_HERO_IMAGES = [
-  '/uploads/1793707743-0d3ca7b4cb55a2c2.webp',
-  '/uploads/1793707859-11e753d772ddb0d5.webp',
-  '/uploads/1793707977-52b4ff533e02d77d.webp',
+  '/uploads/1791677310137-913474746.png',
+  '/uploads/1791677360469-260447463.png',
+  '/uploads/1791677400636-307273037.png',
 ];
 
 const UNSPLASH_WIDTHS = [640, 1080, 1920];
