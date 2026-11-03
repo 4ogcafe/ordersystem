@@ -165,9 +165,123 @@
     <!-- Fonts load without blocking first paint; text shows in the fallback font until they arrive (display=swap). -->
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Jost:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Jost:wght@400;500;600;700&display=swap" /></noscript>
+
+    <!-- Instant QR Scan Preloader Script & Styles -->
+    <script>
+      (function() {
+        try {
+          var p = window.location.pathname;
+          var s = window.location.search;
+          var isQr = p.indexOf('/table') === 0 || p.indexOf('/dine-in') === 0 || s.indexOf('table=') !== -1;
+          if (isQr) {
+            document.documentElement.classList.add('is-qr-scan');
+          }
+        } catch(e) {}
+      })();
+    </script>
+    <style>
+      .is-qr-scan #root > header,
+      .is-qr-scan #root > main,
+      .is-qr-scan #root > footer {
+        display: none !important;
+      }
+      .qr-instant-splash {
+        display: none;
+      }
+      .is-qr-scan .qr-instant-splash {
+        display: flex !important;
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        align-items: center;
+        justify-content: center;
+        background-color: #faf8f5;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        padding: 16px;
+      }
+      .qr-instant-card {
+        width: 100%;
+        max-width: 360px;
+        background: #ffffff;
+        border: 1px solid #fed7aa;
+        border-radius: 24px;
+        padding: 32px 24px 28px;
+        box-shadow: 0 16px 48px -8px rgba(184, 46, 31, 0.12), 0 4px 16px rgba(0, 0, 0, 0.04);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+      .qr-instant-logo {
+        width: 76px;
+        height: 76px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 3px solid #b82e1f;
+        box-shadow: 0 4px 14px rgba(184, 46, 31, 0.25);
+        margin-bottom: 16px;
+      }
+      .qr-instant-bar {
+        width: 100%;
+        max-width: 240px;
+        height: 6px;
+        background: #f3f4f6;
+        border-radius: 9999px;
+        overflow: hidden;
+        margin: 18px 0 14px;
+      }
+      .qr-instant-bar-inner {
+        height: 100%;
+        width: 45%;
+        background: linear-gradient(90deg, #ea580c, #b82e1f, #f59e0b);
+        border-radius: 9999px;
+        animation: qrInstantSlide 1.5s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+      }
+      @keyframes qrInstantSlide {
+        0% { transform: translateX(-120%); }
+        100% { transform: translateX(280%); }
+      }
+    </style>
   </head>
   <body>
     <div id="root">
+      <!-- Instant QR Scan Preloader (Shows during 0ms first-paint on mobile QR scan) -->
+      <div class="qr-instant-splash" aria-busy="true">
+        <div class="qr-instant-card">
+          <div style="display:inline-flex;align-items:center;gap:5px;background:#fff7ed;border:1px solid #ffedd5;color:#c2410c;font-size:0.75rem;font-weight:700;padding:4px 12px;border-radius:9999px;margin-bottom:18px;">
+            ✨ 卓上QRモバイルオーダー
+          </div>
+          <img src="/adarsha-log.webp" alt="Adarsha (アダルサ)" class="qr-instant-logo" />
+          <h2 style="margin:0;font-size:1.45rem;font-weight:900;color:#b82e1f;letter-spacing:0.02em;">アダルサ</h2>
+          <p style="margin:2px 0 12px;font-size:0.85rem;font-weight:700;color:#4b5563;">武蔵境店（インド料理レストラン）</p>
+          <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:9999px;padding:8px 20px;font-size:1.05rem;font-weight:900;color:#9a3412;margin-bottom:6px;">
+            <span id="qr-instant-table-label">🍽️ お席へようこそ</span>
+          </div>
+          <div class="qr-instant-bar">
+            <div class="qr-instant-bar-inner"></div>
+          </div>
+          <p style="margin:0;font-size:0.92rem;font-weight:800;color:#1f2937;">お席のメニューを読み込んでいます...</p>
+          <p style="margin:4px 0 0;font-size:0.78rem;color:#6b7280;">少々お待ちください。まもなくご注文いただけます。</p>
+        </div>
+      </div>
+      <script>
+        (function() {
+          try {
+            var s = window.location.search;
+            var p = window.location.pathname;
+            var match = s.match(/[?&]table=([^&#]*)/);
+            var tableNum = match ? decodeURIComponent(match[1]) : '';
+            if (!tableNum) {
+              var m = p.match(/\/(?:table|dine-in)\/([^\/?#]+)/);
+              if (m) tableNum = decodeURIComponent(m[1]);
+            }
+            if (tableNum) {
+              var el = document.getElementById('qr-instant-table-label');
+              if (el) el.textContent = '🍽️ お席 ' + tableNum + ' 番席';
+            }
+          } catch(e) {}
+        })();
+      </script>
       <!-- Semantic Static Fallback for Crawlers and JavaScript-Disabled Environments -->
       <header class="navbar" style="padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee;">
         <a href="/" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit;">

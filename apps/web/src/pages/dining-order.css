@@ -1303,3 +1303,238 @@ body.dio-modal-open {
   transform: translateY(-1px);
 }
 
+/* ==========================================================================
+   QR Scan Preloader (卓上QRコード スキャン専用プレローダー)
+   ========================================================================== */
+.dio-qr-preloader {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #faf8f5;
+  transition: opacity 0.35s ease-out, visibility 0.35s ease-out;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.dio-qr-preloader.is-fading-out {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.dio-qr-preloader-backdrop {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 35%, rgba(254, 215, 170, 0.35) 0%, rgba(250, 248, 245, 0.98) 75%);
+  pointer-events: none;
+}
+
+.dio-qr-preloader-card {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 360px;
+  background: #ffffff;
+  border: 1px solid #fed7aa;
+  border-radius: 24px;
+  padding: 32px 24px 28px;
+  box-shadow: 0 16px 48px -8px rgba(184, 46, 31, 0.12), 0 4px 16px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: dioCardPop 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes dioCardPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.dio-qr-preloader-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #fff7ed;
+  border: 1px solid #ffedd5;
+  color: #c2410c;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  margin-bottom: 20px;
+  letter-spacing: 0.04em;
+}
+
+.dio-qr-preloader-logo-ring {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin-bottom: 16px;
+}
+
+.dio-qr-preloader-pulse-glow {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px dashed #f97316;
+  opacity: 0.7;
+  animation: dioRotatePulse 8s linear infinite;
+}
+
+@keyframes dioRotatePulse {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.dio-qr-preloader-logo-img {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid #b82e1f;
+  box-shadow: 0 4px 14px rgba(184, 46, 31, 0.25);
+  animation: dioLogoFloat 3s ease-in-out infinite;
+}
+
+@keyframes dioLogoFloat {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.dio-qr-preloader-brand {
+  margin-bottom: 14px;
+}
+
+.dio-qr-preloader-name {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 900;
+  color: var(--dio-primary);
+  letter-spacing: 0.02em;
+}
+
+.dio-qr-preloader-branch {
+  margin: 2px 0 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #4b5563;
+}
+
+.dio-qr-preloader-seat-badge {
+  background: #fff7ed;
+  border: 1.5px solid #fed7aa;
+  border-radius: 9999px;
+  padding: 8px 20px;
+  margin-bottom: 22px;
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.08);
+}
+
+.dio-qr-preloader-seat-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.dio-qr-preloader-seat-icon {
+  font-size: 1.05rem;
+}
+
+.dio-qr-preloader-seat-text {
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: #9a3412;
+  letter-spacing: 0.05em;
+}
+
+.dio-qr-preloader-progress-wrap {
+  width: 100%;
+  max-width: 240px;
+  height: 6px;
+  background: #f3f4f6;
+  border-radius: 9999px;
+  overflow: hidden;
+  position: relative;
+  margin-bottom: 14px;
+}
+
+.dio-qr-preloader-progress-bar {
+  height: 100%;
+  width: 45%;
+  background: linear-gradient(90deg, #ea580c, #b82e1f, #f59e0b);
+  border-radius: 9999px;
+  animation: dioProgressSlide 1.5s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes dioProgressSlide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(280%);
+  }
+}
+
+.dio-qr-preloader-status {
+  margin-bottom: 18px;
+}
+
+.dio-qr-preloader-status-main {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.dio-qr-preloader-status-sub {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.dio-qr-preloader-features {
+  width: 100%;
+  border-top: 1px dashed #fed7aa;
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.dio-qr-preloader-feat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #4b5563;
+}
+
+.dio-qr-preloader-feat-emoji {
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+

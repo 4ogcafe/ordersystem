@@ -12,6 +12,7 @@ import { yen } from '../../lib/format';
 import { type StoreLocation } from '../../lib/stores';
 import { useCustomer } from '../../lib/customer-context';
 import { readyChime } from '../../lib/push';
+import QrScanPreloader from './QrScanPreloader';
 import '../../pages/dining-order.css';
 
 export interface QuickMenuItem {
@@ -171,6 +172,10 @@ export default function DineInOrderExperience({
       return next;
     });
   };
+
+  // QR Scan Preloader states
+  const [loadingMenu, setLoadingMenu] = useState<boolean>(true);
+  const [fadeOutPreloader, setFadeOutPreloader] = useState<boolean>(false);
 
   // Menu data
   const [menuItems, setMenuItems] = useState<QuickMenuItem[]>([]);
@@ -435,22 +440,47 @@ export default function DineInOrderExperience({
     } catch {}
   }, [tray, tableNumber]);
 
-  // Load menu items & categories (dynamically for Dine-In vs Takeout)
+  // Load menu items & categories (dynamically for Dine-In vs Takeout with QR Scan Preloader)
   useEffect(() => {
     const fQuery = isTakeout ? 'TAKEOUT' : 'DINE_IN';
-    getPublic<QuickMenuItem[]>(`/api/v1/menu/items?fulfillment=${fQuery}`)
-      .then(items => {
+    setLoadingMenu(true);
+    setFadeOutPreloader(false);
+    let isCancelled = false;
+
+    Promise.all([
+      getPublic<QuickMenuItem[]>(`/api/v1/menu/items?fulfillment=${fQuery}`),
+      getPublic<QuickCategory[]>(`/api/v1/menu/categories?fulfillment=${fQuery}`),
+    ])
+      .then(([items, cats]) => {
+        if (isCancelled) return;
         if (Array.isArray(items)) {
           setMenuItems(items.filter(it => it.isOrderable !== false && !it.isSoldOut));
         }
+        if (Array.isArray(cats)) {
+          setCategories(cats);
+        }
+        // Smooth preloader transition
+        setTimeout(() => {
+          if (!isCancelled) {
+            setFadeOutPreloader(true);
+            setTimeout(() => {
+              if (!isCancelled) setLoadingMenu(false);
+            }, 350);
+          }
+        }, 350);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!isCancelled) {
+          setFadeOutPreloader(true);
+          setTimeout(() => {
+            if (!isCancelled) setLoadingMenu(false);
+          }, 350);
+        }
+      });
 
-    getPublic<QuickCategory[]>(`/api/v1/menu/categories?fulfillment=${fQuery}`)
-      .then(cats => {
-        if (Array.isArray(cats)) setCategories(cats);
-      })
-      .catch(() => {});
+    return () => {
+      isCancelled = true;
+    };
   }, [isTakeout]);
 
   // Poll / fetch active table orders
@@ -825,6 +855,17 @@ export default function DineInOrderExperience({
 
   return (
     <div className="dio-wrapper notranslate" translate="no">
+      {/* ── QR SCAN PRELOADER ── */}
+      {loadingMenu && (
+        <QrScanPreloader
+          tableNumber={tableNumber}
+          storeName={`アダルサ ${branchDisplayName}`}
+          isTakeout={isTakeout}
+          lang={lang}
+          fadeOut={fadeOutPreloader}
+        />
+      )}
+
       {/* ── TOP HEADER (Logo, Brand & Branch, Flag Pill) ── */}
       <header className="dio-header">
         <div className="dio-header-inner">
