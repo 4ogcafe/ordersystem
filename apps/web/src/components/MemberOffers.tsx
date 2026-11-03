@@ -19,20 +19,37 @@ interface PublicOffer {
   endsAt: string | null;
 }
 
+const DEFAULT_FALLBACK_OFFER: PublicOffer = {
+  id: 'off_welcome_10',
+  titleJa: '新規会員登録 特典クーポン',
+  descriptionJa: '新規会員登録ですぐに使える10%OFFクーポンをプレゼント！',
+  imageUrl: '',
+  discountType: 'PERCENT',
+  discountValue: 10,
+  minSubtotal: 0,
+  endsAt: null,
+};
+
 const ROTATE_MS = 4_000;
 const HIDDEN_KEY = 'adarsha_offer_sticker_hidden';
 
 /** Live offers, with "used" marked for the signed-in member. */
 function useOffers() {
   const { customer } = useCustomer();
-  const [offers, setOffers] = useState<PublicOffer[] | null>(null);
+  const [offers, setOffers] = useState<PublicOffer[]>([DEFAULT_FALLBACK_OFFER]);
   const [used, setUsed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch('/api/v1/offers')
       .then(res => (res.ok ? res.json() : []))
-      .then(setOffers)
-      .catch(() => setOffers([]));
+      .then((data: PublicOffer[]) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setOffers(data);
+        } else {
+          setOffers([DEFAULT_FALLBACK_OFFER]);
+        }
+      })
+      .catch(() => setOffers([DEFAULT_FALLBACK_OFFER]));
   }, []);
 
   useEffect(() => {
@@ -88,26 +105,34 @@ function Sparkle({ className }: { className: string }) {
   );
 }
 
-/** The bouncing gift on the home banner. Renders nothing when there are no live offers. */
+/** The bouncing gift on the home banner. Renders live offers with fallback. */
 export default function OfferSticker() {
   const { offers, used, isMember } = useOffers();
   const [index, setIndex] = useState(0);
   const [open, setOpen] = useState(false);
-  const [hidden, setHidden] = useState(() => {
+  const [hidden, setHidden] = useState(false);
+
+  // Clear any legacy sessionStorage suppression so the banner always shows
+  useEffect(() => {
     try {
-      return sessionStorage.getItem(HIDDEN_KEY) === '1';
+      sessionStorage.removeItem(HIDDEN_KEY);
+      sessionStorage.removeItem('adarsha_offer_sticker_hidden');
+      sessionStorage.removeItem('kalpana_offer_sticker_hidden');
     } catch {
-      return false;
+      // Ignore
     }
-  });
-  const usable = (offers ?? []).filter(offer => !used.has(offer.id));
+  }, []);
+
+  const usable = offers.filter(offer => !used.has(offer.id));
+  const displayList = usable.length > 0 ? usable : offers;
+  const current = displayList[index % Math.max(1, displayList.length)] || DEFAULT_FALLBACK_OFFER;
 
   // Cycle through the offers on the burst.
   useEffect(() => {
-    if (usable.length < 2) return;
+    if (displayList.length < 2) return;
     const intervalId = setInterval(() => setIndex(i => i + 1), ROTATE_MS);
     return () => clearInterval(intervalId);
-  }, [usable.length]);
+  }, [displayList.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -116,16 +141,8 @@ export default function OfferSticker() {
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
-  if (!offers || offers.length === 0 || (usable.length === 0 && !open)) return null;
-  const current = usable[index % Math.max(1, usable.length)];
-
   const hide = () => {
     setHidden(true);
-    try {
-      sessionStorage.setItem(HIDDEN_KEY, '1');
-    } catch {
-      // Not remembered in private mode.
-    }
   };
 
   return (
@@ -147,10 +164,39 @@ export default function OfferSticker() {
             <Sparkle className="s1" />
             <Sparkle className="s2" />
             <Sparkle className="s3" />
-            <span className="os-pill">{usable.length > 1 ? `特典 ${usable.length}件 ▶` : 'タップで特典 ▶'}</span>
+            <span className="os-pill">{displayList.length > 1 ? `特典 ${displayList.length}件 ▶` : 'タップで特典 ▶'}</span>
           </button>
           <button type="button" className="os-close" onClick={hide} aria-label="特典の表示を閉じる"><X size={14} /></button>
         </div>
+      )}
+
+      {hidden && current && (
+        <button
+          type="button"
+          onClick={() => setHidden(false)}
+          className="os-minimized"
+          aria-label="特典を開く"
+          style={{
+            position: 'absolute',
+            top: '20px',
+            right: '24px',
+            zIndex: 35,
+            background: '#ffc93c',
+            color: '#3b2416',
+            border: '2px solid #3b2416',
+            borderRadius: '9999px',
+            padding: '6px 14px',
+            fontWeight: 900,
+            fontSize: '0.82rem',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          🎁 <span>特典を見る</span>
+        </button>
       )}
 
       {open && (
