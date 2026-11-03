@@ -11,6 +11,7 @@ import { apiFetch, assetUrl, errorMessage, getPublic } from '../../lib/api';
 import { yen } from '../../lib/format';
 import { type StoreLocation } from '../../lib/stores';
 import { useCustomer } from '../../lib/customer-context';
+import { setCustomerSession } from '../../lib/auth-storage';
 import { readyChime } from '../../lib/push';
 import QrScanPreloader from './QrScanPreloader';
 import '../../pages/dining-order.css';
@@ -316,7 +317,7 @@ export default function DineInOrderExperience({
       }
 
       if (data.token) {
-        localStorage.setItem('kalpana_customer_token', data.token);
+        setCustomerSession(data.token, false);
       }
       if (data.customer) {
         signIn(data.customer);
@@ -356,7 +357,7 @@ export default function DineInOrderExperience({
         return;
       }
       if (data.token) {
-        localStorage.setItem('kalpana_customer_token', data.token);
+        setCustomerSession(data.token, false);
       }
       if (data.customer) {
         signIn(data.customer);

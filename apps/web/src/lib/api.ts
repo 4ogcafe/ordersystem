@@ -1,3 +1,5 @@
+import { getStaffToken, getCustomerToken, clearStaffSession } from './auth-storage';
+
 // Empty in development: Vite proxies /api and /uploads to the API (see vite.config.ts).
 // In production set VITE_API_URL if the API is served from another origin.
 const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
@@ -56,8 +58,8 @@ export function assetUrl(url: string | null | undefined): string {
 
 /** Authenticated request: sends session cookies and Authorization Bearer header, never using HTTP cache. */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const staffToken = typeof window !== 'undefined' ? localStorage.getItem('kalpana_session_token') : null;
-  const customerToken = typeof window !== 'undefined' ? localStorage.getItem('kalpana_customer_token') : null;
+  const staffToken = getStaffToken();
+  const customerToken = getCustomerToken();
   const isCustomerPath = path.includes('/customers') || path.includes('/customer');
   const token = isCustomerPath ? (customerToken || staffToken) : (staffToken || customerToken);
 
@@ -73,10 +75,12 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     headers,
   });
 
-  if (res.status === 401 && window.location.pathname.startsWith('/admin')) {
-    localStorage.removeItem('kalpana_session_token');
-    localStorage.removeItem('kalpana_session_user');
-    window.location.assign('/login');
+  if (res.status === 401 && typeof window !== 'undefined') {
+    const p = window.location.pathname;
+    if (p.startsWith('/admin') || p.startsWith('/kitchen') || p.startsWith('/cash-counter') || p.startsWith('/cashier')) {
+      clearStaffSession();
+      window.location.assign('/login?reason=session_expired');
+    }
   }
   return res;
 }

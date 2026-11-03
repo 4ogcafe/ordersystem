@@ -32,6 +32,8 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { apiFetch, errorMessage, getPublic } from '../lib/api';
+import { setStaffSession } from '../lib/auth-storage';
+import SessionSecurityGuard from '../components/admin/SessionSecurityGuard';
 import { yen, formatOrderNumber } from '../lib/format';
 import { DEFAULT_STORE_LOCATIONS, resolveOrderStore, type StoreLocation } from '../lib/stores';
 import { printCustomerReceipt, printBillInvoice, printHtml, DEFAULT_STORE_SETTINGS, type ReceiptOrder } from '../lib/receipt';
@@ -396,7 +398,12 @@ export default function CashCounter() {
   useEffect(() => {
     apiFetch('/api/v1/auth/me')
       .then(r => r.ok ? r.json() : Promise.reject())
-      .then(d => setUser(d.user))
+      .then(d => {
+        if (d.token) {
+          setStaffSession(d.token, d.user, false);
+        }
+        setUser(d.user);
+      })
       .catch(() => navigate('/login', { replace: true }));
 
     getPublic<any>('/api/v1/stores')
@@ -1008,6 +1015,7 @@ export default function CashCounter() {
 
   return (
     <div className="cc">
+      <SessionSecurityGuard type="STAFF" />
       <title>{`${visibleOrders.length ? `(${visibleOrders.length}) ` : ''}Cash Counter | Adarsha`}</title>
       <meta name="robots" content="noindex, nofollow" />
 

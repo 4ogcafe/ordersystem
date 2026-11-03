@@ -2,9 +2,10 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { apiFetch, getPublic } from '../lib/api';
 import { useCustomer } from '../lib/customer-context';
+import { setCustomerSession } from '../lib/auth-storage';
 import { offerLabel, toHalfWidth, yen } from '../lib/format';
 import { cardStyle, inputStyle, labelStyle, mutedStyle } from '../components/account/styles';
-import { CheckCircle2, Mail, RefreshCw } from 'lucide-react';
+import { CheckCircle2, Mail, RefreshCw, ShieldCheck, Info } from 'lucide-react';
 
 interface Benefit {
   icon: string;
@@ -64,12 +65,14 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
 
   const [step, setStep] = useState<'form' | 'verify'>(mode === 'verify' ? 'verify' : 'form');
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: '' });
+  const [rememberMe, setRememberMe] = useState(false);
   const [verifyingEmail, setVerifyingEmail] = useState<string>(params.get('email') || '');
   const [verificationCode, setVerificationCode] = useState<string>('');
   const [error, setError] = useState('');
   const [infoMsg, setInfoMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const reason = params.get('reason');
 
   // Auto-verify if ?token= and ?email= are present in URL
   useEffect(() => {
@@ -83,12 +86,12 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
       apiFetch(`/api/v1/customers/verify-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, token }),
+        body: JSON.stringify({ email, token, rememberMe }),
       })
         .then(async res => {
           if (res.ok) {
             const data = await res.json();
-            if (data.token) localStorage.setItem('kalpana_customer_token', data.token);
+            if (data.token) setCustomerSession(data.token, rememberMe);
             if (data.customer) signIn(data.customer);
             window.location.assign(next);
           } else {
@@ -124,7 +127,7 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
     setInfoMsg('');
     setSubmitting(true);
     try {
-      const body = isRegister ? form : { email: form.email, password: form.password };
+      const body = isRegister ? { ...form, rememberMe } : { email: form.email, password: form.password, rememberMe };
       const res = await apiFetch(`/api/v1/customers/${isRegister ? 'register' : 'login'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -154,7 +157,7 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
       }
 
       if (data.token) {
-        localStorage.setItem('kalpana_customer_token', data.token);
+        setCustomerSession(data.token, rememberMe);
       }
       if (data.customer) {
         signIn(data.customer);
@@ -180,7 +183,7 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
       const res = await apiFetch('/api/v1/customers/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: verifyingEmail, code: verificationCode.trim() }),
+        body: JSON.stringify({ email: verifyingEmail, code: verificationCode.trim(), rememberMe }),
       });
 
       const data = await res.json();
@@ -190,7 +193,7 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
       }
 
       if (data.token) {
-        localStorage.setItem('kalpana_customer_token', data.token);
+        setCustomerSession(data.token, rememberMe);
       }
       if (data.customer) {
         signIn(data.customer);
@@ -342,6 +345,18 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
               </form>
             ) : (
               <form onSubmit={handleSubmit} style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {reason === 'idle_timeout' && (
+                  <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#92400e', backgroundColor: '#fef3c7', border: '1px solid #fde68a', padding: '0.65rem 0.75rem', borderRadius: '6px', fontSize: '0.85rem', lineHeight: 1.4 }}>
+                    <Info size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div>一定時間操作がなかったため、セキュリティ保護のため安全に自動ログアウトしました。</div>
+                  </div>
+                )}
+                {reason === 'session_expired' && (
+                  <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#1e40af', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', padding: '0.65rem 0.75rem', borderRadius: '6px', fontSize: '0.85rem', lineHeight: 1.4 }}>
+                    <Info size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div>セッションが終了しました。再度ログインしてください。</div>
+                  </div>
+                )}
                 {isRegister && (
                   <label style={labelStyle}>
                     お名前
@@ -362,6 +377,24 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
                   パスワード{isRegister && '（6文字以上）'}
                   <input name="password" type="password" required minLength={isRegister ? 6 : 1} maxLength={200} autoComplete={isRegister ? 'new-password' : 'current-password'} value={form.password} onChange={handleChange} style={inputStyle} />
                 </label>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '2px 0' }}>
+                  <input
+                    id="customer-remember"
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={e => setRememberMe(e.target.checked)}
+                    style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: 'var(--spice)' }}
+                  />
+                  <label htmlFor="customer-remember" style={{ fontSize: '0.85rem', color: '#374151', cursor: 'pointer', userSelect: 'none' }}>
+                    ログイン状態を保持する（次回から自動ログイン）
+                  </label>
+                </div>
+
+                <div style={{ padding: '0.5rem 0.75rem', backgroundColor: '#f9fafb', borderRadius: '6px', border: '1px solid #e5e7eb', fontSize: '0.75rem', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <ShieldCheck size={14} style={{ color: '#059669', flexShrink: 0 }} />
+                  <span>未選択時はブラウザ終了またはシステム再起動で自動ログアウトされます。</span>
+                </div>
 
                 {error && <p role="alert" style={{ margin: 0, color: '#b91c1c', fontSize: '0.9rem' }}>{error}</p>}
                 {infoMsg && <p style={{ margin: 0, color: '#166534', fontSize: '0.9rem' }}>{infoMsg}</p>}

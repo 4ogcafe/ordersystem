@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch, errorMessage } from '../lib/api';
+import { clearStaffSession, setStaffSession } from '../lib/auth-storage';
+import SessionSecurityGuard from '../components/admin/SessionSecurityGuard';
 import OrdersTab from '../components/admin/OrdersTab';
 import CashCounterTab from '../components/admin/CashCounterTab';
 import './admin.css';
@@ -73,6 +75,9 @@ export default function AdminDashboard() {
     apiFetch('/api/v1/auth/me')
       .then(res => (res.ok ? res.json() : Promise.reject(new Error('Not logged in'))))
       .then(data => {
+        if (data.token) {
+          setStaffSession(data.token, data.user, false);
+        }
         // Kitchen accounts have no admin access; their screen is the kitchen display.
         if (data.user?.role === 'KITCHEN') navigate('/kitchen', { replace: true });
         else setUser(data.user);
@@ -137,8 +142,7 @@ export default function AdminDashboard() {
   };
 
   const handleLogout = async () => {
-    localStorage.removeItem('kalpana_session_token');
-    localStorage.removeItem('kalpana_session_user');
+    clearStaffSession();
     await apiFetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
     window.location.assign('/login');
   };
@@ -179,6 +183,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="adm-root" style={{ display: 'flex', height: '100vh', minHeight: '100dvh', maxHeight: '100dvh', width: '100%', backgroundColor: '#f3f4f6', fontFamily: "'Inter', sans-serif", overflow: 'hidden' }}>
+      <SessionSecurityGuard type="STAFF" />
       {sidebarOpen && <div className="adm-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
       <title>Admin | Adarsha</title>
       <meta name="robots" content="noindex, nofollow" />

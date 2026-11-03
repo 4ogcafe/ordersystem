@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ReadyAlertButton from '../components/order/ReadyAlertButton';
+import SessionSecurityGuard from '../components/admin/SessionSecurityGuard';
 import { readyChime } from '../lib/push';
 import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ChevronRight, Coins, House, LogOut, Receipt, ShoppingBag, Sparkles, Ticket, UserRound, Wallet, type LucideIcon } from 'lucide-react';
@@ -203,6 +204,7 @@ export default function Account() {
 
   return (
     <div className="acc">
+      <SessionSecurityGuard type="CUSTOMER" timeoutMinutes={60} warningMinutes={2} />
       <title>マイページ | Adarsha (アダルサ)</title>
       <meta name="robots" content="noindex" />
 

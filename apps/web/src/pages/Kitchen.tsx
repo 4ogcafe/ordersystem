@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { Bell, BellOff, ChefHat, ClipboardList, History, LogOut, Maximize, Minimize, PauseCircle, PlayCircle, Printer, Sliders, WifiOff, X } from 'lucide-react';
 import { apiFetch, errorMessage, getPublic } from '../lib/api';
+import { clearStaffSession, setStaffSession } from '../lib/auth-storage';
+import SessionSecurityGuard from '../components/admin/SessionSecurityGuard';
 import { formatOrderNumber } from '../lib/format';
 import { DEFAULT_STORE_LOCATIONS, resolveOrderStore, type StoreLocation } from '../lib/stores';
 import { alertText } from '../components/admin/dietary';
@@ -166,7 +168,12 @@ export default function Kitchen() {
   useEffect(() => {
     apiFetch('/api/v1/auth/me')
       .then(res => (res.ok ? res.json() : Promise.reject(new Error('Not logged in'))))
-      .then(data => setUser(data.user))
+      .then(data => {
+        if (data.token) {
+          setStaffSession(data.token, data.user, false);
+        }
+        setUser(data.user);
+      })
       .catch(() => navigate('/login', { replace: true }));
     getPublic<{ stores?: StoreLocation[] }>('/api/v1/stores')
       .then(res => {
@@ -409,8 +416,7 @@ export default function Kitchen() {
   };
 
   const logout = async () => {
-    localStorage.removeItem('kalpana_session_token');
-    localStorage.removeItem('kalpana_session_user');
+    clearStaffSession();
     await apiFetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
     window.location.assign('/login');
   };
@@ -445,6 +451,7 @@ export default function Kitchen() {
 
   return (
     <div className="kd">
+      <SessionSecurityGuard type="STAFF" />
       <title>{`${byColumn('NEW').length ? `(${byColumn('NEW').length}) ` : ''}Kitchen | Adarsha`}</title>
       <meta name="robots" content="noindex, nofollow" />
 

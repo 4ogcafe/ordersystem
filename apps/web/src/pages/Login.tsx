@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch, errorMessage } from '../lib/api';
+import { setStaffSession, clearStaffSession } from '../lib/auth-storage';
+import { ShieldCheck, Info } from 'lucide-react';
 
 type Role = 'ADMIN' | 'STAFF' | 'KITCHEN';
 interface SessionUser {
@@ -17,23 +19,35 @@ const homeFor = (role: Role | undefined) => (role === 'KITCHEN' ? '/kitchen' : '
 /** Sign-in for restaurant accounts (admin, staff, kitchen). Customers use マイページ (/account/login). */
 export default function Login() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   // Someone already signed in on this browser (undefined while checking).
   const [current, setCurrent] = useState<SessionUser | null | undefined>(undefined);
 
+  const reason = params.get('reason');
+
   useEffect(() => {
     apiFetch('/api/v1/auth/me')
       .then(res => (res.ok ? res.json() : null))
-      .then(data => setCurrent(data?.user ?? null))
+      .then(data => {
+        if (data?.user) {
+          setCurrent(data.user);
+          if (data.token) {
+            setStaffSession(data.token, data.user, false);
+          }
+        } else {
+          setCurrent(null);
+        }
+      })
       .catch(() => setCurrent(null));
   }, []);
 
   const signOut = async () => {
-    localStorage.removeItem('kalpana_session_token');
-    localStorage.removeItem('kalpana_session_user');
+    clearStaffSession();
     await apiFetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
     setCurrent(null);
   };
@@ -46,7 +60,7 @@ export default function Login() {
       const res = await apiFetch('/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({ email: email.trim(), password, rememberMe }),
       });
       if (!res.ok) {
         setError(
@@ -61,8 +75,7 @@ export default function Login() {
       const data = await res.json();
       const user = data.user as SessionUser;
       if (data.token) {
-        localStorage.setItem('kalpana_session_token', data.token);
-        localStorage.setItem('kalpana_session_user', JSON.stringify(user));
+        setStaffSession(data.token, user, rememberMe);
       }
       const destination = homeFor(user.role);
       window.location.assign(destination);
@@ -77,9 +90,23 @@ export default function Login() {
     <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6', padding: '16px', boxSizing: 'border-box' }}>
       <title>Staff Login | Adarsha</title>
       <meta name="robots" content="noindex, nofollow" />
-      <div style={{ backgroundColor: 'white', padding: '2rem', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', width: '100%', maxWidth: '400px', boxSizing: 'border-box' }}>
+      <div style={{ backgroundColor: 'white', padding: '2rem', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', width: '100%', maxWidth: '420px', boxSizing: 'border-box' }}>
         <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: '0 0 0.25rem', textAlign: 'center' }}>Staff Login</h1>
-        <p style={{ margin: '0 0 1.5rem', textAlign: 'center', color: '#6b7280', fontSize: '0.875rem' }}>For admin, staff and kitchen accounts.</p>
+        <p style={{ margin: '0 0 1.25rem', textAlign: 'center', color: '#6b7280', fontSize: '0.875rem' }}>For admin, staff and kitchen accounts.</p>
+
+        {reason === 'idle_timeout' && (
+          <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#92400e', backgroundColor: '#fef3c7', border: '1px solid #fde68a', padding: '0.65rem 0.75rem', borderRadius: '6px', marginBottom: '1.25rem', fontSize: '0.85rem', lineHeight: 1.4 }}>
+            <Info size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div>一定時間操作がなかったため、セキュリティ保護のため安全に自動ログアウトしました。</div>
+          </div>
+        )}
+
+        {reason === 'session_expired' && (
+          <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#1e40af', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', padding: '0.65rem 0.75rem', borderRadius: '6px', marginBottom: '1.25rem', fontSize: '0.85rem', lineHeight: 1.4 }}>
+            <Info size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div>セッションが終了しました。再度ログインしてください。</div>
+          </div>
+        )}
 
         {current && (
           <div style={{ marginBottom: '1.5rem', padding: '1rem', borderRadius: '8px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
@@ -105,10 +132,29 @@ export default function Login() {
               <label htmlFor="login-email" style={label}>Email</label>
               <input id="login-email" autoComplete="username" type="email" value={email} onChange={e => setEmail(e.target.value)} style={input} required autoFocus />
             </div>
-            <div style={{ marginBottom: '1.5rem' }}>
+            <div style={{ marginBottom: '1rem' }}>
               <label htmlFor="login-password" style={label}>Password</label>
               <input id="login-password" autoComplete="current-password" type="password" value={password} onChange={e => setPassword(e.target.value)} style={input} required />
             </div>
+
+            <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                id="login-remember"
+                type="checkbox"
+                checked={rememberMe}
+                onChange={e => setRememberMe(e.target.checked)}
+                style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#111827' }}
+              />
+              <label htmlFor="login-remember" style={{ fontSize: '0.85rem', color: '#374151', cursor: 'pointer', userSelect: 'none' }}>
+                ログイン状態を保持する（次回から自動ログイン）
+              </label>
+            </div>
+
+            <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', backgroundColor: '#f9fafb', borderRadius: '6px', border: '1px solid #e5e7eb', fontSize: '0.75rem', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <ShieldCheck size={14} style={{ color: '#059669', flexShrink: 0 }} />
+              <span>未選択時はブラウザ終了またはシステム再起動で自動ログアウトされます。</span>
+            </div>
+
             <button type="submit" disabled={busy || !email.trim() || !password} style={{ ...button, width: '100%', opacity: busy || !email.trim() || !password ? 0.6 : 1 }}>
               {busy ? 'Signing in…' : 'Sign In'}
             </button>

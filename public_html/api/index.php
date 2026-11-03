@@ -6282,8 +6282,11 @@ if ($method === 'POST' && ($subPath === '/auth/login' || $subPath === '/auth/log
     $ttl = ($user['role'] === 'KITCHEN') ? 57600 : 28800; // 16h for kitchen, 8h for staff
     $token = createJwt(['sub' => $user['id'], 'role' => $user['role']], $jwtSecret, $ttl);
 
+    $rememberMe = !empty($input['rememberMe']);
+    $cookieExpires = $rememberMe ? (time() + $ttl) : 0; // 0 = session cookie (expires on browser close or system reset)
+
     setcookie('kalpana_session', $token, [
-        'expires' => time() + $ttl,
+        'expires' => $cookieExpires,
         'path' => '/',
         'domain' => '',
         'secure' => true,
@@ -6291,7 +6294,7 @@ if ($method === 'POST' && ($subPath === '/auth/login' || $subPath === '/auth/log
         'samesite' => 'Lax',
     ]);
 
-    echo json_encode(['user' => $sessionUser, 'token' => $token]);
+    echo json_encode(['user' => $sessionUser, 'token' => $token, 'rememberMe' => $rememberMe]);
     exit;
 }
 
@@ -6345,7 +6348,8 @@ if ($method === 'GET' && ($subPath === '/auth/me' || $subPath === '/auth/me/')) 
             'name' => $user['name'],
             'email' => $user['email'],
             'role' => $user['role'],
-        ]
+        ],
+        'token' => $token,
     ]);
     exit;
 }
@@ -6589,10 +6593,12 @@ if ($method === 'POST' && ($subPath === '/customers/verify-code' || $subPath ===
     }
 
     if (!empty($customer['isEmailVerified'])) {
-        $ttl = 30 * 86400;
+        $rememberMe = !empty($input['rememberMe']);
+        $ttl = $rememberMe ? (30 * 86400) : 86400;
         $token = createJwt(['sub' => $customer['id'], 'aud' => 'customer'], $jwtSecret, $ttl);
+        $cookieExpires = $rememberMe ? (time() + $ttl) : 0;
         setcookie('kalpana_customer', $token, [
-            'expires' => time() + $ttl,
+            'expires' => $cookieExpires,
             'path' => '/',
             'domain' => '',
             'secure' => true,
@@ -6603,6 +6609,7 @@ if ($method === 'POST' && ($subPath === '/customers/verify-code' || $subPath ===
             'success' => true,
             'customer' => formatCustomerProfile($customer),
             'token' => $token,
+            'rememberMe' => $rememberMe,
             'message' => 'すでに認証済みです。',
         ]);
         exit;
@@ -6666,10 +6673,12 @@ if ($method === 'POST' && ($subPath === '/customers/verify-code' || $subPath ===
         }
     } catch (Throwable $e) {}
 
-    $ttl = 30 * 86400;
+    $rememberMe = !empty($input['rememberMe']);
+    $ttl = $rememberMe ? (30 * 86400) : 86400;
     $token = createJwt(['sub' => $customer['id'], 'aud' => 'customer'], $jwtSecret, $ttl);
+    $cookieExpires = $rememberMe ? (time() + $ttl) : 0;
     setcookie('kalpana_customer', $token, [
-        'expires' => time() + $ttl,
+        'expires' => $cookieExpires,
         'path' => '/',
         'domain' => '',
         'secure' => true,
@@ -6681,6 +6690,7 @@ if ($method === 'POST' && ($subPath === '/customers/verify-code' || $subPath ===
         'success' => true,
         'customer' => formatCustomerProfile($customer),
         'token' => $token,
+        'rememberMe' => $rememberMe,
         'message' => 'メール認証が完了しました！会員登録ありがとうございます。',
     ]);
     exit;
@@ -6761,10 +6771,10 @@ if ($method === 'GET' && ($subPath === '/customers/verify-link' || $subPath === 
     $upd = $pdo->prepare('UPDATE Customer SET isEmailVerified = 1, emailVerifiedAt = ?, verificationCode = NULL, verificationToken = NULL, isActive = 1, updatedAt = ? WHERE id = ?');
     $upd->execute([$now, $now, $customer['id']]);
 
-    $ttl = 30 * 86400;
+    $ttl = 86400;
     $jwt = createJwt(['sub' => $customer['id'], 'aud' => 'customer'], $jwtSecret, $ttl);
     setcookie('kalpana_customer', $jwt, [
-        'expires' => time() + $ttl,
+        'expires' => 0, // Session cookie: expires on browser close
         'path' => '/',
         'domain' => '',
         'secure' => true,
@@ -6842,11 +6852,13 @@ if ($method === 'POST' && ($subPath === '/customers/login' || $subPath === '/cus
         $customer['memberCode'] = $newCode;
     }
 
-    $ttl = 30 * 86400; // 30 days
+    $rememberMe = !empty($input['rememberMe']);
+    $ttl = $rememberMe ? (30 * 86400) : 86400; // 30 days if remembered, else 24h token
     $token = createJwt(['sub' => $customer['id'], 'aud' => 'customer'], $jwtSecret, $ttl);
+    $cookieExpires = $rememberMe ? (time() + $ttl) : 0; // 0 = session cookie (expires on browser close or reset)
 
     setcookie('kalpana_customer', $token, [
-        'expires' => time() + $ttl,
+        'expires' => $cookieExpires,
         'path' => '/',
         'domain' => '',
         'secure' => true,
@@ -6854,7 +6866,7 @@ if ($method === 'POST' && ($subPath === '/customers/login' || $subPath === '/cus
         'samesite' => 'Lax',
     ]);
 
-    echo json_encode(['customer' => formatCustomerProfile($customer), 'token' => $token]);
+    echo json_encode(['customer' => formatCustomerProfile($customer), 'token' => $token, 'rememberMe' => $rememberMe]);
     exit;
 }
 
@@ -6883,7 +6895,11 @@ if ($method === 'GET' && ($subPath === '/customers/me' || $subPath === '/custome
         exit;
     }
 
-    echo json_encode(['customer' => formatCustomerProfile($customer), 'loyalty' => ['enabled' => true, 'pointsPer100Yen' => 1, 'pointValueYen' => 1]]);
+    echo json_encode([
+        'customer' => formatCustomerProfile($customer),
+        'loyalty' => ['enabled' => true, 'pointsPer100Yen' => 1, 'pointValueYen' => 1],
+        'token' => $token,
+    ]);
     exit;
 }
 
