@@ -27,6 +27,7 @@ import {
   ShoppingBag,
   Banknote,
   Gift,
+  Tag,
   UserCircle,
   MessageSquare, 
   Users, 
@@ -38,8 +39,8 @@ import {
   X
 } from 'lucide-react';
 
-// STAFF may edit menu items & operate the cash counter; everything else is admin-only.
-const STAFF_TABS = ['Overview', 'Orders', 'Cash Counter', 'Menu Management'];
+// STAFF may edit menu items, operate the cash counter & manage coupons; everything else is admin-only.
+const STAFF_TABS = ['Overview', 'Orders', 'Cash Counter', 'Menu Management', 'Offers & Coupons'];
 const STATS_POLL_MS = 30_000;
 
 /** A short beep for new orders; browsers only allow it after the user has clicked on the page. */
@@ -160,7 +161,8 @@ export default function AdminDashboard() {
     { name: 'Overview', icon: LayoutDashboard },
     { name: 'Orders', icon: ShoppingBag },
     { name: 'Menu Management', icon: MenuIcon },
-    { name: 'Stamps, Offers & Points', icon: Gift },
+    { name: 'Offers & Coupons', icon: Tag },
+    { name: 'Stamps & Loyalty', icon: Gift },
     { name: 'Restaurant Settings', icon: Settings },
     { name: 'Store Locations', icon: MapPin },
     { name: 'Page Settings', icon: ImageIcon },
@@ -329,7 +331,9 @@ export default function AdminDashboard() {
           {activeTab === 'Orders' && <OrdersTab isAdmin={user.role === 'ADMIN'} intent={intent} />}
           {activeTab === 'Cash Counter' && <CashCounterTab user={user} />}
           {activeTab === 'Menu Management' && <MenuManagementTab intent={intent} />}
-          {activeTab === 'Stamps, Offers & Points' && <OffersTab intent={intent} />}
+          {activeTab === 'Offers & Coupons' && <OffersTab intent={intent} defaultSection="offers" />}
+          {activeTab === 'Stamps & Loyalty' && <OffersTab intent={intent} defaultSection="stamps" />}
+          {activeTab === 'Stamps, Offers & Points' && <OffersTab intent={intent} defaultSection="offers" />}
           {activeTab === 'Restaurant Settings' && <SettingsTab />}
           {activeTab === 'Store Locations' && <StoreLocationsManager />}
           {activeTab === 'Page Settings' && <PageSettingsTabComponent onOpenRestaurantSettings={() => navigateTo('Restaurant Settings')} />}

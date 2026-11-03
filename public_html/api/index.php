@@ -3829,7 +3829,7 @@ function serializeOfferItem(array $offer, int $uses = 0): array {
 // Endpoint: GET /offers/all (Admin list with usage count)
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/offers/all' || $subPath === '/offers/all/')) {
-    requireAdminUser($jwtSecret, $pdo);
+    requireStaffUser($jwtSecret, $pdo);
     $stmt = $pdo->query('SELECT * FROM Offer ORDER BY createdAt DESC');
     $offers = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
@@ -3905,7 +3905,7 @@ if ($method === 'GET' && ($subPath === '/offers' || $subPath === '/offers/')) {
 // Endpoint: POST /offers (Admin create offer)
 // -------------------------------------------------------------
 if ($method === 'POST' && ($subPath === '/offers' || $subPath === '/offers/')) {
-    $admin = requireAdminUser($jwtSecret, $pdo);
+    $admin = requireStaffUser($jwtSecret, $pdo);
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
 
     $titleJa = trim((string)($input['titleJa'] ?? ''));
@@ -4005,7 +4005,7 @@ if ($method === 'POST' && ($subPath === '/offers' || $subPath === '/offers/')) {
 // Endpoint: PATCH /offers/:id/toggle (Admin toggle active status)
 // -------------------------------------------------------------
 if ($method === 'PATCH' && preg_match('#^/offers/([a-zA-Z0-9_-]+)/toggle/?$#', $subPath, $toggleMatches)) {
-    requireAdminUser($jwtSecret, $pdo);
+    requireStaffUser($jwtSecret, $pdo);
     $offerId = $toggleMatches[1];
 
     $stmt = $pdo->prepare('SELECT * FROM Offer WHERE id = ?');
@@ -4029,7 +4029,7 @@ if ($method === 'PATCH' && preg_match('#^/offers/([a-zA-Z0-9_-]+)/toggle/?$#', $
 // Endpoint: PUT /offers/:id (Admin update offer)
 // -------------------------------------------------------------
 if ($method === 'PUT' && preg_match('#^/offers/([a-zA-Z0-9_-]+)/?$#', $subPath, $putMatches)) {
-    requireAdminUser($jwtSecret, $pdo);
+    requireStaffUser($jwtSecret, $pdo);
     $offerId = $putMatches[1];
 
     $stmt = $pdo->prepare('SELECT * FROM Offer WHERE id = ?');
@@ -4131,7 +4131,7 @@ if ($method === 'PUT' && preg_match('#^/offers/([a-zA-Z0-9_-]+)/?$#', $subPath, 
 // Endpoint: DELETE /offers/:id (Admin delete offer)
 // -------------------------------------------------------------
 if ($method === 'DELETE' && preg_match('#^/offers/([a-zA-Z0-9_-]+)/?$#', $subPath, $delMatches)) {
-    requireAdminUser($jwtSecret, $pdo);
+    requireStaffUser($jwtSecret, $pdo);
     $offerId = $delMatches[1];
 
     $stmt = $pdo->prepare('SELECT id FROM Offer WHERE id = ?');
