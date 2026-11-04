@@ -1447,11 +1447,14 @@ if (empty($subPath)) $subPath = '/';
 if ($method === 'GET' && preg_match('#^/uploads/([a-zA-Z0-9_.-]+)$#', $subPath, $uploadMatches)) {
     $reqFile = basename($uploadMatches[1]);
     $primaryPath = dirname(__DIR__) . '/uploads/' . $reqFile;
+    $rootPath = dirname(__DIR__) . '/../uploads/' . $reqFile;
     $backupPath = dirname(__DIR__, 2) . '/kalpana-uploads/' . $reqFile;
 
     $servePath = null;
     if (is_file($primaryPath)) {
         $servePath = $primaryPath;
+    } elseif (is_file($rootPath)) {
+        $servePath = $rootPath;
     } elseif (is_file($backupPath)) {
         // Restore into public_html/uploads/ so Apache serves future requests directly
         if (!is_dir(dirname($primaryPath))) {

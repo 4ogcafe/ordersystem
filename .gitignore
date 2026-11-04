@@ -12,6 +12,10 @@ apps/web/dist/
 .cache/
 coverage/
 
+# Avoid duplicate image storage across multiple locations
+apps/web/public/uploads/
+apps/api/public/uploads/
+
 # Environment files & secrets
 .env
 .env.*

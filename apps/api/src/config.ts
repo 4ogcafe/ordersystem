@@ -42,10 +42,11 @@ export const config = {
   uploadDir: process.env.UPLOAD_DIR
     ? path.resolve(process.env.UPLOAD_DIR)
     : [
-        path.join(process.cwd(), 'public', 'uploads'),
-        path.join(process.cwd(), 'apps', 'api', 'public', 'uploads'),
-        path.join(process.cwd(), 'public_html', 'uploads'),
-      ].find((d) => fs.existsSync(d)) || path.join(process.cwd(), 'public', 'uploads'),
+        path.resolve(process.cwd(), 'uploads'),
+        path.resolve(process.cwd(), '../../uploads'),
+        path.resolve(__dirname, '../../../uploads'),
+        path.resolve(process.cwd(), 'public_html', 'uploads'),
+      ].find((d) => fs.existsSync(d)) || path.resolve(process.cwd(), 'uploads'),
   // Built web app (`pnpm --filter web build`). When present, the API serves the site too.
   webDistDir: path.resolve(
     process.env.WEB_DIST_DIR ||

@@ -53,6 +53,10 @@ DirectoryIndex index.html index.php
   RewriteCond %{DOCUMENT_ROOT}/uploads/%1 -f
   RewriteRule ^uploads/(.+)$ uploads/$1 [L]
 
+  RewriteCond %{REQUEST_URI} ^/uploads/(.+)$
+  RewriteCond %{DOCUMENT_ROOT}/../uploads/%1 -f
+  RewriteRule ^uploads/(.+)$ ../uploads/$1 [L]
+
   # ----------------------------------------------------------------------
   # 404 FOR MISSING STATIC ASSETS (PREVENT HTML RETURNED AS IMAGE/CSS)
   # ----------------------------------------------------------------------
