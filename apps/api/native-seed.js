@@ -87,7 +87,7 @@ async function run() {
     const settings = db.collection('Settings');
     await settings.deleteMany({});
     await settings.insertOne({
-      _id: new ObjectId(), name: 'Adarsha Indian Cuisine', addressEn: 'Kumagaya, Saitama, Japan', addressJa: '埼玉県熊谷市', lat: 36.1473, lng: 139.3886, phone: '048-XXX-XXXX', email: 'info@adarshacurry.com', timezone: 'Asia/Tokyo', currency: 'JPY',
+      _id: new ObjectId(), name: 'Adarsha Indian Cuisine', addressEn: 'Kumagaya, Saitama, Japan', addressJa: '埼玉県熊谷市', lat: 36.1473, lng: 139.3886, phone: '048-XXX-XXXX', email: 'info@adarsha.jp', timezone: 'Asia/Tokyo', currency: 'JPY',
       weeklyHours: { monday: "11:00-15:00, 17:00-22:00" }, holidays: { regular: "Tuesday" }, socials: { instagram: "@adarsha_restro" }, updatedAt: new Date()
     });
     console.log(`Inserted Settings`);

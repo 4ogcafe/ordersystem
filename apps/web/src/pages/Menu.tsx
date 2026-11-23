@@ -5,17 +5,19 @@ import { assetUrl, getPublic } from '../lib/api';
 import { useCart } from '../lib/cart-context';
 import { yen } from '../lib/format';
 import { checkMenuTypeOrderAllowed, evaluateOrderTiming } from '../lib/order-timing';
-import { DEFAULT_STORE_LOCATIONS, getSavedOrderStoreId, type StoreLocation } from '../lib/stores';
+import { DEFAULT_STORE_LOCATIONS, getSavedOrderStoreId, saveOrderStoreId, type StoreLocation } from '../lib/stores';
 import OrderButtons, { type OrderableItem } from '../components/order/OrderButtons';
 import RelatedItemsPanel, { type PanelItem } from '../components/order/RelatedItemsPanel';
 import OfferSticker from '../components/MemberOffers';
 import NotFound from './NotFound';
 import { getCategoryIcon } from '../lib/category-icons';
+import { useBodyScrollLock } from '../lib/useBodyScrollLock';
+import SafeImage from '../components/SafeImage';
 
 const HERO_IMAGES: Record<string, string> = {
-  lunch: 'https://images.unsplash.com/photo-1585937421612-70a008356fbe?auto=format&fit=crop&w=1920&q=80',
-  takeout: 'https://images.unsplash.com/photo-1551224650-9c25e628120e?auto=format&fit=crop&w=1920&q=80',
-  grand: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1920&q=80'
+  lunch: '',
+  takeout: '',
+  grand: '',
 };
 
 const SPICE_LABELS: Record<number, string> = {
@@ -30,7 +32,7 @@ function getSpiceLabel(level: number): string {
   return SPICE_LABELS[level] || `辛さ Lv.${level}`;
 }
 
-const DEFAULT_IMAGE = '/bg-hero-img.webp';
+const DEFAULT_IMAGE = ''; // empty → SafeImage omits <img> (never src="")
 
 export default function Menu() {
   const { type } = useParams();
@@ -55,6 +57,7 @@ export default function Menu() {
   const selectedStore = stores.find(s => s.id === selectedStoreId) ?? stores[0] ?? DEFAULT_STORE_LOCATIONS[0];
 
   const [showScrollTop, setShowScrollTop] = useState<boolean>(false);
+  useBodyScrollLock(selectedIndex !== null);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -125,9 +128,16 @@ export default function Menu() {
       .then(data => setSettings(data))
       .catch(console.error);
 
-    getPublic<{ enabled: boolean }>('/api/v1/orders/slots')
-      .then(data => setOrderingEnabled(Boolean(data.enabled)))
-      .catch(console.error);
+    const loadOrdering = () => {
+      getPublic<{ enabled: boolean }>('/api/v1/orders/slots')
+        .then(data => setOrderingEnabled(Boolean(data.enabled)))
+        .catch(console.error);
+    };
+    loadOrdering();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadOrdering();
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     getPublic<any[]>('/api/v1/menu/option-groups')
       .then(groups => {
@@ -136,6 +146,8 @@ export default function Menu() {
         }
       })
       .catch(console.error);
+
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
   const menuType = (type ?? '').toLowerCase();
@@ -216,9 +228,23 @@ export default function Menu() {
       categoriesMap.set(catId, { id: catId, name: catName, icon, sortOrder, items: [] });
     }
     
-    const resolvedGroups = Array.isArray(item.optionGroupIds)
+    // API returns optionGroups (stubs or full). Prefer full payload; fall back to optionGroupIds + map.
+    const fromItem = Array.isArray(item.optionGroups)
+      ? item.optionGroups
+          .map((g: { id: string; nameJa?: string; options?: unknown }) => {
+            const full = optionGroupMap.get(g.id);
+            if (full) return full;
+            if (Array.isArray(g.options) && g.nameJa) return g;
+            return null;
+          })
+          .filter(Boolean)
+      : [];
+    const fromIds = Array.isArray(item.optionGroupIds)
       ? item.optionGroupIds.map((gid: string) => optionGroupMap.get(gid)).filter(Boolean)
       : [];
+    const resolvedGroups = (fromItem.length > 0 ? fromItem : fromIds)
+      .slice()
+      .sort((a: { sortOrder?: number }, b: { sortOrder?: number }) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
 
     categoriesMap.get(catId).items.push({
       id: item.id,
@@ -249,7 +275,7 @@ export default function Menu() {
   categories.forEach(cat => cat.items.sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)));
   const flatItems = categories.flatMap(cat => cat.items);
 
-  const defaultHero = carousels.length > 0 ? carousels[0].imageUrl : 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1920&q=80';
+  const defaultHero = carousels.length > 0 ? carousels[0].imageUrl : (settings.menuGrandHeroImage || settings.menuLunchHeroImage || settings.menuTakeoutHeroImage || '');
 
   const menuInfo = {
     title: menuType === 'lunch' ? 'ランチメニュー' : menuType === 'takeout' ? 'テイクアウト' : 'グランドメニュー',
@@ -314,8 +340,8 @@ export default function Menu() {
 
   if (loading) return <div style={{ padding: '100px', textAlign: 'center' }}>Loading menu...</div>;
 
-  const canonicalUrl = `https://pnglike.com/menu/${menuType}`;
-  const menuOgImage = dynamicHeroImages[menuType] || 'https://pnglike.com/bg-hero-img.webp';
+  const canonicalUrl = `https://adarsha.jp/menu/${menuType}`;
+  const menuOgImage = dynamicHeroImages[menuType] || 'https://adarsha.jp/uploads/site-logo-01.webp';
   const menuDescription = `本格インド・アジア料理店アダルサの${menuInfo.title}。備長炭タンドール窯で焼き上げるナン、本場スパイスカレーなどを価格とともにご紹介します。`;
 
   return (
@@ -345,7 +371,7 @@ export default function Menu() {
                 '@type': 'ListItem',
                 'position': 1,
                 'name': 'ホーム',
-                'item': 'https://pnglike.com/'
+                'item': 'https://adarsha.jp/'
               },
               {
                 '@type': 'ListItem',
@@ -386,7 +412,7 @@ export default function Menu() {
       />
       {/* Hero Section */}
       <div className="home-hero" style={{ height: '40vh', minHeight: '300px' }}>
-        <img src={dynamicHeroImages[menuType]} alt="" fetchPriority="high" className="slide-bg-img" style={{ opacity: 0.5, objectFit: 'cover' }} />
+        <SafeImage src={dynamicHeroImages[menuType]} alt="" fetchPriority="high" className="slide-bg-img" style={{ opacity: 0.5, objectFit: 'cover' }} />
         <OfferSticker />
         <div className="hero-content">
           <div className="hero-tag">{menuInfo.tag}</div>
@@ -454,19 +480,15 @@ export default function Menu() {
                         return (
                           <article key={item.id} className={`menu-card${item.soldOut ? ' is-sold-out' : ''}`} onClick={() => handleItemClick(item.id)}>
                             <div className="menu-card-media">
-                              <img
+                              <SafeImage
                                 src={item.img}
                                 alt={item.name}
                                 loading="lazy"
                                 decoding="async"
                                 width={400}
                                 height={300}
-                                onError={(e) => {
-                                  const target = e.currentTarget;
-                                  if (!target.src.endsWith('/bg-hero-img.webp')) {
-                                    target.src = DEFAULT_IMAGE;
-                                  }
-                                }}
+                                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                fallback={<div className="menu-card-media-placeholder" aria-hidden="true" />}
                               />
                               <div className="menu-card-badges">
                                 {item.soldOut && <span className="menu-badge menu-badge-dark">売り切れ</span>}
@@ -571,33 +593,28 @@ export default function Menu() {
           type="button"
           onClick={cart.openCart}
           className="btn-warm"
-          style={{ position: 'fixed', left: '50%', bottom: '20px', transform: 'translateX(-50%)', zIndex: 900, display: 'flex', alignItems: 'center', gap: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.25)', whiteSpace: 'nowrap', borderRadius: '9999px' }}
+          style={{ position: 'fixed', left: '50%', bottom: 'max(16px, env(safe-area-inset-bottom))', transform: 'translateX(-50%)', zIndex: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', boxShadow: '0 8px 24px rgba(0,0,0,0.25)', borderRadius: '9999px', maxWidth: 'calc(100% - 32px)', padding: '12px 18px', whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.3 }}
         >
-          🛒 カートを見る（{cart.count}点） {yen(cart.total)} <span style={{ fontWeight: 'normal', fontSize: '0.8rem' }}>(税込)</span>
+          🛒 カート（{cart.count}点） {yen(cart.total)} <span style={{ fontWeight: 'normal', fontSize: '0.8rem' }}>(税込)</span>
         </button>
       )}
 
       {/* Lightbox / Popup */}
       {selectedIndex !== null && (
-        <div onClick={closeLightbox} style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', boxSizing: 'border-box' }}>
+        <div onClick={closeLightbox} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left))', boxSizing: 'border-box', overscrollBehavior: 'none', touchAction: 'none' }}>
           
           <button onClick={closeLightbox} aria-label="閉じる" style={{ position: 'absolute', top: '20px', right: '20px', background: 'none', border: 'none', color: 'white', fontSize: '2rem', cursor: 'pointer', padding: '10px' }}>×</button>
           
-          <button onClick={handlePrev} aria-label="前の商品" style={{ position: 'absolute', left: '20px', top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', fontSize: '2rem', cursor: 'pointer', padding: '15px 20px', borderRadius: '50%' }}>❮</button>
+          <button onClick={handlePrev} aria-label="前の商品" style={{ position: 'absolute', left: 'max(4px, env(safe-area-inset-left))', top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', fontSize: '1.4rem', cursor: 'pointer', padding: '10px 12px', borderRadius: '50%', zIndex: 2 }}>❮</button>
           
-          <div onClick={(e) => e.stopPropagation()} style={{ backgroundColor: 'white', borderRadius: '12px', overflowX: 'hidden', overflowY: 'auto', display: 'flex', flexDirection: 'column', maxWidth: '600px', width: '100%', maxHeight: '90vh' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ backgroundColor: 'white', borderRadius: '12px', overflowX: 'hidden', overflowY: 'auto', display: 'flex', flexDirection: 'column', maxWidth: '600px', width: '100%', maxHeight: '90vh', touchAction: 'pan-y', overscrollBehavior: 'contain' }}>
             {/* Shorter photo on small screens so the order buttons stay in view; the panel scrolls if needed. */}
             <div style={{ width: '100%', height: 'min(350px, 38vh)', flexShrink: 0, backgroundColor: '#f9f6f0', padding: '0', position: 'relative' }}>
-              <img
+              <SafeImage
                 src={flatItems[selectedIndex].img}
                 alt={flatItems[selectedIndex].name}
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                onError={(e) => {
-                  const target = e.currentTarget;
-                  if (!target.src.endsWith('/bg-hero-img.webp')) {
-                    target.src = DEFAULT_IMAGE;
-                  }
-                }}
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
               />
               {/* Share + Like buttons */}
               <div style={{ position: 'absolute', top: '12px', right: '12px', display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
@@ -716,19 +733,63 @@ export default function Menu() {
                     )}
                   </div>
 
-                  <a
-                    href={`tel:${(selectedStore.phone || '03-6903-7598').replace(/[^0-9]/g, '')}`}
-                    className="popup-dinein-call-btn"
+                  <label
+                    htmlFor="menu-popup-store"
+                    style={{ display: 'block', textAlign: 'left', fontSize: '0.78rem', fontWeight: 700, color: 'var(--dark-bark)', marginBottom: '6px' }}
                   >
-                    📞 {selectedStore.phone || '03-6903-7598'}（{selectedStore.name}へお電話でご注文・ご予約）
-                  </a>
+                    お電話する店舗
+                  </label>
+                  <select
+                    id="menu-popup-store"
+                    value={selectedStore.id}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setSelectedStoreId(nextId);
+                      saveOrderStoreId(nextId, 'manual');
+                    }}
+                    style={{
+                      width: '100%',
+                      maxWidth: '360px',
+                      margin: '0 auto 12px',
+                      display: 'block',
+                      padding: '10px 12px',
+                      borderRadius: '10px',
+                      border: '1.5px solid #e5dbcd',
+                      background: '#fff',
+                      color: 'var(--dark-bark)',
+                      font: 'inherit',
+                      fontWeight: 600,
+                      fontSize: '0.9rem',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    {stores.map(store => (
+                      <option key={store.id} value={store.id}>
+                        {store.name}{store.phone ? `（${store.phone}）` : ''}
+                      </option>
+                    ))}
+                  </select>
+
+                  {selectedStore.phone ? (
+                    <a
+                      href={`tel:${selectedStore.phone.replace(/[^0-9]/g, '')}`}
+                      className="popup-dinein-call-btn"
+                      aria-label={`${selectedStore.name}（${selectedStore.phone}）へ電話する`}
+                    >
+                      📞 {selectedStore.phone}（{selectedStore.name}へお電話でご注文・ご予約）
+                    </a>
+                  ) : (
+                    <span className="popup-dinein-call-btn" style={{ opacity: 0.55, cursor: 'not-allowed' }}>
+                      📞 電話番号未設定（{selectedStore.name}）
+                    </span>
+                  )}
                 </div>
               )}
               
             </div>
           </div>
 
-          <button onClick={handleNext} aria-label="次の商品" style={{ position: 'absolute', right: '20px', top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', fontSize: '2rem', cursor: 'pointer', padding: '15px 20px', borderRadius: '50%' }}>❯</button>
+          <button onClick={handleNext} aria-label="次の商品" style={{ position: 'absolute', right: 'max(4px, env(safe-area-inset-right))', top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', fontSize: '1.4rem', cursor: 'pointer', padding: '10px 12px', borderRadius: '50%', zIndex: 2 }}>❯</button>
 
         </div>
       )}

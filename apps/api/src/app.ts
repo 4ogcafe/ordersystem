@@ -21,14 +21,19 @@ import stampRoutes from './routes/stamps.js';
 import reviewRoutes from './routes/reviews.js';
 import pushRoutes from './routes/push.js';
 import squareRoutes from './routes/square.js';
+import { handleSquareWebhook } from './routes/square.js';
 import gameRoutes from './routes/game.js';
 import jobsRoutes from './routes/jobs.js';
 import blogRoutes from './routes/blogs.js';
 import storeRoutes from './routes/stores.js';
 import cashRegisterRoutes from './routes/cash-register.js';
+import lineRoutes, { handleLineWebhook } from './routes/line.js';
+import qrRoutes, { qrAdminRoutes } from './routes/qr.js';
+import { BRAND_IMAGE_FILES } from './lib/uploads.js';
 
 const JSON_BODY_LIMIT = '100kb';
 const UPLOAD_MAX_AGE = '30d';
+const BRAND_FILE_SET = new Set(BRAND_IMAGE_FILES.map((f) => f.toLowerCase()));
 
 export function createApp() {
   const app = express();
@@ -56,6 +61,22 @@ export function createApp() {
       },
     }),
   );
+  // LINE + Square webhooks need raw body bytes for signature verification (before JSON parsing).
+  app.post(
+    '/api/v1/line/webhook',
+    express.raw({ type: '*/*', limit: JSON_BODY_LIMIT }),
+    (req, res, next) => {
+      Promise.resolve(handleLineWebhook(req, res)).catch(next);
+    },
+  );
+  app.post(
+    '/api/v1/square/webhook',
+    express.raw({ type: '*/*', limit: JSON_BODY_LIMIT }),
+    (req, res, next) => {
+      Promise.resolve(handleSquareWebhook(req, res)).catch(next);
+    },
+  );
+
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
   // Upload names are unique, so files can be cached for a long time. The sandbox CSP stops any
@@ -71,6 +92,18 @@ export function createApp() {
       },
     }),
   );
+
+  // Legacy root brand URLs (/adarsha-log.webp) → same file in the single uploads/ store.
+  app.get(/^\/([^/]+\.(?:webp|png|jpe?g|gif|svg))$/i, (req, res, next) => {
+    const name = path.basename(req.path);
+    if (!BRAND_FILE_SET.has(name.toLowerCase())) return next();
+    const filePath = path.join(config.uploadDir, name);
+    if (!filePath.startsWith(config.uploadDir) || !fs.existsSync(filePath)) return next();
+    res.setHeader('Cache-Control', `public, max-age=${60 * 60 * 24 * 30}, immutable`);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.sendFile(filePath, (err) => { if (err) next(); });
+  });
 
   app.get('/api/v1/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -97,6 +130,9 @@ export function createApp() {
   app.use('/api/v1/blogs', blogRoutes);
   app.use('/api/v1/stores', storeRoutes);
   app.use('/api/v1/cash-register', cashRegisterRoutes);
+  app.use('/api/v1/line', lineRoutes);
+  app.use('/api/v1/qr', qrRoutes);
+  app.use('/api/v1/admin/tables/qr', qrAdminRoutes);
 
   if (fs.existsSync(path.join(config.webDistDir, 'index.html'))) {
     // Serve the built site; any other GET outside /api and /uploads is a client-side route.

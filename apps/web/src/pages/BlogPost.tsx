@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { assetUrl, getPublic } from '../lib/api';
+import SafeImage from '../components/SafeImage';
 
 interface PostDetail {
   id: string;
@@ -148,10 +149,10 @@ export default function BlogPost() {
     );
   }
 
-  const canonicalUrl = `https://pnglike.com/blog/${post.slug}`;
+  const canonicalUrl = `https://adarsha.jp/blog/${post.slug}`;
   const pageTitle = post.metaTitle?.trim() || `${post.title} | Adarsha (アダルサ) 熊谷`;
   const pageDescription = post.metaDescription?.trim() || post.excerpt || `${post.title} - 埼玉県熊谷市の本格インド料理店Adarsha（アダルサ）公式ブログ。`;
-  const postImage = assetUrl(post.coverImage) || 'https://pnglike.com/bg-hero-img.webp';
+  const postImage = assetUrl(post.coverImage) || 'https://adarsha.jp/uploads/site-logo-01.webp';
 
   // AI SEO & DEO (Direct Engine Optimization) BlogPosting Schema
   const blogPostingJsonLd = {
@@ -179,10 +180,10 @@ export default function BlogPost() {
     'publisher': {
       '@type': 'Restaurant',
       'name': '本格インド料理 Adarsha (アダルサ)',
-      'url': 'https://pnglike.com',
+      'url': 'https://adarsha.jp',
       'logo': {
         '@type': 'ImageObject',
-        'url': 'https://pnglike.com/adarsha-log.webp'
+        'url': 'https://adarsha.jp/uploads/adarsha-log.webp'
       },
       'address': {
         '@type': 'PostalAddress',
@@ -207,13 +208,13 @@ export default function BlogPost() {
         '@type': 'ListItem',
         'position': 1,
         'name': 'ホーム',
-        'item': 'https://pnglike.com/'
+        'item': 'https://adarsha.jp/'
       },
       {
         '@type': 'ListItem',
         'position': 2,
         'name': 'ブログ・コラム',
-        'item': 'https://pnglike.com/blog'
+        'item': 'https://adarsha.jp/blog'
       },
       {
         '@type': 'ListItem',
@@ -378,15 +379,10 @@ export default function BlogPost() {
             marginBottom: '2.5rem',
             boxShadow: '0 10px 30px rgba(0,0,0,0.08)'
           }}>
-            <img
-              src={assetUrl(post.coverImage) || '/bg-hero-img.webp'}
+            <SafeImage
+              src={assetUrl(post.coverImage)}
               alt={post.title}
-              onError={(e) => {
-                const target = e.currentTarget;
-                if (!target.src.endsWith('/bg-hero-img.webp')) {
-                  target.src = '/bg-hero-img.webp';
-                }
-              }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
               style={{ width: '100%', maxHeight: '480px', objectFit: 'cover', display: 'block' }}
             />
           </div>
@@ -693,16 +689,11 @@ export default function BlogPost() {
                   onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
                 >
                   <div style={{ height: '140px', overflow: 'hidden' }}>
-                    <img
-                      src={assetUrl(rel.coverImage) || '/bg-hero-img.webp'}
+                    <SafeImage
+                      src={assetUrl(rel.coverImage)}
                       alt={rel.title}
                       loading="lazy"
-                      onError={(e) => {
-                        const target = e.currentTarget;
-                        if (!target.src.endsWith('/bg-hero-img.webp')) {
-                          target.src = '/bg-hero-img.webp';
-                        }
-                      }}
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
                   </div>

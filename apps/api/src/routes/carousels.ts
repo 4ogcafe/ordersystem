@@ -1,10 +1,9 @@
 import express from 'express';
 import { z } from 'zod';
-import { notFound } from '../lib/errors.js';
+import { AppError, notFound } from '../lib/errors.js';
 import { prisma } from '../lib/prisma.js';
 import { definedOnly, idParam, imageUrl, optionalText } from '../lib/schemas.js';
-import { requireAdmin } from '../middleware/auth.js';
-import { publicCache } from '../middleware/cache.js';
+import { readSession, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -16,7 +15,7 @@ const slideUpdateSchema = z.object({
   altEn: optionalText(300),
   imageUrl: imageUrl.optional(),
   isActive: z.boolean().optional(),
-  sortOrder: z.number().int().optional(),
+  sortOrder: z.number().int().min(0).max(500).optional(),
 });
 
 const slideCreateSchema = z.object({
@@ -27,13 +26,20 @@ const slideCreateSchema = z.object({
   placement: placement.default('HOME'),
 });
 
-router.get('/', publicCache, async (req, res) => {
+router.get('/', async (req, res) => {
   const showAll = req.query.all === 'true';
+  if (showAll) {
+    const user = await readSession(req);
+    if (!user) throw new AppError(401, 'UNAUTHENTICATED', 'Please log in');
+    if (user.role !== 'ADMIN') throw new AppError(403, 'FORBIDDEN', 'You do not have permission to do this');
+    res.setHeader('Cache-Control', 'private, no-store');
+  } else {
+    res.setHeader('Cache-Control', 'public, no-cache');
+  }
   const slides = await prisma.carouselSlide.findMany({
     orderBy: { sortOrder: 'asc' },
     where: showAll ? undefined : { placement: placement.catch('HOME').parse(req.query.placement), isActive: true },
   });
-  if (showAll) res.setHeader('Cache-Control', 'no-store');
   res.json(slides);
 });
 

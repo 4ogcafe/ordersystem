@@ -119,16 +119,16 @@ export default function Careers() {
     <main style={{ backgroundColor: '#faf7f2', minHeight: '100vh', color: '#1f2937' }}>
       <title>採用情報・求人募集 (Careers) | Adarsha (アダルサ) 熊谷</title>
       <meta name="description" content="本格インド料理アダルサの求人・採用情報です。ホール、キッチン（カレーシェフ）、デリバリースタッフを募集中。絶品まかない無料、ビザサポートあり！" />
-      <link rel="canonical" href="https://pnglike.com/careers" />
+      <link rel="canonical" href="https://adarsha.jp/careers" />
       <meta property="og:title" content="採用情報・求人募集 (Careers) | Adarsha (アダルサ) 熊谷" />
       <meta property="og:description" content="本格インド料理アダルサの求人・採用情報です。ホール、キッチン、デリバリースタッフ募集中。" />
       <meta property="og:type" content="website" />
-      <meta property="og:url" content="https://pnglike.com/careers" />
-      <meta property="og:image" content="https://pnglike.com/bg-hero-img.webp" />
+      <meta property="og:url" content="https://adarsha.jp/careers" />
+      <meta property="og:image" content="https://adarsha.jp/uploads/site-logo-01.webp" />
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:title" content="採用情報・求人募集 | Adarsha (アダルサ)" />
       <meta name="twitter:description" content="本格インド料理アダルサの求人・採用情報です。" />
-      <meta name="twitter:image" content="https://pnglike.com/bg-hero-img.webp" />
+      <meta name="twitter:image" content="https://adarsha.jp/uploads/site-logo-01.webp" />
 
       {/* Structured Data */}
       <script
@@ -142,13 +142,13 @@ export default function Careers() {
                 '@type': 'ListItem',
                 'position': 1,
                 'name': 'ホーム',
-                'item': 'https://pnglike.com/'
+                'item': 'https://adarsha.jp/'
               },
               {
                 '@type': 'ListItem',
                 'position': 2,
                 'name': '採用情報',
-                'item': 'https://pnglike.com/careers'
+                'item': 'https://adarsha.jp/careers'
               }
             ]
           })

@@ -1,6 +1,10 @@
+@reference "../index.css";
+
 /* Member dashboard: an app-style shell with its own navigation (the site navbar and footer are hidden). */
 
 .acc {
+  @apply min-h-screen grid;
+
   --acc-bg: #f6f2ec;
   --acc-surface: #ffffff;
   --acc-border: #ece4d8;
@@ -9,35 +13,26 @@
   --acc-accent: var(--spice);
   --acc-accent-soft: #fbeee7;
   --acc-radius: 18px;
-  min-height: 100vh;
   background: var(--acc-bg);
   color: var(--acc-ink);
-  display: grid;
   grid-template-columns: 264px minmax(0, 1fr);
 }
 
 /* ---- Sidebar (desktop) ---- */
 .acc-sidebar {
-  position: sticky;
+  @apply sticky flex flex-col gap-6 box-border;
+
   top: 0;
   height: 100vh;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
   padding: 28px 20px;
   background: var(--acc-surface);
   border-right: 1px solid var(--acc-border);
-  box-sizing: border-box;
 }
 
 .acc-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  @apply flex items-center gap-2.5 no-underline font-display font-bold;
+
   color: var(--acc-ink);
-  text-decoration: none;
-  font-family: var(--font-display);
-  font-weight: 700;
   font-size: 1.2rem;
 }
 .acc-brand img { width: 36px; height: 36px; object-fit: contain; }
@@ -45,51 +40,40 @@
 
 .acc-nav { display: flex; flex-direction: column; gap: 4px; }
 .acc-nav button {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
+  @apply flex items-center gap-3 w-full border-0 bg-transparent font-semibold cursor-pointer text-left;
+
   padding: 11px 14px;
-  border: none;
   border-radius: 12px;
-  background: transparent;
   color: var(--acc-muted);
   font: inherit;
-  font-weight: 600;
   font-size: 0.95rem;
-  cursor: pointer;
-  text-align: left;
   transition: background-color 0.15s, color 0.15s;
 }
 .acc-nav button:hover { background: #f8f4ee; color: var(--acc-ink); }
 .acc-nav button[aria-current='page'] { background: var(--acc-accent-soft); color: var(--acc-accent); }
-.acc-nav .acc-badge { margin-left: auto; }
+.acc-nav .acc-badge {
+  @apply ml-auto;
+}
 
 .acc-sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 12px; }
 
 .acc-badge {
+  @apply rounded-full font-bold text-center box-border;
+
   min-width: 20px;
   padding: 2px 7px;
-  border-radius: 9999px;
   background: var(--acc-accent);
   color: #fff;
   font-size: 0.72rem;
-  font-weight: 700;
-  text-align: center;
-  box-sizing: border-box;
 }
 
 /* ---- Main column ---- */
 .acc-main { min-width: 0; display: flex; flex-direction: column; }
 
 .acc-topbar {
-  position: sticky;
+  @apply sticky z-20 flex items-center justify-between gap-4;
+
   top: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
   padding: 18px 40px;
   background: rgba(246, 242, 236, 0.85);
   backdrop-filter: saturate(160%) blur(12px);
@@ -98,20 +82,17 @@
 .acc-topbar h1 { margin: 0; font-size: 1.5rem; font-family: var(--font-display); letter-spacing: -0.3px; }
 .acc-topbar p { margin: 2px 0 0; color: var(--acc-muted); font-size: 0.85rem; }
 .acc-topbar-actions { display: flex; align-items: center; gap: 12px; }
-.acc-mobile-brand { display: none; }
+.acc-mobile-brand {
+  @apply hidden;
+}
 
 .acc-avatar {
+  @apply rounded-full grid place-items-center font-bold border-0 cursor-pointer shrink-0;
+
   width: 40px;
   height: 40px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
   background: linear-gradient(135deg, var(--gold), var(--acc-accent));
   color: #fff;
-  font-weight: 700;
-  border: none;
-  cursor: pointer;
-  flex-shrink: 0;
 }
 
 .acc-content { padding: 8px 40px 48px; max-width: 1120px; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; }
@@ -128,35 +109,22 @@
 .acc-section-head h2 { margin: 0; font-size: 1.1rem; }
 
 .acc-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: none;
-  border: none;
-  padding: 0;
+  @apply inline-flex items-center gap-1 bg-transparent border-0 p-0 font-bold cursor-pointer no-underline;
+
   color: var(--acc-accent);
   font: inherit;
-  font-weight: 700;
   font-size: 0.88rem;
-  cursor: pointer;
-  text-decoration: none;
 }
 
 .acc-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+  @apply inline-flex items-center justify-center gap-2 border-0 font-bold cursor-pointer no-underline;
+
   padding: 11px 18px;
   border-radius: 12px;
-  border: none;
   background: var(--acc-accent);
   color: #fff;
   font: inherit;
-  font-weight: 700;
   font-size: 0.92rem;
-  cursor: pointer;
-  text-decoration: none;
   transition: background-color 0.15s, transform 0.15s;
 }
 .acc-btn:hover { background: var(--spice-hover); }
@@ -166,17 +134,15 @@
 
 /* Hero: greeting + points */
 .acc-hero {
-  position: relative;
-  overflow: hidden;
+  @apply relative overflow-hidden grid gap-6;
+
   border-radius: 24px;
   padding: 28px;
   color: #fff;
   background:
     radial-gradient(circle at 85% 15%, rgba(242, 168, 59, 0.55), transparent 45%),
     linear-gradient(135deg, #c4521f 0%, #8a3313 60%, #5e220c 100%);
-  display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 24px;
   align-items: end;
 }
 .acc-hero-label { font-size: 0.75rem; letter-spacing: 2px; opacity: 0.85; text-transform: uppercase; }
@@ -206,43 +172,29 @@
 
 /* ---- Hero Actions ---- */
 .acc-hero-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
+  @apply flex flex-col gap-2 items-start;
 }
 
 /* ---- Order Item Row (Home tab) ---- */
 .acc-order-row {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 14px;
+  @apply flex w-full items-center gap-3.5 bg-transparent border-0 text-left cursor-pointer;
+
   padding: 14px 0;
-  background: none;
-  border: none;
   font: inherit;
   color: inherit;
-  text-align: left;
-  cursor: pointer;
   transition: opacity 0.15s ease;
 }
 .acc-order-row:hover { opacity: 0.85; }
 
 /* ---- Daily Game Banner Responsive Classes ---- */
 .daily-game-banner {
-  position: relative;
-  overflow: hidden;
+  @apply relative overflow-hidden flex items-center justify-between gap-4 cursor-pointer;
+
   border-radius: 20px;
   background: linear-gradient(135deg, #1e1b4b 0%, #311042 50%, #451a03 100%);
   border: 1.5px solid rgba(251, 191, 36, 0.4);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 0 16px rgba(251, 191, 36, 0.15);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
   padding: 20px 24px;
-  cursor: pointer;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 .daily-game-banner:hover {
@@ -253,39 +205,30 @@
   padding: 16px 20px;
 }
 .daily-game-banner-body {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+  @apply flex items-center gap-4 min-w-0 flex-1;
+
   z-index: 1;
-  min-width: 0;
-  flex: 1;
 }
 .daily-game-banner-icon {
+  @apply grid place-items-center shrink-0;
+
   width: 56px;
   height: 56px;
   border-radius: 16px;
   background-color: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(251, 191, 36, 0.3);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 .daily-game-banner-action {
+  @apply shrink-0;
+
   z-index: 1;
-  flex-shrink: 0;
 }
 .daily-game-play-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
+  @apply inline-flex items-center justify-center gap-1.5 rounded-full font-extrabold border-0 cursor-pointer;
+
   padding: 10px 20px;
-  border-radius: 9999px;
-  font-weight: 800;
   font-size: 0.9rem;
-  border: none;
-  cursor: pointer;
   transition: transform 0.15s ease, filter 0.15s ease;
 }
 .daily-game-play-btn:active {
@@ -293,15 +236,17 @@
 }
 
 /* ---- Bottom tab bar (phones & tablets) ---- */
-.acc-tabbar { display: none; }
+.acc-tabbar {
+  @apply hidden;
+}
 
 @media (max-width: 960px) {
   .acc { grid-template-columns: minmax(0, 1fr); }
-  .acc-sidebar { display: none; }
+  .acc-sidebar { @apply hidden; }
   .acc-topbar { padding: 14px 16px; }
   .acc-topbar h1 { font-size: clamp(1.1rem, 4.2vw, 1.35rem); }
-  .acc-topbar p { display: none; }
-  .acc-mobile-brand { display: block; }
+  .acc-topbar p { @apply hidden; }
+  .acc-mobile-brand { @apply block; }
   .acc-mobile-brand img { width: 32px; height: 32px; object-fit: contain; display: block; }
   .acc-hide-mobile { display: none !important; }
   .acc-content { padding: 8px 16px calc(96px + env(safe-area-inset-bottom)); gap: 20px; }
@@ -313,12 +258,11 @@
   .acc-grid-2 { grid-template-columns: 1fr; }
 
   .acc-tabbar {
-    position: fixed;
+    @apply fixed z-30 grid;
+
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: 30;
-    display: grid;
     grid-template-columns: repeat(4, 1fr);
     padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
     background: rgba(255, 255, 255, 0.96);
@@ -326,25 +270,17 @@
     -webkit-backdrop-filter: blur(16px);
     border-top: 1px solid var(--acc-border);
     box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.05);
-  }
+}
   .acc-tabbar button {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    border: none;
-    background: none;
+    @apply relative flex flex-col items-center justify-center gap-[3px] border-0 bg-transparent font-semibold cursor-pointer;
+
     color: var(--acc-muted);
     font: inherit;
     font-size: 0.68rem;
-    font-weight: 600;
     padding: 6px 0;
     min-height: 48px;
-    cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-  }
+}
   .acc-tabbar button[aria-current='page'] { color: var(--acc-accent); }
   .acc-tabbar .acc-badge { position: absolute; top: 1px; left: 54%; min-width: 16px; padding: 1px 5px; font-size: 0.62rem; }
 }
@@ -355,16 +291,14 @@
     border-radius: 16px;
   }
   .acc-stats {
-    gap: 8px;
+    @apply gap-2;
   }
   .acc-stat {
+    @apply flex-col items-center text-center min-w-0;
+
     padding: 10px 4px;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
     border-radius: 14px;
-    min-width: 0;
-  }
+}
   .acc-stat-icon {
     width: 34px;
     height: 34px;
@@ -376,31 +310,28 @@
     height: 17px;
   }
   .acc-stat-value {
+    @apply whitespace-nowrap overflow-hidden text-ellipsis;
+
     font-size: clamp(0.95rem, 3.8vw, 1.25rem);
     line-height: 1.15;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     max-width: 100%;
-  }
+}
   .acc-stat-label {
     font-size: 0.72rem;
     line-height: 1.2;
     margin-top: 2px;
   }
   .daily-game-banner {
-    flex-direction: column;
-    align-items: stretch;
+    @apply flex-col items-stretch gap-3.5;
+
     padding: 16px 14px;
     border-radius: 18px;
-    gap: 14px;
-  }
+}
   .daily-game-banner.is-compact {
     padding: 14px 12px;
   }
   .daily-game-banner-body {
-    align-items: flex-start;
-    gap: 12px;
+    @apply items-start gap-3;
   }
   .daily-game-banner-icon {
     width: 44px;
@@ -408,32 +339,33 @@
     border-radius: 12px;
   }
   .daily-game-banner-action {
-    width: 100%;
+    @apply w-full;
   }
   .daily-game-play-btn {
-    width: 100%;
+    @apply w-full;
+
     padding: 12px 18px;
     font-size: 0.95rem;
-  }
+}
   .stamp-card-foot {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
+    @apply flex-col items-stretch gap-3;
   }
   .stamp-card-rules {
-    flex: 1 1 auto;
+    @apply flex-auto;
+
     font-size: 0.78rem;
-  }
+}
   .stamp-qr-btn {
-    width: 100%;
-    justify-content: center;
+    @apply w-full justify-center;
+
     padding: 12px 16px;
     font-size: 0.95rem;
-  }
+}
   .acc-order-row {
-    gap: 10px;
+    @apply gap-2.5;
+
     padding: 12px 0;
-  }
+}
   .acc-order-row .acc-stat-icon {
     width: 34px !important;
     height: 34px !important;
@@ -445,7 +377,7 @@
   .acc-content { padding: 6px 12px calc(90px + env(safe-area-inset-bottom)); gap: 16px; }
   .acc-hero { padding: 16px 12px; }
   .acc-card { padding: 14px 10px; }
-  .acc-stats { gap: 6px; }
+  .acc-stats { @apply gap-1.5; }
   .acc-stat { padding: 8px 3px; }
   .acc-stat-icon { width: 30px; height: 30px; }
   .acc-stat-value { font-size: 0.9rem; }
@@ -461,18 +393,13 @@
 .prof-fieldset { border: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .prof-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .prof-chip {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
+  @apply relative inline-flex items-center rounded-full font-semibold cursor-pointer select-none;
+
   min-height: 38px;
   padding: 0 14px;
   border: 1px solid var(--acc-border);
-  border-radius: 9999px;
   background: #fff;
   font-size: 0.88rem;
-  font-weight: 600;
-  cursor: pointer;
-  user-select: none;
   transition: background-color 0.15s, border-color 0.15s, color 0.15s;
 }
 /* The real checkbox stays in place for keyboards and screen readers, just invisible. */
@@ -489,15 +416,16 @@
   .prof-grid { grid-template-columns: 1fr; }
   /* Above the bottom tab bar. */
   .prof-save { bottom: calc(84px + env(safe-area-inset-bottom)); }
-  .prof-save .acc-btn { width: 100%; }
+  .prof-save .acc-btn { @apply w-full; }
 }
 
 /* ---- Stamp card (drawn like the paper card: olive card, stamps joined by a line) ---- */
 .stamp-card {
+  @apply relative flex flex-col gap-4;
+
   --stamp-ink: #b3261e;
   --stamp-line: #8a5a2b;
   --stamp-label: #6b3a14;
-  position: relative;
   border-radius: 22px;
   padding: 22px 22px 18px;
   color: #3d2a12;
@@ -506,9 +434,6 @@
     radial-gradient(circle at 100% 100%, rgba(120, 110, 20, 0.25), transparent 45%),
     linear-gradient(160deg, #d3d46d 0%, #c2c450 55%, #b3b544 100%);
   box-shadow: 0 18px 40px -24px rgba(80, 70, 10, 0.7), inset 0 0 0 1px rgba(255, 255, 255, 0.25);
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
   container-type: inline-size;
 }
 .stamp-card-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
@@ -521,21 +446,20 @@
 .stamp-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px 10px; }
 .stamp-cell { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
 .stamp-slot {
-  position: relative;
+  @apply relative rounded-full grid place-items-center;
+
   z-index: 1;
   width: min(100%, 86px);
   aspect-ratio: 1;
-  border-radius: 50%;
   background: #fffdf3;
-  display: grid;
-  place-items: center;
   box-shadow: inset 0 2px 4px rgba(120, 100, 40, 0.18), 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 /* The line joining each stamp to the next one in its row, at the stamps' centre. */
 .stamp-slot-wrap { position: relative; width: 100%; display: flex; justify-content: center; }
 .stamp-cell:not(.is-row-end) .stamp-slot-wrap::after {
+  @apply absolute;
+
   content: '';
-  position: absolute;
   z-index: 0;
   top: 50%;
   left: 50%;
@@ -562,15 +486,15 @@
 .stamp-goal-badge { font-size: 0.76rem; font-weight: 800; color: #92400e; background: #fef3c7; border: 1px solid #fde68a; border-radius: 9999px; padding: 2px 8px; white-space: nowrap; display: inline-flex; align-items: center; gap: 3px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
 .stamp-start { font-size: 0.78rem; font-weight: 800; color: var(--stamp-label); transform: rotate(-6deg); white-space: nowrap; }
 .stamp-reward-label {
+  @apply font-bold text-center;
+
   max-width: 100%;
   padding: 4px 8px;
   border-radius: 8px;
   background: var(--stamp-label);
   color: #fff;
   font-size: 0.7rem;
-  font-weight: 700;
   line-height: 1.35;
-  text-align: center;
   word-break: auto-phrase;
   box-shadow: 0 2px 0 rgba(0, 0, 0, 0.15);
 }
@@ -586,38 +510,29 @@
 .stamp-card-rules { display: flex; flex-direction: column; gap: 2px; font-size: 0.8rem; min-width: 0; flex: 1 1 220px; }
 .stamp-card-rules strong { font-size: 0.92rem; color: var(--stamp-label); }
 .stamp-qr-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  @apply inline-flex items-center gap-1.5 border-0 rounded-full font-bold cursor-pointer whitespace-nowrap;
+
   padding: 10px 16px;
-  border: none;
-  border-radius: 9999px;
   background: var(--stamp-label);
   color: #fff;
   font: inherit;
-  font-weight: 700;
   font-size: 0.88rem;
-  cursor: pointer;
-  white-space: nowrap;
 }
 .stamp-qr-btn:hover { background: #57300f; }
 
 .stamp-reward-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .stamp-ticket {
-  display: flex;
-  gap: 14px;
-  align-items: center;
+  @apply flex gap-3.5 items-center;
+
   padding: 12px 14px;
   border-radius: 14px;
   border: 1px dashed #d8c39f;
   background: linear-gradient(90deg, #fff8e8, #fffdf7);
 }
 .stamp-ticket-value {
-  flex-shrink: 0;
+  @apply shrink-0 text-center font-display font-bold;
+
   min-width: 64px;
-  text-align: center;
-  font-family: var(--font-display);
-  font-weight: 700;
   font-size: 1.2rem;
   color: var(--acc-accent);
   line-height: 1.1;
@@ -627,15 +542,13 @@
 /* ---- Member QR (shown at the counter) ---- */
 .qr-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(20, 12, 6, 0.6); display: grid; place-items: center; padding: 16px; }
 .qr-sheet {
-  position: relative;
+  @apply relative overflow-y-auto text-center box-border;
+
   width: min(100%, 360px);
   max-height: calc(100dvh - 32px);
-  overflow-y: auto;
   background: #fff;
   border-radius: 24px;
   padding: 28px 24px 24px;
-  text-align: center;
-  box-sizing: border-box;
 }
 .qr-sheet h2 { margin: 0; font-family: var(--font-display); }
 .qr-name { margin: 4px 0 14px; color: var(--acc-muted); }
@@ -660,21 +573,18 @@
 
 /* ---- Points & Special Offers Merged Page ---- */
 .benefits-summary-bar {
-  display: grid;
+  @apply grid gap-3.5;
+
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 14px;
 }
 
 .benefits-summary-item {
+  @apply flex flex-col gap-1.5 cursor-pointer text-left;
+
   background: var(--acc-surface);
   border: 1px solid var(--acc-border);
   border-radius: var(--acc-radius);
   padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  cursor: pointer;
-  text-align: left;
   font: inherit;
   color: inherit;
   transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -694,18 +604,16 @@
 }
 
 .benefits-summary-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  @apply flex items-center gap-2 font-bold;
+
   color: var(--acc-muted);
   font-size: 0.82rem;
-  font-weight: 700;
 }
 
 .benefits-summary-value {
+  @apply font-bold font-display;
+
   font-size: 1.45rem;
-  font-weight: 700;
-  font-family: var(--font-display);
   color: var(--acc-ink);
   line-height: 1.2;
 }
@@ -717,31 +625,25 @@
 }
 
 .benefits-pill-nav {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
+  @apply flex gap-2 overflow-x-auto;
+
   padding: 4px 2px 8px;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
 .benefits-pill-nav::-webkit-scrollbar {
-  display: none;
-}
+    @apply hidden;
+  }
 
 .benefits-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  @apply inline-flex items-center gap-1.5 rounded-full font-bold cursor-pointer whitespace-nowrap;
+
   padding: 8px 16px;
-  border-radius: 9999px;
   border: 1px solid var(--acc-border);
   background: var(--acc-surface);
   color: var(--acc-muted);
   font: inherit;
   font-size: 0.86rem;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
   transition: all 0.15s ease;
 }
 
@@ -758,11 +660,11 @@
 }
 
 .benefits-pill-badge {
+  @apply rounded-full font-extrabold;
+
   padding: 1px 7px;
-  border-radius: 9999px;
   background: rgba(255, 255, 255, 0.25);
   font-size: 0.72rem;
-  font-weight: 800;
 }
 
 .benefits-pill:not(.is-active) .benefits-pill-badge {
@@ -772,9 +674,10 @@
 
 @media (max-width: 640px) {
   .benefits-summary-bar {
+    @apply gap-2.5;
+
     grid-template-columns: 1fr;
-    gap: 10px;
-  }
+}
   .benefits-summary-item {
     padding: 12px 16px;
   }

@@ -108,7 +108,7 @@ export default function FooterSettings({ onOpenRestaurantSettings }: { onOpenRes
         <h3 style={h3}>Logo &amp; name</h3>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem' }}>
           <div style={{ width: '120px', height: '64px', borderRadius: '8px', background: '#2a2321', display: 'grid', placeItems: 'center', padding: '6px', boxSizing: 'border-box' }}>
-            <img src={assetUrl(form.footerLogo) || '/adarsha-log.webp'} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '50%' }} />
+            <img src={assetUrl(form.footerLogo) || '/uploads/adarsha-log.webp'} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: '50%' }} />
           </div>
           <label style={{ ...btn, cursor: uploading ? 'wait' : 'pointer' }}>
             <Upload size={15} /> {uploading ? 'Uploading…' : 'Upload logo'}

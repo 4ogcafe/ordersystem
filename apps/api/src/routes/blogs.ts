@@ -157,6 +157,7 @@ router.get('/:slug', publicCache, async (req, res) => {
   try {
     const post = await (prisma as any).blogPost.findFirst({
       where: {
+        isPublished: true,
         OR: [{ slug }, { id: slug }],
       },
     });

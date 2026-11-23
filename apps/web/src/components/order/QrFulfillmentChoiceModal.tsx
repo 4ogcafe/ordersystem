@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { UtensilsCrossed, ShoppingBag, MapPin, ArrowRight, X } from 'lucide-react';
 import { type StoreLocation } from '../../lib/stores';
+import { useBodyScrollLock } from '../../lib/useBodyScrollLock';
 
 interface QrFulfillmentChoiceModalProps {
   open: boolean;
@@ -20,6 +22,17 @@ export default function QrFulfillmentChoiceModal({
   onSelectTakeout,
   onClose,
 }: QrFulfillmentChoiceModalProps) {
+  useBodyScrollLock(open);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose?.();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const isJa = lang === 'ja';
@@ -40,6 +53,8 @@ export default function QrFulfillmentChoiceModal({
         justifyContent: 'center',
         padding: '16px',
         animation: 'dioFadeIn 0.2s ease-out',
+        overscrollBehavior: 'none',
+        touchAction: 'none',
       }}
       onClick={onClose}
     >
@@ -110,7 +125,7 @@ export default function QrFulfillmentChoiceModal({
             }}
           >
             <img
-              src="/adarsha-log.webp"
+              src="/uploads/adarsha-log.webp"
               alt="Adarsha"
               style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
             />

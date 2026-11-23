@@ -61,8 +61,8 @@ afterAll(async () => {
 });
 
 describe('stamp card rules', () => {
-  it('defaults to 10 stamps, ¥1,000 and 12 hours, with rewards at 5 and 10', () => {
-    expect(stampConfig({})).toMatchObject({ enabled: true, perCard: 10, minAmount: 1000, cooldownHours: 12, rewards: DEFAULT_STAMP_REWARDS });
+  it('defaults to 10 stamps, ¥1,000 and 6 hours, with rewards at 5 and 10', () => {
+    expect(stampConfig({})).toMatchObject({ enabled: true, perCard: 10, minAmount: 1000, cooldownHours: 6, rewards: DEFAULT_STAMP_REWARDS });
     // Rewards beyond a shortened card are dropped.
     expect(stampConfig({ stampsPerCard: 6 }).rewards.map((r) => r.at)).toEqual([5]);
   });
@@ -71,8 +71,8 @@ describe('stamp card rules', () => {
     expect(stampAmount({ total: 926, tax: 74 })).toBe(1000);
     const config = stampConfig({});
     const last = new Date('2026-10-01T10:00:00Z');
-    expect(nextStampAt(last, config, new Date('2026-10-01T21:59:00Z'))?.toISOString()).toBe('2026-10-01T22:00:00.000Z');
-    expect(nextStampAt(last, config, new Date('2026-10-01T22:00:00Z'))).toBeNull();
+    expect(nextStampAt(last, config, new Date('2026-10-01T15:59:00Z'))?.toISOString()).toBe('2026-10-01T16:00:00.000Z');
+    expect(nextStampAt(last, config, new Date('2026-10-01T16:00:00Z'))).toBeNull();
   });
 
   it('reads member codes the way people type or scanners send them', () => {

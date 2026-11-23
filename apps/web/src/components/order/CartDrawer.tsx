@@ -8,8 +8,10 @@ import { consumptionTax, taxRateOf } from '../../lib/price';
 import { DEFAULT_STORE_LOCATIONS, fetchStores, getSavedOrderStoreId, saveOrderStoreId, type StoreLocation } from '../../lib/stores';
 import { formatKm } from '../../lib/geo';
 import { useNearestStore } from '../../lib/useNearestStore';
+import { useBodyScrollLock } from '../../lib/useBodyScrollLock';
 import QuantitySelector from './QuantitySelector';
 import StoreLocator from './StoreLocator';
+import SafeImage from '../../components/SafeImage';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -63,18 +65,17 @@ export default function CartDrawer() {
     return () => window.removeEventListener('adarsha:store-changed', onStoreChanged);
   }, []);
 
+  useBodyScrollLock(cart.isOpen);
+
   useEffect(() => {
     if (!cart.isOpen) return;
     setSelectedStoreId(getSavedOrderStoreId(stores));
     const previous = document.activeElement as HTMLElement | null;
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
     panel.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     return () => {
-      document.body.style.overflow = overflow;
       previous?.focus();
     };
-  }, [cart.isOpen]);
+  }, [cart.isOpen, stores]);
 
   if (!cart.isOpen) return null;
 
@@ -187,17 +188,12 @@ export default function CartDrawer() {
             <ul style={{ listStyle: 'none', margin: 0, padding: '0 20px', overflowY: 'auto', flex: 1 }}>
               {cart.lines.map(line => (
                 <li key={line.cartKey} style={{ display: 'flex', gap: '12px', padding: '16px 0', borderBottom: '1px solid #f0ebe3' }}>
-                  <img
-                    src={line.img || '/bg-hero-img.webp'}
+                  <SafeImage
+                    src={line.img}
                     alt=""
                     width={64}
                     height={64}
-                    onError={(e) => {
-                      const target = e.currentTarget;
-                      if (!target.src.endsWith('/bg-hero-img.webp')) {
-                        target.src = '/bg-hero-img.webp';
-                      }
-                    }}
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
                     style={{ borderRadius: '10px', objectFit: 'cover', flexShrink: 0 }}
                   />
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>

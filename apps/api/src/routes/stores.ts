@@ -1,5 +1,6 @@
 import express from 'express';
 import { z } from 'zod';
+import { googleMapEmbedUrl, hotpepperSiteUrl, tabelogSiteUrl } from '../lib/schemas.js';
 import { prisma } from '../lib/prisma.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { AppError } from '../lib/errors.js';
@@ -23,6 +24,10 @@ export interface StoreLocation {
   rating: number;
   reviewCount: number;
   mapEmbedUrl: string;
+  /** Branch page on ホットペッパーグルメ (empty = hide link). */
+  hotpepperUrl?: string;
+  /** Branch page on 食べログ (empty = hide link). */
+  tabelogUrl?: string;
   /** WGS84 coordinates used by the nearest-store feature; null when unknown. */
   latitude?: number | null;
   longitude?: number | null;
@@ -204,13 +209,20 @@ const APPROX_STORE_COORDS: Record<string, LatLng> = {
 };
 
 /** Ensures every store carries latitude/longitude when we know them (own value wins). */
+function safeMapEmbed(store: StoreLocation): string {
+  const value = (store.mapEmbedUrl ?? '').trim();
+  const parsed = googleMapEmbedUrl.safeParse(value);
+  return parsed.success && parsed.data ? parsed.data : buildMapEmbedUrl(store.address, store.name);
+}
+
 function withCoords(stores: StoreLocation[]): StoreLocation[] {
   return stores.map((s) => {
-    if (isValidLatLng(s.latitude, s.longitude)) return s;
+    const mapEmbedUrl = safeMapEmbed(s);
+    if (isValidLatLng(s.latitude, s.longitude)) return { ...s, mapEmbedUrl };
     const approx = APPROX_STORE_COORDS[s.id];
     return approx
-      ? { ...s, latitude: approx.lat, longitude: approx.lng, coordsApproximate: true }
-      : { ...s, latitude: null, longitude: null };
+      ? { ...s, mapEmbedUrl, latitude: approx.lat, longitude: approx.lng, coordsApproximate: true }
+      : { ...s, mapEmbedUrl, latitude: null, longitude: null };
   });
 }
 
@@ -252,7 +264,9 @@ const storeInputSchema = z.object({
   phone: z.string().trim().max(50).optional().default(''),
   rating: z.coerce.number().min(0).max(5).optional().default(4.4),
   reviewCount: z.coerce.number().int().min(0).optional().default(100),
-  mapEmbedUrl: z.string().trim().max(2000).optional().default(''),
+  mapEmbedUrl: googleMapEmbedUrl.optional().default(''),
+  hotpepperUrl: hotpepperSiteUrl.optional().default(''),
+  tabelogUrl: tabelogSiteUrl.optional().default(''),
   // Optional: left blank, the server geocodes the address when it is saved.
   latitude: optionalCoord(-90, 90),
   longitude: optionalCoord(-180, 180),
@@ -368,6 +382,8 @@ router.post('/', requireAdmin, async (req, res) => {
     rating: parsed.rating,
     reviewCount: parsed.reviewCount,
     mapEmbedUrl,
+    hotpepperUrl: parsed.hotpepperUrl?.trim() || '',
+    tabelogUrl: parsed.tabelogUrl?.trim() || '',
     ...(await resolveCoords(parsed)),
   };
 
@@ -442,6 +458,8 @@ router.put('/:id', requireAdmin, async (req, res) => {
     rating: parsed.rating,
     reviewCount: parsed.reviewCount,
     mapEmbedUrl,
+    hotpepperUrl: parsed.hotpepperUrl?.trim() || '',
+    tabelogUrl: parsed.tabelogUrl?.trim() || '',
     ...(await resolveCoords(parsed, existing)),
   };
 

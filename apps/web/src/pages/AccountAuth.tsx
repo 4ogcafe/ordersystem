@@ -89,7 +89,7 @@ function useBenefits(): BenefitItem[] {
     });
   }
 
-  if (settings?.stampCardEnabled !== false) {
+  if ((settings?.stampCardEnabled ?? (settings as { stampsEnabled?: boolean } | undefined)?.stampsEnabled) !== false) {
     const minAmt = settings?.stampMinAmount ?? 1000;
     const firstReward = [...(settings?.stampRewards ?? [])].sort((a, b) => a.at - b.at)[0];
     list.push({
@@ -245,7 +245,9 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
         if (data?.requiresVerification) {
           setVerifyingEmail(data.email || form.email);
           setStep('verify');
-          setInfoMsg(data.error?.message || 'メールアドレスの確認が完了していません。確認コードを入力してください。');
+          const mailNote = data.error?.message || 'メールアドレスの確認が完了していません。確認コードを入力してください。';
+          if (data.emailSent === false) setError(mailNote);
+          else setInfoMsg(mailNote);
           setResendCooldown(60);
           return;
         }
@@ -256,7 +258,9 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
       if (data.requiresVerification) {
         setVerifyingEmail(data.email || form.email);
         setStep('verify');
-        setInfoMsg(data.message || `確認コードを ${data.email || form.email} 宛に送信しました。`);
+        const mailNote = data.message || `確認コードを ${data.email || form.email} 宛に送信しました。`;
+        if (data.emailSent === false) setError(mailNote);
+        else setInfoMsg(mailNote);
         setResendCooldown(60);
         return;
       }
@@ -597,7 +601,7 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
                 <label style={labelStyle}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Lock size={15} style={{ color: '#b3471c' }} /> パスワード{isRegister && '（6文字以上）'}
+                      <Lock size={15} style={{ color: '#b3471c' }} /> パスワード{isRegister && '（8文字以上）'}
                     </span>
                     {!isRegister && (
                       <button
@@ -626,10 +630,10 @@ export default function AccountAuth({ mode }: { mode: 'login' | 'register' | 've
                       name="password"
                       type={showPassword ? 'text' : 'password'}
                       required
-                      minLength={isRegister ? 6 : 1}
+                      minLength={isRegister ? 8 : 1}
                       maxLength={200}
                       autoComplete={isRegister ? 'new-password' : 'current-password'}
-                      placeholder={isRegister ? '半角英数6文字以上' : 'パスワードを入力'}
+                      placeholder={isRegister ? '半角英数8文字以上' : 'パスワードを入力'}
                       value={form.password}
                       onChange={handleChange}
                       style={{ ...inputStyle, paddingRight: '44px' }}

@@ -23,16 +23,34 @@ import {
   ShieldCheck,
   ExternalLink,
   X,
-  FileText
+  FileText,
+  Landmark,
 } from 'lucide-react';
 import { apiFetch, errorMessage } from '../../lib/api';
 import { yen, formatOrderNumber } from '../../lib/format';
-import { DEFAULT_STORE_LOCATIONS, type StoreLocation } from '../../lib/stores';
+import { DEFAULT_STORE_LOCATIONS, resolveOrderStore, type StoreLocation } from '../../lib/stores';
 import { printCustomerReceipt, printHtml, DEFAULT_STORE_SETTINGS, type ReceiptOrder } from '../../lib/receipt';
+import {
+  enabledCashierPaymentMethods,
+  type CashierPaymentMethod,
+} from '../../lib/payment-methods';
+import JapanDevicePay from './JapanDevicePay';
+import StampCounter from './StampCounter';
+import TableFloorAlerts from '../order/TableFloorAlerts';
+
+const CC_STORE_KEY = 'adarsha_cash_counter_store';
+
+function initialCashCounterStoreId(): string {
+  try {
+    const saved = localStorage.getItem(CC_STORE_KEY);
+    if (saved && saved !== 'ALL') return saved;
+  } catch { /* ignore */ }
+  return DEFAULT_STORE_LOCATIONS[0]?.id || 'musashisakai';
+}
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-export type PaymentMethod = 'CASH' | 'CARD' | 'PAYPAY' | 'IC' | 'ID_QUICPAY' | 'INVOICE';
+export type PaymentMethod = CashierPaymentMethod;
 
 export interface CashRegisterShift {
   id: string;
@@ -139,14 +157,30 @@ const JAPAN_DENOMINATIONS = [
   { yen: 1, label: '1円玉 (一円)', type: 'coin' },
 ];
 
-const PAYMENT_METHODS: Array<{ id: PaymentMethod; label: string; icon: any; color: string; bg: string }> = [
-  { id: 'CASH', label: '現金 (Cash)', icon: Banknote, color: '#15803d', bg: '#f0fdf4' },
-  { id: 'CARD', label: 'クレジットカード', icon: CreditCard, color: '#1d4ed8', bg: '#eff6ff' },
-  { id: 'PAYPAY', label: 'PayPay / QRコード', icon: QrCode, color: '#dc2626', bg: '#fef2f2' },
-  { id: 'IC', label: '交通系IC (Suica等)', icon: Smartphone, color: '#0284c7', bg: '#f0f9ff' },
-  { id: 'ID_QUICPAY', label: 'iD / QUICPay', icon: Smartphone, color: '#7c3aed', bg: '#faf5ff' },
-  { id: 'INVOICE', label: '売掛・請求書払い', icon: FileText, color: '#475569', bg: '#f8fafc' },
-];
+const METHOD_ICONS: Record<PaymentMethod, any> = {
+  CASH: Banknote,
+  CARD: CreditCard,
+  PAYPAY: QrCode,
+  RAKUTEN_PAY: QrCode,
+  D_PAY: QrCode,
+  AU_PAY: QrCode,
+  MERPAY: QrCode,
+  WECHAT_PAY: QrCode,
+  IC: Smartphone,
+  ID_QUICPAY: Smartphone,
+  INVOICE: FileText,
+  BANK_TRANSFER: Landmark,
+};
+
+function buildPaymentMethods(flags: Parameters<typeof enabledCashierPaymentMethods>[0]) {
+  return enabledCashierPaymentMethods(flags).map(m => ({
+    id: m.id,
+    label: m.labelJa,
+    icon: METHOD_ICONS[m.id] ?? CreditCard,
+    color: m.color,
+    bg: m.bg,
+  }));
+}
 
 const PRESET_QUICK_ITEMS: QuickSaleItem[] = [
   { id: 'quick-curry-bento', nameJa: '日替わりカレー弁当', nameEn: 'Daily Curry Bento', price: 850, categoryJa: '弁当・セット', taxRate: 8 },
@@ -224,9 +258,12 @@ export function calculateOptimalChange(change: number): string {
 }
 
 export default function CashCounterTab({ user }: { user?: any }) {
-  const [activeSubTab, setActiveSubTab] = useState<'checkout' | 'walkin' | 'drawer' | 'history'>('checkout');
+  const [activeSubTab, setActiveSubTab] = useState<'checkout' | 'walkin' | 'drawer' | 'history' | 'stamps' | 'sales'>('checkout');
   const [stores, setStores] = useState<StoreLocation[]>(DEFAULT_STORE_LOCATIONS);
-  const [selectedStoreId, setSelectedStoreId] = useState<string>('ALL');
+  const [selectedStoreId, setSelectedStoreId] = useState<string>(initialCashCounterStoreId);
+  const [PAYMENT_METHODS, setPaymentMethods] = useState(() => buildPaymentMethods(undefined));
+  const [closedShifts, setClosedShifts] = useState<CashRegisterShift[]>([]);
+  const [byPaymentMethod, setByPaymentMethod] = useState<Record<string, { count: number; total: number }>>({});
 
   // Register State
   const [shift, setShift] = useState<CashRegisterShift | null>(null);
@@ -243,6 +280,18 @@ export default function CashCounterTab({ user }: { user?: any }) {
     expectedDrawerCash: 30000,
   });
 
+  const activeStore = useMemo(
+    () => stores.find(s => s.id === selectedStoreId) || stores[0] || DEFAULT_STORE_LOCATIONS[0],
+    [stores, selectedStoreId],
+  );
+
+  const selectStore = (id: string) => {
+    if (!id || id === 'ALL' || id === selectedStoreId) return;
+    setSelectedStoreId(id);
+    setShift(null);
+    try { localStorage.setItem(CC_STORE_KEY, id); } catch { /* ignore */ }
+  };
+
   // Active Unsettled Orders
   const [orders, setOrders] = useState<ActiveOrder[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<ActiveOrder | null>(null);
@@ -258,6 +307,7 @@ export default function CashCounterTab({ user }: { user?: any }) {
 
   // Walk-in Quick Sale State
   const [walkinCart, setWalkinCart] = useState<Array<{ item: QuickSaleItem; quantity: number }>>([]);
+  const [quickMenuItems, setQuickMenuItems] = useState<QuickSaleItem[]>(PRESET_QUICK_ITEMS);
   const [customItemName, setCustomItemName] = useState('');
   const [customItemPrice, setCustomItemPrice] = useState('');
   const [customTaxRate, setCustomTaxRate] = useState<number>(8);
@@ -294,25 +344,68 @@ export default function CashCounterTab({ user }: { user?: any }) {
 
   // ── Load Register Data & Orders ───────────────────────────────────────────
 
-  const loadRegisterData = async () => {
+  const loadRegisterData = async (storeId = selectedStoreId) => {
+    if (!storeId || storeId === 'ALL') return null as CashRegisterShift | null;
     try {
-      const res = await apiFetch('/api/v1/cash-register');
+      const res = await apiFetch(`/api/v1/cash-register?storeId=${encodeURIComponent(storeId)}`);
       if (res.ok) {
         const data = await res.json();
         setShift(data.shift || null);
-        if (data.stats) setStats(data.stats);
+        if (data.stats) {
+          setStats(data.stats);
+          setByPaymentMethod(data.stats.byPaymentMethod || {});
+        }
         if (Array.isArray(data.todayTransactions)) setTransactions(data.todayTransactions);
         if (Array.isArray(data.recentMovements)) setMovements(data.recentMovements);
+        if (Array.isArray(data.closedShifts)) setClosedShifts(data.closedShifts);
+        return data.shift || null;
       }
     } catch (err) {
       console.warn('Could not load cash register server data:', err);
+    }
+    return null;
+  };
+
+  /** Reload or auto-open a shift for the active store so settlement can proceed. */
+  const ensureShiftOpen = async (): Promise<CashRegisterShift | null> => {
+    const store = activeStore;
+    if (!store?.id) {
+      toast.error('店舗を選択してください');
+      return null;
+    }
+    let current = await loadRegisterData(store.id);
+    if (current?.isOpen) return current;
+
+    const floatVal = parseInt(startingFloatInput, 10);
+    const startingFloat = !isNaN(floatVal) && floatVal >= 0 ? floatVal : 30000;
+    try {
+      const res = await apiFetch('/api/v1/cash-register/shift/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startingFloat, storeId: store.id }),
+      });
+      if (res.status === 409) {
+        // Already open on server — reload
+        current = await loadRegisterData(store.id);
+        if (current?.isOpen) return current;
+      }
+      if (!res.ok) throw new Error(await errorMessage(res, 'レジ開設に失敗しました'));
+      const data = await res.json();
+      setShift(data.shift);
+      toast.success(`${store.name} のレジを開設しました（準備金 ${yen(startingFloat)}）`);
+      await loadRegisterData(store.id);
+      return data.shift || null;
+    } catch (err: any) {
+      toast.error(err.message || 'レジを開設できませんでした');
+      setOpenShiftModal(true);
+      return null;
     }
   };
 
   const loadActiveOrders = async () => {
     setLoadingOrders(true);
     try {
-      const res = await apiFetch('/api/v1/orders?scope=active');
+      const res = await apiFetch('/api/v1/orders?scope=cashier');
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) {
@@ -336,15 +429,50 @@ export default function CashCounterTab({ user }: { user?: any }) {
       apiFetch('/api/v1/stores').then(r => r.ok ? r.json() : []).catch(() => DEFAULT_STORE_LOCATIONS),
       loadRegisterData(),
       loadActiveOrders(),
-    ]).then(([storeList]) => {
-      if (Array.isArray(storeList) && storeList.length > 0) setStores(storeList);
+      apiFetch('/api/v1/menu/items').then(r => (r.ok ? r.json() : null)).catch(() => null),
+      apiFetch('/api/v1/settings').then(r => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([storeList, _reg, _ord, menuData, settings]) => {
+      const list = Array.isArray(storeList) && storeList.length > 0 ? storeList : DEFAULT_STORE_LOCATIONS;
+      setStores(list);
+      if (!list.some((s: StoreLocation) => s.id === selectedStoreId)) {
+        selectStore(list[0].id);
+      }
+      const methods = buildPaymentMethods(settings?.cashierPaymentMethods);
+      setPaymentMethods(methods);
+      if (!methods.some(m => m.id === settlementMethod)) {
+        setSettlementMethod(methods[0]?.id ?? 'CASH');
+      }
+      if (!methods.some(m => m.id === walkinPaymentMethod)) {
+        setWalkinPaymentMethod(methods[0]?.id ?? 'CASH');
+      }
+      const items = Array.isArray(menuData) ? menuData : (menuData?.items || []);
+      const quick = items
+        .filter((i: any) => i && i.isActive !== false && !i.isSoldOut && typeof i.price === 'number')
+        .slice(0, 48)
+        .map((i: any): QuickSaleItem => ({
+          id: i.id,
+          nameJa: i.nameJa || i.nameEn || '商品',
+          nameEn: i.nameEn || i.nameJa || 'Item',
+          price: Number(i.price) || 0,
+          categoryJa: i.category?.nameJa || i.categoryNameJa || 'メニュー',
+          taxRate: 8,
+        }));
+      if (quick.length > 0) setQuickMenuItems(quick);
     });
 
     const interval = setInterval(() => {
       loadActiveOrders();
+      loadRegisterData();
     }, 15000);
     return () => clearInterval(interval);
   }, []);
+
+  // Reload branch ledger whenever the selected store changes
+  useEffect(() => {
+    if (selectedStoreId && selectedStoreId !== 'ALL') {
+      loadRegisterData(selectedStoreId);
+    }
+  }, [selectedStoreId]);
 
   // Amount tendered starts blank for manual entry
   useEffect(() => {
@@ -361,18 +489,22 @@ export default function CashCounterTab({ user }: { user?: any }) {
       toast.error('有効な準備金を入力してください。');
       return;
     }
+    if (!activeStore?.id) {
+      toast.error('店舗を選択してください。');
+      return;
+    }
     try {
       const res = await apiFetch('/api/v1/cash-register/shift/open', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ startingFloat: floatVal, storeId: selectedStoreId }),
+        body: JSON.stringify({ startingFloat: floatVal, storeId: activeStore.id }),
       });
       if (!res.ok) throw new Error(await errorMessage(res, 'レジ開設に失敗しました'));
       const data = await res.json();
       setShift(data.shift);
       setOpenShiftModal(false);
-      toast.success(`レジを開設しました（釣銭準備金: ${yen(floatVal)}）`);
-      loadRegisterData();
+      toast.success(`${activeStore.name} のレジを開設しました（釣銭準備金: ${yen(floatVal)}）`);
+      loadRegisterData(activeStore.id);
     } catch (err: any) {
       toast.error(err.message || 'エラーが発生しました');
     }
@@ -384,6 +516,10 @@ export default function CashCounterTab({ user }: { user?: any }) {
       toast.error('有効な金額を入力してください。');
       return;
     }
+    if (!activeStore?.id) {
+      toast.error('店舗を選択してください。');
+      return;
+    }
     try {
       const res = await apiFetch('/api/v1/cash-register/movement', {
         method: 'POST',
@@ -393,6 +529,7 @@ export default function CashCounterTab({ user }: { user?: any }) {
           amount: amt,
           reason: movementReason,
           memo: movementMemo,
+          storeId: activeStore.id,
         }),
       });
       if (!res.ok) throw new Error(await errorMessage(res, '入出金の登録に失敗しました'));
@@ -400,7 +537,7 @@ export default function CashCounterTab({ user }: { user?: any }) {
       setMovementAmount('');
       setMovementMemo('');
       toast.success(`${movementType === 'IN' ? '入金' : '出金'} ${yen(amt)} を登録しました`);
-      loadRegisterData();
+      loadRegisterData(activeStore.id);
     } catch (err: any) {
       toast.error(err.message || 'エラーが発生しました');
     }
@@ -417,6 +554,10 @@ export default function CashCounterTab({ user }: { user?: any }) {
   const cashVariance = actualCountedCash - stats.expectedDrawerCash;
 
   const handleCloseShift = async () => {
+    if (!activeStore?.id) {
+      toast.error('店舗を選択してください。');
+      return;
+    }
     try {
       const res = await apiFetch('/api/v1/cash-register/shift/close', {
         method: 'POST',
@@ -425,13 +566,14 @@ export default function CashCounterTab({ user }: { user?: any }) {
           countedTotal: actualCountedCash,
           denominations: denominationsCount,
           notes: closeShiftNotes,
+          storeId: activeStore.id,
         }),
       });
       if (!res.ok) throw new Error(await errorMessage(res, 'レジ締めに失敗しました'));
       const data = await res.json();
-      toast.success('本日のレジ締めが完了しました！');
+      toast.success(`${activeStore.name} のレジ締めが完了しました！`);
       printClosingZReport(data.shift);
-      loadRegisterData();
+      loadRegisterData(activeStore.id);
     } catch (err: any) {
       toast.error(err.message || 'エラーが発生しました');
     }
@@ -439,18 +581,34 @@ export default function CashCounterTab({ user }: { user?: any }) {
 
   // ── Settle Order ──────────────────────────────────────────────────────────
 
-  const handleSettleOrder = async () => {
+  const handleSettleOrder = async (opts?: {
+    paymentMethod?: PaymentMethod;
+    noteExtra?: string;
+    squarePaymentId?: string | null;
+    skipConfirm?: boolean;
+  }) => {
     if (!selectedOrder) return;
+    const openShift = shift?.isOpen ? shift : await ensureShiftOpen();
+    if (!openShift?.isOpen) return;
+    const registerStoreId = openShift.storeId || activeStore?.id;
+    if (!registerStoreId) {
+      toast.error('店舗を選択してください');
+      return;
+    }
+    const method = opts?.paymentMethod || settlementMethod;
     const orderTotal = selectedOrder.grandTotal ?? selectedOrder.total;
-    const tendered = parseInt(amountTenderedStr, 10) || orderTotal;
+    const tendered = method === 'CASH' ? (parseInt(amountTenderedStr, 10) || orderTotal) : orderTotal;
 
-    if (settlementMethod === 'CASH' && tendered < orderTotal) {
+    if (method === 'CASH' && tendered < orderTotal) {
       toast.error(`お預かり金額が不足しています（不足: ${yen(orderTotal - tendered)}）`);
       return;
     }
 
-    const change = settlementMethod === 'CASH' ? Math.max(0, tendered - orderTotal) : 0;
+    const change = method === 'CASH' ? Math.max(0, tendered - orderTotal) : 0;
     const tableNum = extractTableNumber(selectedOrder.note);
+    const noteParts = [settlementNote, opts?.noteExtra, opts?.squarePaymentId ? `Square:${opts.squarePaymentId}` : '']
+      .map(s => (s || '').trim())
+      .filter(Boolean);
 
     setSettling(true);
     try {
@@ -480,11 +638,14 @@ export default function CashCounterTab({ user }: { user?: any }) {
           taxRate: selectedOrder.taxRate || (selectedOrder.fulfillment === 'DINE_IN' ? 10 : 8),
           discount: selectedOrder.pointsDiscount || 0,
           total: orderTotal,
-          paymentMethod: settlementMethod,
+          paymentMethod: method,
           amountTendered: tendered,
           changeAmount: change,
-          storeId: selectedStoreId,
-          note: settlementNote,
+          storeId: registerStoreId,
+          storeName: activeStore?.name || resolveOrderStore(selectedOrder, stores)?.name,
+          note: noteParts.join(' · '),
+          markCompleted: true,
+          squarePaymentId: opts?.squarePaymentId || undefined,
         }),
       });
 
@@ -492,19 +653,19 @@ export default function CashCounterTab({ user }: { user?: any }) {
 
       playCashChime();
 
-      if (settlementMethod === 'CASH') {
+      if (method === 'CASH') {
         toast.success(`🎉 会計完了！ お釣り: ${yen(change)} (${calculateOptimalChange(change)})`, { duration: 6000 });
       } else {
-        toast.success(`🎉 ${PAYMENT_METHODS.find(m => m.id === settlementMethod)?.label} でのお会計完了！`);
+        toast.success(`🎉 ${PAYMENT_METHODS.find(m => m.id === method)?.label || method} でのお会計完了！`);
       }
 
       // Automatically offer receipt printing
-      handlePrintReceiptForOrder(selectedOrder, tendered, change, settlementMethod);
+      handlePrintReceiptForOrder(selectedOrder, tendered, change, method);
 
       setSelectedOrder(null);
       setAmountTenderedStr('');
       setSettlementNote('');
-      loadRegisterData();
+      loadRegisterData(registerStoreId);
       loadActiveOrders();
     } catch (err: any) {
       toast.error(err.message || 'エラーが発生しました');
@@ -561,17 +722,32 @@ export default function CashCounterTab({ user }: { user?: any }) {
     setCustomItemPrice('');
   };
 
-  const handleSettleWalkin = async () => {
+  const handleSettleWalkin = async (opts?: {
+    paymentMethod?: PaymentMethod;
+    squarePaymentId?: string | null;
+    noteExtra?: string;
+  }) => {
     if (walkinCart.length === 0) {
       toast.error('カートに商品を追加してください。');
       return;
     }
-    const tendered = parseInt(walkinTenderedStr, 10) || walkinGrandTotal;
-    if (walkinPaymentMethod === 'CASH' && tendered < walkinGrandTotal) {
+    const openShift = shift?.isOpen ? shift : await ensureShiftOpen();
+    if (!openShift?.isOpen) return;
+    const registerStoreId = openShift.storeId || activeStore?.id;
+    if (!registerStoreId) {
+      toast.error('店舗を選択してください');
+      return;
+    }
+    const method = opts?.paymentMethod || walkinPaymentMethod;
+    const tendered = method === 'CASH' ? (parseInt(walkinTenderedStr, 10) || walkinGrandTotal) : walkinGrandTotal;
+    if (method === 'CASH' && tendered < walkinGrandTotal) {
       toast.error(`お預かり金額が不足しています（不足: ${yen(walkinGrandTotal - tendered)}）`);
       return;
     }
-    const change = walkinPaymentMethod === 'CASH' ? Math.max(0, tendered - walkinGrandTotal) : 0;
+    const change = method === 'CASH' ? Math.max(0, tendered - walkinGrandTotal) : 0;
+    const noteParts = ['店頭クイック会計', opts?.noteExtra, opts?.squarePaymentId ? `Square:${opts.squarePaymentId}` : '']
+      .map(s => (s || '').trim())
+      .filter(Boolean);
 
     setSettling(true);
     try {
@@ -597,24 +773,30 @@ export default function CashCounterTab({ user }: { user?: any }) {
           tax: walkinTax,
           taxRate: walkinTaxRate,
           total: walkinGrandTotal,
-          paymentMethod: walkinPaymentMethod,
+          paymentMethod: method,
           amountTendered: tendered,
           changeAmount: change,
-          storeId: selectedStoreId,
-          note: '店頭クイック会計',
+          storeId: registerStoreId,
+          storeName: activeStore?.name,
+          note: noteParts.join(' · '),
+          squarePaymentId: opts?.squarePaymentId || undefined,
         }),
       });
 
       if (!res.ok) throw new Error(await errorMessage(res, 'クイック会計に失敗しました'));
 
       playCashChime();
-      toast.success(`🎉 クイック会計完了！ お釣り: ${yen(change)}`, { duration: 6000 });
+      toast.success(
+        method === 'CASH'
+          ? `🎉 クイック会計完了！ お釣り: ${yen(change)}`
+          : `🎉 ${PAYMENT_METHODS.find(m => m.id === method)?.label || method} でのクイック会計完了！`,
+        { duration: 6000 },
+      );
 
-      // Print receipt
-      printWalkinReceipt(walkinCart, walkinSubtotal, walkinTax, walkinGrandTotal, tendered, change, walkinPaymentMethod);
+      printWalkinReceipt(walkinCart, walkinSubtotal, walkinTax, walkinGrandTotal, tendered, change, method);
 
       setWalkinCart([]);
-      loadRegisterData();
+      loadRegisterData(registerStoreId);
     } catch (err: any) {
       toast.error(err.message || 'エラーが発生しました');
     } finally {
@@ -857,6 +1039,8 @@ export default function CashCounterTab({ user }: { user?: any }) {
 
   const filteredOrders = useMemo(() => {
     return consolidatedOrders.filter(o => {
+      const branch = resolveOrderStore(o, stores);
+      if (selectedStoreId && branch?.id && branch.id !== selectedStoreId) return false;
       if (orderFilter !== 'ALL' && o.fulfillment !== orderFilter) return false;
       if (orderSearch.trim()) {
         const q = orderSearch.toLowerCase();
@@ -867,7 +1051,7 @@ export default function CashCounterTab({ user }: { user?: any }) {
       }
       return true;
     });
-  }, [consolidatedOrders, orderFilter, orderSearch]);
+  }, [consolidatedOrders, orderFilter, orderSearch, selectedStoreId, stores]);
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
@@ -887,6 +1071,8 @@ export default function CashCounterTab({ user }: { user?: any }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', paddingBottom: '3rem' }}>
+
+      <TableFloorAlerts compact sound />
       
       {/* Kiosk Display Promo Banner */}
       <div style={{
@@ -962,19 +1148,30 @@ export default function CashCounterTab({ user }: { user?: any }) {
             </div>
           )}
 
-          {stores.length > 1 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '0.5rem' }}>
-              <Store size={16} color="#6b7280" />
-              <select
-                value={selectedStoreId}
-                onChange={e => setSelectedStoreId(e.target.value)}
-                style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '0.85rem', outline: 'none' }}
-              >
-                <option value="ALL">全店舗共通</option>
-                {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-          )}
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginLeft: '0.5rem', padding: '4px 10px', borderRadius: '8px', border: '2px solid #f59e0b', background: '#fffbeb' }}>
+            <Store size={16} color="#b45309" />
+            <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#b45309' }}>店舗</span>
+            <select
+              value={stores.some(s => s.id === selectedStoreId) ? selectedStoreId : (stores[0]?.id || '')}
+              onChange={e => selectStore(e.target.value)}
+              aria-label="店舗を選択"
+              style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '0.85rem', outline: 'none', fontWeight: 700, minWidth: '200px', background: '#fff', cursor: 'pointer' }}
+              title="店舗別レジ・売上記録"
+            >
+              {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <span style={{
+              fontSize: '0.72rem',
+              fontWeight: 700,
+              padding: '3px 8px',
+              borderRadius: '999px',
+              background: shift?.isOpen ? '#dcfce7' : '#fef3c7',
+              color: shift?.isOpen ? '#15803d' : '#92400e',
+              whiteSpace: 'nowrap',
+            }}>
+              {shift?.isOpen ? '稼働中' : '未開設'}
+            </span>
+          </label>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -1007,6 +1204,15 @@ export default function CashCounterTab({ user }: { user?: any }) {
 
           <button
             type="button"
+            onClick={() => setActiveSubTab('stamps')}
+            style={actionBtnStyle('#b45309', '#ffffff')}
+            title="会員QRをスキャンしてスタンプを付与"
+          >
+            <QrCode size={15} /> QRスタンプ付与
+          </button>
+
+          <button
+            type="button"
             onClick={() => { loadRegisterData(); loadActiveOrders(); toast.success('最新情報に更新しました'); }}
             style={{ ...actionBtnStyle('#ffffff', '#374151'), border: '1px solid #d1d5db' }}
             title="最新情報に更新"
@@ -1020,7 +1226,7 @@ export default function CashCounterTab({ user }: { user?: any }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
         <MetricCard
           icon={<Banknote size={24} color="#16a34a" />}
-          label="現有ドロワー現金 (理論値)"
+          label={`${activeStore?.name?.replace(/^本格インド料理\s*/, '') || '店舗'} ドロワー理論値`}
           value={yen(stats.expectedDrawerCash)}
           sublabel={`準備金: ${yen(stats.startingFloat)} | 入金: +${yen(stats.cashIn)} | 出金: -${yen(stats.cashOut)}`}
           bg="#f0fdf4"
@@ -1028,9 +1234,9 @@ export default function CashCounterTab({ user }: { user?: any }) {
         />
         <MetricCard
           icon={<Calculator size={24} color="#2563eb" />}
-          label="本日の総売上 (Total Sales)"
+          label="本日の店舗売上"
           value={yen(stats.todaySales)}
-          sublabel={`決済件数: ${stats.transactionCount} 件`}
+          sublabel={`決済件数: ${stats.transactionCount} 件 · この店舗のみ`}
           bg="#eff6ff"
           border="#bfdbfe"
         />
@@ -1038,15 +1244,15 @@ export default function CashCounterTab({ user }: { user?: any }) {
           icon={<CreditCard size={24} color="#7c3aed" />}
           label="売上内訳 (現金 / キャッシュレス)"
           value={`${yen(stats.cashSales)} / ${yen(stats.nonCashSales)}`}
-          sublabel="現金 vs カード・PayPay・IC"
+          sublabel="この店舗の決済方法別"
           bg="#faf5ff"
           border="#e9d5ff"
         />
         <MetricCard
           icon={<UtensilsCrossed size={24} color="#ea580c" />}
           label="未会計の注文・伝票"
-          value={`${orders.length} 件`}
-          sublabel={orders.some(o => o.fulfillment === 'DINE_IN') ? 'お席テーブル注文あり' : '全伝票待機中'}
+          value={`${filteredOrders.length} 件`}
+          sublabel={filteredOrders.some(o => o.fulfillment === 'DINE_IN') ? 'お席テーブル注文あり' : 'この店舗の伝票待機中'}
           bg="#fff7ed"
           border="#fed7aa"
         />
@@ -1080,6 +1286,19 @@ export default function CashCounterTab({ user }: { user?: any }) {
           icon={<History size={17} />}
           label="本日決済ジャーナル (History)"
           badge={transactions.length}
+        />
+        <SubTabButton
+          active={activeSubTab === 'sales'}
+          onClick={() => setActiveSubTab('sales')}
+          icon={<FileSpreadsheet size={17} />}
+          label="店舗売上記録"
+          badge={stats.transactionCount || undefined}
+        />
+        <SubTabButton
+          active={activeSubTab === 'stamps'}
+          onClick={() => setActiveSubTab('stamps')}
+          icon={<QrCode size={17} />}
+          label="QRスタンプ付与"
         />
       </div>
 
@@ -1299,6 +1518,27 @@ export default function CashCounterTab({ user }: { user?: any }) {
                   </div>
                 </div>
 
+                {settlementMethod !== 'CASH' && selectedOrder && (
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <JapanDevicePay
+                      method={settlementMethod}
+                      amount={selectedOrder.grandTotal ?? selectedOrder.total}
+                      storeId={activeStore?.id || null}
+                      orderIds={(selectedOrder as any).orderIds || [selectedOrder.id]}
+                      label={`Order #${selectedOrder.number}`}
+                      disabled={settling}
+                      onPaid={async ({ paymentMethod, squarePaymentId, noteExtra }) => {
+                        await handleSettleOrder({
+                          paymentMethod,
+                          squarePaymentId: squarePaymentId ?? undefined,
+                          noteExtra: noteExtra || paymentMethod,
+                          skipConfirm: true,
+                        });
+                      }}
+                    />
+                  </div>
+                )}
+
                 {/* Cash Calculator (if cash selected) */}
                 {settlementMethod === 'CASH' && (
                   <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '12px', marginBottom: '1.25rem' }}>
@@ -1482,7 +1722,7 @@ export default function CashCounterTab({ user }: { user?: any }) {
 
             {/* Popular Items Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '10px', marginBottom: '1.5rem' }}>
-              {PRESET_QUICK_ITEMS.map(item => (
+              {quickMenuItems.map(item => (
                 <button
                   key={item.id}
                   type="button"
@@ -1669,10 +1909,29 @@ export default function CashCounterTab({ user }: { user?: any }) {
                   </div>
                 )}
 
+                {walkinPaymentMethod !== 'CASH' && walkinGrandTotal > 0 && (
+                  <div style={{ marginBottom: '1rem' }}>
+                    <JapanDevicePay
+                      method={walkinPaymentMethod}
+                      amount={walkinGrandTotal}
+                      storeId={activeStore?.id || null}
+                      label="店頭クイック会計"
+                      disabled={settling}
+                      onPaid={async ({ paymentMethod, squarePaymentId, noteExtra }) => {
+                        await handleSettleWalkin({
+                          paymentMethod,
+                          squarePaymentId: squarePaymentId ?? undefined,
+                          noteExtra: noteExtra || paymentMethod,
+                        });
+                      }}
+                    />
+                  </div>
+                )}
+
                 <button
                   type="button"
                   disabled={settling}
-                  onClick={handleSettleWalkin}
+                  onClick={() => handleSettleWalkin()}
                   style={{
                     width: '100%',
                     padding: '12px',
@@ -1685,7 +1944,11 @@ export default function CashCounterTab({ user }: { user?: any }) {
                     cursor: settling ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {settling ? '処理中…' : '即時会計完了・レシート発行'}
+                  {settling
+                    ? '処理中…'
+                    : walkinPaymentMethod === 'CARD'
+                      ? '端末なしでカード受領を確認して精算'
+                      : '即時会計完了・レシート発行'}
                 </button>
               </div>
             )}
@@ -2059,6 +2322,113 @@ export default function CashCounterTab({ user }: { user?: any }) {
           </div>
         </div>
       )}
+
+      {/* =================================================================== */}
+      {/* SUB-TAB 5: BRANCH SALES RECORDS (店舗売上記録)                      */}
+      {/* =================================================================== */}
+      {activeSubTab === 'sales' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>
+                  {activeStore?.name || '店舗'} · 本日の売上記録
+                </h3>
+                <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '0.85rem' }}>
+                  決済方法別の売上・件数は選択中の店舗のみ集計されます。他店舗のレジは独立して稼働できます。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { loadRegisterData(activeStore?.id); toast.success('売上記録を更新しました'); }}
+                style={{ ...actionBtnStyle('#ffffff', '#374151'), border: '1px solid #d1d5db' }}
+              >
+                <RefreshCw size={15} /> 更新
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginTop: '1rem' }}>
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '12px 14px' }}>
+                <div style={{ fontSize: '0.75rem', color: '#15803d', fontWeight: 700 }}>本日売上</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>{yen(stats.todaySales)}</div>
+              </div>
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '12px 14px' }}>
+                <div style={{ fontSize: '0.75rem', color: '#1d4ed8', fontWeight: 700 }}>現金 / キャッシュレス</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800 }}>{yen(stats.cashSales)} / {yen(stats.nonCashSales)}</div>
+              </div>
+              <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '10px', padding: '12px 14px' }}>
+                <div style={{ fontSize: '0.75rem', color: '#c2410c', fontWeight: 700 }}>決済件数</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>{stats.transactionCount} 件</div>
+              </div>
+              <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '10px', padding: '12px 14px' }}>
+                <div style={{ fontSize: '0.75rem', color: '#7e22ce', fontWeight: 700 }}>ドロワー理論値</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 800 }}>{yen(stats.expectedDrawerCash)}</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '1.25rem' }}>
+            <h4 style={{ margin: '0 0 12px', fontSize: '1rem', fontWeight: 800 }}>決済方法別内訳</h4>
+            {Object.keys(byPaymentMethod).length === 0 ? (
+              <p style={{ margin: 0, color: '#6b7280', fontSize: '0.9rem' }}>本日この店舗の決済はまだありません。</p>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+                {Object.entries(byPaymentMethod).map(([method, row]) => {
+                  const meta = PAYMENT_METHODS.find(m => m.id === method);
+                  return (
+                    <div key={method} style={{ border: '1px solid #e5e7eb', borderRadius: '10px', padding: '12px 14px' }}>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#4b5563' }}>{meta?.label || method}</div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 800, marginTop: '4px' }}>{yen(row.total)}</div>
+                      <div style={{ fontSize: '0.78rem', color: '#6b7280' }}>{row.count} 件</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '1.25rem' }}>
+            <h4 style={{ margin: '0 0 12px', fontSize: '1rem', fontWeight: 800 }}>閉店シフト履歴（この店舗）</h4>
+            {closedShifts.length === 0 ? (
+              <p style={{ margin: 0, color: '#6b7280', fontSize: '0.9rem' }}>まだ締め済みシフトはありません。</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ background: '#f9fafb', textAlign: 'left' }}>
+                      <th style={{ padding: '8px' }}>閉店日時</th>
+                      <th style={{ padding: '8px' }}>担当</th>
+                      <th style={{ padding: '8px' }}>準備金</th>
+                      <th style={{ padding: '8px' }}>理論値</th>
+                      <th style={{ padding: '8px' }}>実査</th>
+                      <th style={{ padding: '8px' }}>差異</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {closedShifts.map(s => (
+                      <tr key={s.id} style={{ borderTop: '1px solid #e5e7eb' }}>
+                        <td style={{ padding: '8px' }}>{s.closedAt ? new Date(s.closedAt).toLocaleString('ja-JP') : '—'}</td>
+                        <td style={{ padding: '8px' }}>{s.closedBy || s.openedBy}</td>
+                        <td style={{ padding: '8px' }}>{yen(s.startingFloat)}</td>
+                        <td style={{ padding: '8px' }}>{yen(s.expectedTotal || 0)}</td>
+                        <td style={{ padding: '8px' }}>{yen(s.countedTotal || 0)}</td>
+                        <td style={{ padding: '8px', fontWeight: 700, color: (s.variance || 0) === 0 ? '#15803d' : '#dc2626' }}>
+                          {(s.variance || 0) > 0 ? '+' : ''}{yen(s.variance || 0)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* SUB-TAB 6: QR STAMP AWARD (QRスタンプ付与)                          */}
+      {/* =================================================================== */}
+      {activeSubTab === 'stamps' && <StampCounter />}
 
       {/* =================================================================== */}
       {/* MODAL 1: OPEN SHIFT                                                */}

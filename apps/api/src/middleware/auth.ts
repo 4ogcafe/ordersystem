@@ -90,6 +90,15 @@ export const requireRole =
     next();
   };
 
+/** Staff session when the cookie is valid; null for anonymous visitors. */
+export async function readSession(req: Request): Promise<SessionUser | null> {
+  try {
+    return await authenticate(req);
+  } catch {
+    return null;
+  }
+}
+
 export const requireAuth = requireRole('ADMIN', 'STAFF');
 export const requireAdmin = requireRole('ADMIN');
 export const requireStaff = requireRole('ADMIN', 'STAFF');

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Sparkles, Flame, Heart, Quote } from 'lucide-react';
 import { assetUrl, getPublic } from '../lib/api';
 import EmphasisText from '../components/EmphasisText';
+import SafeImage from '../components/SafeImage';
 
 export default function About() {
   const [settings, setSettings] = useState<any>({});
@@ -18,16 +19,16 @@ export default function About() {
     <main>
       <title>私たちについて | Adarsha (アダルサ) 熊谷の本格インド料理</title>
       <meta name="description" content="埼玉県熊谷市の本格インド料理店アダルサの物語、伝統スパイスへのこだわり、特注の備長炭タンドール窯、シェフをご紹介します。" />
-      <link rel="canonical" href="https://pnglike.com/about" />
+      <link rel="canonical" href="https://adarsha.jp/about" />
       <meta property="og:title" content="私たちについて | Adarsha (アダルサ) 熊谷の本格インド料理" />
       <meta property="og:description" content="埼玉県熊谷市の本格インド料理店アダルサの物語、伝統スパイスへのこだわり、特注の備長炭タンドール窯、シェフをご紹介します。" />
       <meta property="og:type" content="website" />
-      <meta property="og:url" content="https://pnglike.com/about" />
-      <meta property="og:image" content={assetUrl(settings.aboutHeroImage) || "https://pnglike.com/bg-hero-img.webp"} />
+      <meta property="og:url" content="https://adarsha.jp/about" />
+      <meta property="og:image" content={assetUrl(settings.aboutHeroImage) || "https://adarsha.jp/uploads/site-logo-01.webp"} />
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:title" content="私たちについて | Adarsha (アダルサ)" />
       <meta name="twitter:description" content="熊谷の本格インド料理店アダルサの物語、スパイスへのこだわり、シェフをご紹介します。" />
-      <meta name="twitter:image" content={assetUrl(settings.aboutHeroImage) || "https://pnglike.com/bg-hero-img.webp"} />
+      <meta name="twitter:image" content={assetUrl(settings.aboutHeroImage) || "https://adarsha.jp/uploads/site-logo-01.webp"} />
 
       {/* Structured Data */}
       <script
@@ -41,13 +42,13 @@ export default function About() {
                 '@type': 'ListItem',
                 'position': 1,
                 'name': 'ホーム',
-                'item': 'https://pnglike.com/'
+                'item': 'https://adarsha.jp/'
               },
               {
                 '@type': 'ListItem',
                 'position': 2,
                 'name': '私たちについて',
-                'item': 'https://pnglike.com/about'
+                'item': 'https://adarsha.jp/about'
               }
             ]
           })
@@ -59,13 +60,13 @@ export default function About() {
           __html: JSON.stringify({
             '@context': 'https://schema.org',
             '@type': 'AboutPage',
-            '@id': 'https://pnglike.com/about#webpage',
-            'url': 'https://pnglike.com/about',
+            '@id': 'https://adarsha.jp/about#webpage',
+            'url': 'https://adarsha.jp/about',
             'name': '私たちについて | Adarsha (アダルサ)',
             'description': '熊谷の本格インド料理店アダルサの物語、スパイスへのこだわり、シェフをご紹介します。',
             'mainEntity': {
               '@type': 'Restaurant',
-              '@id': 'https://pnglike.com/#restaurant',
+              '@id': 'https://adarsha.jp/#restaurant',
               'name': 'Adarsha (アダルサ)'
             }
           })
@@ -74,17 +75,12 @@ export default function About() {
 
       {/* About Hero */}
       <div className="home-hero" style={{ height: '50vh', minHeight: '400px' }}>
-        <img
-          src={assetUrl(settings.aboutHeroImage) || "/bg-hero-img.webp"}
+        <SafeImage
+          src={assetUrl(settings.aboutHeroImage)}
           alt=""
           fetchPriority="high"
           className="slide-bg-img"
-          onError={(e) => {
-            const target = e.currentTarget;
-            if (!target.src.endsWith('/bg-hero-img.webp')) {
-              target.src = '/bg-hero-img.webp';
-            }
-          }}
+          onError={(e) => { e.currentTarget.style.display = 'none'; }}
           style={{ opacity: 0.5, objectFit: 'cover' }}
         />
         <div className="hero-content">
@@ -250,17 +246,12 @@ export default function About() {
                   backgroundColor: '#2a2321',
                 }}
               >
-                <img
-                  src={assetUrl(settings.aboutStoryImage) || "/bg-hero-img.webp"}
+                <SafeImage
+                  src={assetUrl(settings.aboutStoryImage)}
                   alt={settings.aboutStoryTitleJa?.replace(/<[^>]*>/g, '') || "本場インドの味を、熊谷へ"}
                   loading="lazy"
                   decoding="async"
-                  onError={(e) => {
-                    const target = e.currentTarget;
-                    if (!target.src.endsWith('/bg-hero-img.webp')) {
-                      target.src = '/bg-hero-img.webp';
-                    }
-                  }}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
                   style={{
                     width: '100%',
                     height: '100%',
@@ -373,17 +364,12 @@ export default function About() {
       <div className="section" style={{ backgroundColor: 'var(--cream)' }}>
         <div style={{ maxWidth: '1100px', margin: '0 auto', display: 'flex', flexWrap: 'wrap', gap: '40px', alignItems: 'center' }}>
           <div style={{ flex: '1 1 400px' }}>
-            <img
-              src={assetUrl(settings.aboutSpiceImage) || "/bg-hero-img.webp"}
+            <SafeImage
+              src={assetUrl(settings.aboutSpiceImage)}
               alt={settings.aboutSpiceTitleJa?.replace(/<[^>]*>/g, '') || "厳選直輸入スパイス"}
               loading="lazy"
               decoding="async"
-              onError={(e) => {
-                const target = e.currentTarget;
-                if (!target.src.endsWith('/bg-hero-img.webp')) {
-                  target.src = '/bg-hero-img.webp';
-                }
-              }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
               style={{ width: '100%', borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}
             />
           </div>
@@ -406,17 +392,12 @@ export default function About() {
       <div className="section" style={{ backgroundColor: 'white' }}>
         <div style={{ maxWidth: '1100px', margin: '0 auto', display: 'flex', flexWrap: 'wrap', gap: '40px', alignItems: 'center', flexDirection: 'row-reverse' }}>
           <div style={{ flex: '1 1 400px' }}>
-            <img
-              src={assetUrl(settings.aboutChefImage) || "/bg-hero-img.webp"}
+            <SafeImage
+              src={assetUrl(settings.aboutChefImage)}
               alt={settings.aboutChefTitleJa?.replace(/<[^>]*>/g, '') || "熟練のシェフ"}
               loading="lazy"
               decoding="async"
-              onError={(e) => {
-                const target = e.currentTarget;
-                if (!target.src.endsWith('/bg-hero-img.webp')) {
-                  target.src = '/bg-hero-img.webp';
-                }
-              }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
               style={{ width: '100%', borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}
             />
           </div>

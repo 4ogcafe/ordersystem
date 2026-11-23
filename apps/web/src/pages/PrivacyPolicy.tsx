@@ -26,11 +26,11 @@ export default function PrivacyPolicy() {
     <main style={{ backgroundColor: '#faf7f2', minHeight: '100vh', color: '#1f2937' }}>
       <title>プライバシーポリシー (個人情報保護方針) | Adarsha (アダルサ)</title>
       <meta name="description" content="本格インド料理アダルサのプライバシーポリシーです。お客様の個人情報の適切な保護と取り扱いに関する方針をご案内します。" />
-      <link rel="canonical" href="https://pnglike.com/privacy-policy" />
+      <link rel="canonical" href="https://adarsha.jp/privacy-policy" />
       <meta property="og:title" content="プライバシーポリシー | Adarsha (アダルサ)" />
       <meta property="og:description" content="本格インド料理アダルサのプライバシーポリシーです。" />
       <meta property="og:type" content="website" />
-      <meta property="og:url" content="https://pnglike.com/privacy-policy" />
+      <meta property="og:url" content="https://adarsha.jp/privacy-policy" />
 
       {/* Hero Header */}
       <div style={{

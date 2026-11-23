@@ -4,6 +4,7 @@ import { useCustomer } from '../lib/customer-context';
 import { useCart } from '../lib/cart-context';
 import { Menu, ShoppingCart, UserRound, X } from 'lucide-react';
 import ReservationModal from './ReservationModal';
+import { useBodyScrollLock } from '../lib/useBodyScrollLock';
 
 const NAV_LINKS = [
   { to: '/', label: 'ホーム' },
@@ -43,15 +44,12 @@ export default function Navbar() {
   // Small screens: the links live in a menu opened from the ☰ button.
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => setMenuOpen(false), [location.pathname]);
+  useBodyScrollLock(menuOpen);
   useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMenuOpen(false);
     window.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
-    };
+    return () => window.removeEventListener('keydown', onKey);
   }, [menuOpen]);
 
   const isActive = (path: string) => {
@@ -64,8 +62,8 @@ export default function Navbar() {
       <nav className="navbar">
         <div className="nav-inner">
           <Link className="nav-logo" to="/">
-            <div style={{ height: '40px', display: 'flex', alignItems: 'center' }}>
-              <img src="/adarsha-log.webp" alt="Adarsha" width={40} height={40} style={{ height: '100%', width: 'auto', objectFit: 'contain', borderRadius: '50%' }} />
+            <div className="flex h-10 items-center">
+              <img src="/uploads/adarsha-log.webp" alt="Adarsha" width={40} height={40} className="h-full w-auto rounded-full object-contain" />
             </div>
             <div>
               <div className="nav-logo-text">アダルサ<span>.</span></div>
@@ -114,7 +112,7 @@ export default function Navbar() {
                 ))}
               </ul>
               <div className="nav-mobile-actions">
-                <Link to={customer ? '/account' : '/account/login'} className="order-btn order-btn-outline order-btn-lg" style={{ textDecoration: 'none' }}>
+                <Link to={customer ? '/account' : '/account/login'} className="order-btn order-btn-outline order-btn-lg no-underline">
                   <UserRound size={18} aria-hidden="true" />{customer ? 'マイページ' : 'ログイン・会員登録'}
                 </Link>
                 <button type="button" className="order-btn order-btn-solid order-btn-lg" onClick={() => { setMenuOpen(false); handleOpen(); }}>席を予約する</button>

@@ -131,7 +131,7 @@ export default function StampCard({ card, memberName, preview = false, onCardUpd
                   className={`stamp-slot${stamped ? ' is-stamped' : ''}${isNewlyStamped ? ' is-new' : ''}${milestone ? ' is-milestone' : ''}${isGoal ? ' is-goal' : ''}`}
                   aria-label={`${position}個目${isGoal ? '（ゴール）' : ''}${stamped ? '：押印済み' : ''}`}
                 >
-                  {stamped ? <StampMark date={date} /> : <img src="/adarsha-log.webp" alt="" className="stamp-ghost" style={{ borderRadius: '50%' }} />}
+                  {stamped ? <StampMark date={date} /> : <img src="/uploads/adarsha-log.webp" alt="" className="stamp-ghost" style={{ borderRadius: '50%' }} />}
                   {!stamped && isGoal && <span className="stamp-gift" aria-hidden="true" title="ゴール">🏁</span>}
                   {!stamped && !isGoal && milestone && <span className="stamp-gift" aria-hidden="true">🎁</span>}
                 </span>

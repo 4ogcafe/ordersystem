@@ -1,14 +1,15 @@
 import { Check, Printer, RotateCcw, X } from 'lucide-react';
 import { formatOrderNumber } from '../../lib/format';
-import { resolveOrderStore } from '../../lib/stores';
+import { resolveOrderStore, type StoreLocation } from '../../lib/stores';
 import { alertText } from '../admin/dietary';
 import { clockTime, countdown, dueDay, isDelivery, minutesBetween, nextAction, typeLabel, urgency, type KitchenOrder, type KitchenStatus } from './kitchen';
 
 /** One order on the kitchen display: what to cook, by when, and the next step. */
-export default function KitchenTicket({ order, now, busy, onMove, onToggleLine, onPrint }: {
+export default function KitchenTicket({ order, now, busy, stores, onMove, onToggleLine, onPrint }: {
   order: KitchenOrder;
   now: number;
   busy: boolean;
+  stores?: StoreLocation[];
   onMove: (order: KitchenOrder, status: KitchenStatus) => void;
   onToggleLine: (order: KitchenOrder, index: number, done: boolean) => void;
   onPrint: (order: KitchenOrder) => void;
@@ -26,7 +27,7 @@ export default function KitchenTicket({ order, now, busy, onMove, onToggleLine, 
   const since = order.status === 'NEW' ? order.createdAt : order.status === 'CONFIRMED' ? order.confirmedAt : order.readyAt;
   const waited = since ? minutesBetween(since, now) : null;
   const isNewArrival = order.status === 'NEW' && minutesBetween(order.createdAt, now) < 1;
-  const resolvedBranch = resolveOrderStore(order);
+  const resolvedBranch = resolveOrderStore(order, stores);
 
   return (
     <article className={`kt kt-${level}${isNewArrival ? ' kt-fresh' : ''}`} aria-label={`Order ${formatOrderNumber(order.number)}`}>

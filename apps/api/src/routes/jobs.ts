@@ -2,6 +2,7 @@ import express from 'express';
 import { z } from 'zod';
 import { AppError } from '../lib/errors.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 import {
   getAllJobs,
   getPublicActiveJobs,
@@ -16,6 +17,12 @@ import {
 } from '../services/jobs.js';
 
 const router = express.Router();
+
+const applyRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  key: (req) => `job-apply:${req.ip || req.socket.remoteAddress || 'unknown'}`,
+});
 
 const jobSchema = z.object({
   titleJa: z.string().trim().min(1, '職種名を入力してください').max(150),
@@ -50,7 +57,7 @@ router.get('/', async (_req, res) => {
 });
 
 // Public: Submit job application
-router.post('/apply', async (req, res) => {
+router.post('/apply', applyRateLimit, async (req, res) => {
   try {
     const parsed = applicationSchema.parse(req.body);
     const ip = req.ip || req.socket.remoteAddress || undefined;

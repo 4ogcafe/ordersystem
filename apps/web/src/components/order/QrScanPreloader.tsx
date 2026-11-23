@@ -39,7 +39,7 @@ export default function QrScanPreloader({
         <div className="dio-qr-preloader-logo-ring">
           <div className="dio-qr-preloader-pulse-glow" />
           <img
-            src="/adarsha-log.webp"
+            src="/uploads/adarsha-log.webp"
             alt="Adarsha (アダルサ)"
             className="dio-qr-preloader-logo-img"
           />

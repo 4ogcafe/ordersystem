@@ -2,96 +2,96 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
-    <loc>https://pnglike.com/</loc>
+    <loc>https://adarsha.jp/</loc>
     <lastmod>2026-10-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
     <image:image>
-      <image:loc>https://pnglike.com/bg-hero-img.webp</image:loc>
+      <image:loc>https://adarsha.jp/site-logo-01.webp</image:loc>
       <image:title>本格インド料理 Adarsha (アダルサ) 本格カレーと焼き立てナン</image:title>
       <image:caption>埼玉・熊谷の本格インド料理店アダルサ。備長炭タンドール窯で焼き上げるナンと極上カレー。</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://pnglike.com/menu/lunch</loc>
+    <loc>https://adarsha.jp/menu/lunch</loc>
     <lastmod>2026-10-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
     <image:image>
-      <image:loc>https://pnglike.com/bg-hero-img.webp</image:loc>
+      <image:loc>https://adarsha.jp/site-logo-01.webp</image:loc>
       <image:title>アダルサ ランチセット・チーズナンランチ</image:title>
     </image:image>
   </url>
   <url>
-    <loc>https://pnglike.com/menu/takeout</loc>
+    <loc>https://adarsha.jp/menu/takeout</loc>
     <lastmod>2026-10-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
     <image:image>
-      <image:loc>https://pnglike.com/bg-hero-img.webp</image:loc>
+      <image:loc>https://adarsha.jp/site-logo-01.webp</image:loc>
       <image:title>アダルサ テイクアウトメニュー</image:title>
     </image:image>
   </url>
   <url>
-    <loc>https://pnglike.com/menu/grand</loc>
+    <loc>https://adarsha.jp/menu/grand</loc>
     <lastmod>2026-10-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
     <image:image>
-      <image:loc>https://pnglike.com/bg-hero-img.webp</image:loc>
+      <image:loc>https://adarsha.jp/site-logo-01.webp</image:loc>
       <image:title>アダルサ グランドメニュー・タンドリーチキン</image:title>
     </image:image>
   </url>
   <url>
-    <loc>https://pnglike.com/about</loc>
+    <loc>https://adarsha.jp/about</loc>
     <lastmod>2026-10-24</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://pnglike.com/contact</loc>
+    <loc>https://adarsha.jp/contact</loc>
     <lastmod>2026-10-24</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://pnglike.com/blog</loc>
+    <loc>https://adarsha.jp/blog</loc>
     <lastmod>2026-10-25</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.85</priority>
   </url>
   <url>
-    <loc>https://pnglike.com/blog/kumagaya-indian-curry-spices-guide</loc>
+    <loc>https://adarsha.jp/blog/kumagaya-indian-curry-spices-guide</loc>
     <lastmod>2026-10-25</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://pnglike.com/blog/binchotan-charcoal-tandoor-naan-special</loc>
+    <loc>https://adarsha.jp/blog/binchotan-charcoal-tandoor-naan-special</loc>
     <lastmod>2026-10-25</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://pnglike.com/blog/kumagaya-lunch-curry-free-refill-guide</loc>
+    <loc>https://adarsha.jp/blog/kumagaya-lunch-curry-free-refill-guide</loc>
     <lastmod>2026-10-25</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://pnglike.com/careers</loc>
+    <loc>https://adarsha.jp/careers</loc>
     <lastmod>2026-10-24</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://pnglike.com/privacy-policy</loc>
+    <loc>https://adarsha.jp/privacy-policy</loc>
     <lastmod>2026-10-24</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
-    <loc>https://pnglike.com/refund-policy</loc>
+    <loc>https://adarsha.jp/refund-policy</loc>
     <lastmod>2026-10-24</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>

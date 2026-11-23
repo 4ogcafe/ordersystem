@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import {
   Search, Plus, ShoppingCart, History,
   ChefHat, X, ChevronDown, ChevronUp, Bell, Heart,
   Receipt, RotateCcw, User, LogIn, LogOut,
-  CheckCircle2, Sparkles, ShoppingBag, UtensilsCrossed, Phone
+  CheckCircle2, Sparkles, ShoppingBag, UtensilsCrossed, Phone, QrCode
 } from 'lucide-react';
 import type { Fulfillment } from './fulfillment';
 import { apiFetch, assetUrl, errorMessage, getPublic } from '../../lib/api';
@@ -14,8 +14,29 @@ import { useCustomer } from '../../lib/customer-context';
 import { setCustomerSession } from '../../lib/auth-storage';
 import { readyChime } from '../../lib/push';
 import { getStoredQrSession, clearQrSession, type QrSession } from '../../lib/qr-session';
+import {
+  evaluateOrderTiming,
+  isDinnerSetMenuEntity,
+  isLunchSetMenuEntity,
+  isSetMenuAvailableNow,
+} from '../../lib/order-timing';
 import QrScanPreloader from './QrScanPreloader';
+import { useBodyScrollLock } from '../../lib/useBodyScrollLock';
 import '../../pages/dining-order.css';
+
+export interface MenuOptionGroup {
+  id: string;
+  nameEn: string;
+  nameJa?: string | null;
+  type?: 'RADIO' | 'CHECKBOX' | string;
+  required?: boolean;
+  options?: Array<{
+    id: string;
+    nameEn: string;
+    nameJa?: string | null;
+    priceAdjust?: number;
+  }>;
+}
 
 export interface QuickMenuItem {
   id: string;
@@ -33,7 +54,9 @@ export interface QuickMenuItem {
   isRecommended?: boolean;
   isSoldOut?: boolean;
   isOrderable?: boolean;
+  isActive?: boolean;
   menuTypes?: string[];
+  optionGroups?: MenuOptionGroup[];
   category?: { id: string; nameEn: string; nameJa?: string | null };
 }
 
@@ -74,6 +97,23 @@ export interface TableSessionOrder {
   subtotal: number;
   tax: number;
   grandTotal: number;
+}
+
+function orderStatusMeta(status: TableSessionOrder['status'], lang: 'ja' | 'en') {
+  switch (status) {
+    case 'NEW':
+      return { label: lang === 'ja' ? '受付済み' : 'Received', bg: '#eff6ff', color: '#1d4ed8' };
+    case 'CONFIRMED':
+      return { label: lang === 'ja' ? '調理準備中' : 'Preparing', bg: '#fff7ed', color: '#c2410c' };
+    case 'READY':
+      return { label: lang === 'ja' ? 'まもなく配膳' : 'Ready soon', bg: '#fef3c7', color: '#b45309' };
+    case 'COMPLETED':
+      return { label: lang === 'ja' ? '配膳済' : 'Served', bg: '#ecfdf5', color: '#059669' };
+    case 'CANCELLED':
+      return { label: lang === 'ja' ? 'キャンセル' : 'Cancelled', bg: '#f3f4f6', color: '#6b7280' };
+    default:
+      return { label: lang === 'ja' ? '厨房で調理中' : 'Cooking', bg: '#fff7ed', color: '#c2410c' };
+  }
 }
 
 interface DineInOrderExperienceProps {
@@ -135,13 +175,20 @@ const CURRY_CHOICE_OPTIONS: CustomOptionItem[] = [
 ];
 
 const DRINK_OPTIONS: CustomOptionItem[] = [
-  { id: 'none', nameJa: 'なし', nameEn: 'None', price: 0 },
-  { id: 'lassi', nameJa: 'ラッシー', nameEn: 'Lassi', price: 109 },
+  { id: 'lassi', nameJa: 'ラッシー', nameEn: 'Lassi', price: 0 },
   { id: 'mango_lassi', nameJa: 'マンゴーラッシー', nameEn: 'Mango Lassi', price: 109 },
-  { id: 'oolong', nameJa: 'ウーロン茶', nameEn: 'Oolong Tea', price: 109 },
-  { id: 'jasmine', nameJa: 'ジャスミン茶', nameEn: 'Jasmine Tea', price: 109 },
+  { id: 'oolong', nameJa: 'ウーロン茶', nameEn: 'Oolong Tea', price: 0 },
+  { id: 'jasmine', nameJa: 'ジャスミン茶', nameEn: 'Jasmine Tea', price: 0 },
   { id: 'iced_coffee', nameJa: 'アイスコーヒー', nameEn: 'Iced Coffee', price: 109 },
   { id: 'hot_coffee', nameJa: 'ホットコーヒー', nameEn: 'Hot Coffee', price: 109 },
+  { id: 'water', nameJa: 'お水', nameEn: 'Water', price: 0 },
+];
+
+const SNACK_OPTIONS: CustomOptionItem[] = [
+  { id: 'samosa', nameJa: 'サモサ', nameEn: 'Samosa', price: 0 },
+  { id: 'onion_bhaji', nameJa: 'オニオンバジ', nameEn: 'Onion Bhaji', price: 0 },
+  { id: 'papadum', nameJa: 'パパダム', nameEn: 'Papadum', price: 0 },
+  { id: 'none', nameJa: 'なし', nameEn: 'None', price: 0 },
 ];
 
 export default function DineInOrderExperience({
@@ -242,7 +289,6 @@ export default function DineInOrderExperience({
   const [showCheckoutModal, setShowCheckoutModal] = useState<boolean>(false);
   const [showTableEditModal, setShowTableEditModal] = useState<boolean>(false);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
-  const [newTableInput, setNewTableInput] = useState<string>(tableNumber);
 
   // Auth modal states (Optional Login & Registration)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -269,10 +315,11 @@ export default function DineInOrderExperience({
   // Item customization modal
   const [customizingItem, setCustomizingItem] = useState<QuickMenuItem | null>(null);
   const [custImgError, setCustImgError] = useState<boolean>(false);
-  const [customSpice, setCustomSpice] = useState<number>(1);
-  const [customBread, setCustomBread] = useState<string>('plain_naan');
-  const [customCurry, setCustomCurry] = useState<string>('dal');
-  const [customDrink, setCustomDrink] = useState<string>('none');
+  const [customSpice, setCustomSpice] = useState<number | null>(null);
+  const [customBread, setCustomBread] = useState<string>('');
+  const [customCurry, setCustomCurry] = useState<string>('');
+  const [customDrink, setCustomDrink] = useState<string>('');
+  const [customSnack, setCustomSnack] = useState<string>('');
   const [customNote, setCustomNote] = useState<string>('');
   const [customQty, setCustomQty] = useState<number>(1);
 
@@ -281,6 +328,24 @@ export default function DineInOrderExperience({
   const [callingStaff, setCallingStaff] = useState<boolean>(false);
   const [requestingBill, setRequestingBill] = useState<boolean>(false);
   const [isTablePaid, setIsTablePaid] = useState<boolean>(false);
+  /** From admin Table Ordering settings + Square public-config. */
+  const [payOptions, setPayOptions] = useState({
+    allowPayAtRegister: true,
+    allowOnlinePay: true,
+    squareConfigured: false,
+  });
+  const [orderSettings, setOrderSettings] = useState<Record<string, any> | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const timingStatus = useMemo(
+    () => evaluateOrderTiming(selectedStore, orderSettings, new Date(nowTick)),
+    [selectedStore, orderSettings, nowTick],
+  );
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -306,7 +371,9 @@ export default function DineInOrderExperience({
           setAuthVerifyingEmail(data.email || authEmail.trim());
           setAuthStep('verify');
           setAuthResendCooldown(60);
-          setAuthInfoMsg(data.error?.message || (lang === 'ja' ? 'メールアドレスの確認が必要です。' : 'Email verification required.'));
+          const mailNote = data.error?.message || (lang === 'ja' ? 'メールアドレスの確認が必要です。' : 'Email verification required.');
+          if (data.emailSent === false) setAuthError(mailNote);
+          else setAuthInfoMsg(mailNote);
           return;
         }
         setAuthError(data?.error?.message || (isRegister ? (lang === 'ja' ? '登録できませんでした。入力内容をご確認ください。' : 'Registration failed.') : (lang === 'ja' ? 'ログインできませんでした。メールアドレスとパスワードをご確認ください。' : 'Login failed.')));
@@ -317,7 +384,9 @@ export default function DineInOrderExperience({
         setAuthVerifyingEmail(data.email || authEmail.trim());
         setAuthStep('verify');
         setAuthResendCooldown(60);
-        setAuthInfoMsg(data.message || (lang === 'ja' ? `確認コードを ${data.email || authEmail.trim()} 宛に送信しました。` : `Verification code sent to ${data.email || authEmail.trim()}`));
+        const mailNote = data.message || (lang === 'ja' ? `確認コードを ${data.email || authEmail.trim()} 宛に送信しました。` : `Verification code sent to ${data.email || authEmail.trim()}`);
+        if (data.emailSent === false) setAuthError(mailNote);
+        else setAuthInfoMsg(mailNote);
         return;
       }
 
@@ -419,23 +488,7 @@ export default function DineInOrderExperience({
     showTableEditModal ||
     showAuthModal
   );
-
-  useEffect(() => {
-    if (isAnyModalOpen) {
-      const originalOverflow = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
-      document.documentElement.style.overflow = 'hidden';
-      document.body.classList.add('dio-modal-open');
-      document.documentElement.classList.add('dio-modal-open');
-
-      return () => {
-        document.body.style.overflow = originalOverflow;
-        document.documentElement.style.overflow = '';
-        document.body.classList.remove('dio-modal-open');
-        document.documentElement.classList.remove('dio-modal-open');
-      };
-    }
-  }, [isAnyModalOpen]);
+  useBodyScrollLock(isAnyModalOpen);
 
   // Session tokens tracker
   const getSessionTokens = (): string[] => {
@@ -478,7 +531,16 @@ export default function DineInOrderExperience({
       .then(([items, cats]) => {
         if (isCancelled) return;
         if (Array.isArray(items)) {
-          setMenuItems(items.filter(it => it.isOrderable !== false && !it.isSoldOut));
+          setMenuItems(
+            items
+              .filter(it => it.isActive !== false && it.isOrderable !== false && !it.isSoldOut)
+              .sort((a, b) => {
+                const ca = a.category?.nameEn || a.categoryId || '';
+                const cb = b.category?.nameEn || b.categoryId || '';
+                if (ca !== cb) return ca.localeCompare(cb);
+                return (a.nameEn || '').localeCompare(b.nameEn || '');
+              }),
+          );
         }
         if (Array.isArray(cats)) {
           setCategories(cats);
@@ -507,52 +569,88 @@ export default function DineInOrderExperience({
     };
   }, [isTakeout]);
 
+  const knownReadyRef = useRef<Set<string>>(new Set());
+
+  // Keep table number locked to the verified QR session
+  useEffect(() => {
+    const locked = qrSession?.tableNumber || initialTableNumber;
+    if (locked && locked !== tableNumber) {
+      setTableNumber(locked);
+    }
+  }, [qrSession?.tableNumber, initialTableNumber]);
+
   // Poll / fetch active table orders
   const loadTableOrders = async () => {
     if (!tableNumber) return;
+    const tokenList = getSessionTokens();
+    // Fresh scan: no order tokens yet — show empty bill without hitting staff-only table dump.
+    if (tokenList.length === 0) {
+      setTableOrders([]);
+      setTableSubtotal(0);
+      setTableTax(0);
+      setTableGrandTotal(0);
+      setIsTablePaid(false);
+      return;
+    }
     try {
-      const tokens = getSessionTokens().join(',');
+      const tokens = tokenList.join(',');
       const res = await apiFetch(`/api/v1/orders/table?table=${encodeURIComponent(tableNumber)}&tokens=${encodeURIComponent(tokens)}`);
       if (res.ok) {
         const data = await res.json();
-        setTableOrders(data.orders || []);
+        const nextOrders: TableSessionOrder[] = data.orders || [];
+        setTableOrders(nextOrders);
         setTableSubtotal(data.totalSubtotal || 0);
         setTableTax(data.totalTax || 0);
         setTableGrandTotal(data.grandTotal || 0);
 
-        if (data.allCompleted && tokens) {
-          setIsTablePaid(true);
-        } else if (data.orders && data.orders.length > 0 && data.orders.every((o: any) => o.status === 'COMPLETED')) {
+        // Prefer cash-register settlement flag; kitchen COMPLETED alone is not payment.
+        if (typeof data.tablePaid === 'boolean') {
+          setIsTablePaid(data.tablePaid);
+        } else if (nextOrders.length > 0 && nextOrders.every((o: any) => o.paymentStatus === 'PAID')) {
           setIsTablePaid(true);
         } else {
           setIsTablePaid(false);
         }
+
+        // Chime when a round becomes READY or COMPLETED for the first time this sitting
+        for (const ord of nextOrders) {
+          if ((ord.status === 'READY' || ord.status === 'COMPLETED') && !knownReadyRef.current.has(ord.token)) {
+            knownReadyRef.current.add(ord.token);
+            readyChime();
+            toast.success(
+              lang === 'ja'
+                ? (ord.status === 'READY' ? 'ご注文の準備ができました。まもなくお持ちします！' : 'ご注文をお席へお持ちしました！')
+                : (ord.status === 'READY' ? 'Your order is almost ready!' : 'Your order has been served!'),
+              { id: `ready-${ord.token}`, duration: 4000, icon: '🍽️' },
+            );
+          }
+        }
       }
+      // Do not toast "session expired" here — order history 401 is not the same as QR expiry.
     } catch {}
   };
 
-  // Reset table sitting / clear session so next customers start fresh
+  // Guest "new sitting" — clears this phone's local tray/history only (staff reset is separate)
   const handleResetTableSession = async () => {
-    try {
-      await apiFetch('/api/v1/tables/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tableNumber: tableNumber.trim(),
-          storeId: selectedStore.id,
-        }),
-      });
-    } catch {}
     try {
       sessionStorage.removeItem(`adarsha_session_tokens_${tableNumber}`);
       sessionStorage.removeItem(`adarsha_tray_${tableNumber}`);
+      sessionStorage.removeItem('adarsha_qr_choice');
     } catch {}
+    knownReadyRef.current = new Set();
+    setTray([]);
     setTableOrders([]);
     setTableSubtotal(0);
     setTableTax(0);
     setTableGrandTotal(0);
     setIsTablePaid(false);
-    toast.success(lang === 'ja' ? 'テーブルをリセットしました。新しいご注文を開始できます。' : 'Table session reset. Ready for new orders!', { icon: '✨' });
+    setShowHistoryModal(false);
+    toast.success(
+      lang === 'ja'
+        ? 'この端末の注文履歴をクリアしました。続けてご注文いただけます。'
+        : 'Cleared this phone’s order history. You can order again.',
+      { icon: '✨' },
+    );
   };
 
   useEffect(() => {
@@ -560,6 +658,34 @@ export default function DineInOrderExperience({
     const interval = setInterval(loadTableOrders, 12_000);
     return () => clearInterval(interval);
   }, [tableNumber]);
+
+  // Load which payment options the admin enabled for dine-in.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      getPublic<any>(`/api/v1/orders/slots?type=dine_in&storeId=${encodeURIComponent(selectedStore.id)}`).catch(() => null),
+      getPublic<any>('/api/v1/settings').catch(() => null),
+      getPublic<any>('/api/v1/square/public-config').catch(() => null),
+    ]).then(([slots, settings, square]) => {
+      if (cancelled) return;
+      if (settings && typeof settings === 'object') {
+        setOrderSettings(settings);
+      }
+      const dineIn = slots?.dineIn ?? {};
+      const allowPayAtRegister =
+        dineIn.allowPayAtRegister ?? settings?.dineInAllowPayAtRegister ?? true;
+      const allowOnlinePay =
+        dineIn.allowOnlinePay ?? settings?.dineInAllowOnlinePay ?? true;
+      setPayOptions({
+        allowPayAtRegister: allowPayAtRegister !== false,
+        allowOnlinePay: allowOnlinePay !== false,
+        squareConfigured: Boolean(square?.configured),
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStore.id]);
 
   // Toggle favorite
   const toggleFavorite = (itemId: string, e?: React.MouseEvent) => {
@@ -578,25 +704,24 @@ export default function DineInOrderExperience({
     });
   };
 
-  // Visible categories according to mode (Dine-In vs Takeout)
+  // Visible categories according to mode (Dine-In vs Takeout) + lunch/dinner serving windows
   const visibleCategories = useMemo(() => {
+    const itemCatIds = new Set(
+      menuItems.map(it => it.categoryId || it.category?.id || '').filter(Boolean),
+    );
     return categories.filter(cat => {
       const id = (cat.id || '').toLowerCase();
       const en = (cat.nameEn || '').toLowerCase();
       const ja = cat.nameJa || '';
+      const catAsItem = { categoryId: cat.id, category: cat, nameEn: cat.nameEn, nameJa: cat.nameJa };
 
       if (id === 'cat_grand' || id === 'cat_lunch') return false;
+      // Hide empty categories so chips match real dishes
+      if (!itemCatIds.has(cat.id)) return false;
 
       if (isTakeout) {
         // In Takeout mode: hide Lunch Set and Dinner Set categories
-        if (
-          id.includes('lunch_set') ||
-          id.includes('dinner_set') ||
-          en.includes('lunch set') ||
-          en.includes('dinner set') ||
-          ja.includes('ランチセット') ||
-          ja.includes('ディナーセット')
-        ) {
+        if (isLunchSetMenuEntity(catAsItem) || isDinnerSetMenuEntity(catAsItem)) {
           return false;
         }
       } else {
@@ -610,12 +735,16 @@ export default function DineInOrderExperience({
         ) {
           return false;
         }
+        // Lunch / Dinner sets only during their serving windows
+        if (!isSetMenuAvailableNow(catAsItem, timingStatus)) {
+          return false;
+        }
       }
       return true;
     });
-  }, [categories, isTakeout]);
+  }, [categories, isTakeout, menuItems, timingStatus]);
 
-  // Filtered menu items for Dine-In vs Takeout
+  // Filtered menu items for Dine-In vs Takeout (+ time-based lunch/dinner sets)
   const filteredItems = useMemo(() => {
     return menuItems.filter(item => {
       const catId = (item.categoryId || item.category?.id || '').toLowerCase();
@@ -627,32 +756,20 @@ export default function DineInOrderExperience({
 
       if (isTakeout) {
         // Takeout mode: DO NOT SHOW Lunch Sets and Dinner Sets
-        const isLunchSet =
-          catId.includes('lunch_set') ||
-          catNameEn.includes('lunch set') ||
-          catNameJa.includes('ランチセット') ||
-          nameEn.includes('lunch set') ||
-          nameJa.includes('ランチセット');
-        const isDinnerSet =
-          catId.includes('dinner_set') ||
-          catNameEn.includes('dinner set') ||
-          catNameJa.includes('ディナーセット') ||
-          nameEn.includes('dinner set') ||
-          nameJa.includes('ディナーセット');
-        if (isLunchSet || isDinnerSet) return false;
+        if (isLunchSetMenuEntity(item) || isDinnerSetMenuEntity(item)) return false;
 
         // In Takeout mode: item must be allowed for takeout if menuTypes specified
         if (types.length > 0 && !types.includes('TAKEOUT')) {
           return false;
         }
       } else {
-        // Dine-In mode: DO NOT SHOW Takeout-only items
+        // Dine-In: hide takeout-only categories/items; keep LUNCH + GRAND + dual-listed dishes
         if (
           catId === 'cat_takeout' ||
-          catId.includes('takeout') ||
-          catNameEn.includes('takeout') ||
-          catNameJa.includes('テイクアウト') ||
-          catNameJa.includes('お持ち帰り')
+          (catId.includes('takeout') && !catId.includes('lunch')) ||
+          (catNameEn.includes('takeout') && !catNameEn.includes('lunch')) ||
+          (catNameJa.includes('テイクアウト') && !catNameJa.includes('ランチ')) ||
+          catNameJa.includes('お持ち帰り専用')
         ) {
           return false;
         }
@@ -663,7 +780,17 @@ export default function DineInOrderExperience({
         ) {
           return false;
         }
-        if (types.length > 0 && types.includes('TAKEOUT') && !types.includes('GRAND') && !types.includes('LUNCH')) {
+        if (
+          types.length > 0 &&
+          types.includes('TAKEOUT') &&
+          !types.includes('GRAND') &&
+          !types.includes('LUNCH') &&
+          !types.includes('DINE_IN')
+        ) {
+          return false;
+        }
+        // Lunch Set only at lunch; Dinner Set only at dinner
+        if (!isSetMenuAvailableNow(item, timingStatus)) {
           return false;
         }
       }
@@ -681,7 +808,14 @@ export default function DineInOrderExperience({
       }
       return true;
     });
-  }, [menuItems, selectedCategoryId, searchQuery, isTakeout]);
+  }, [menuItems, selectedCategoryId, searchQuery, isTakeout, timingStatus]);
+
+  // If the selected set category leaves the current serving window, fall back to All
+  useEffect(() => {
+    if (selectedCategoryId === 'all') return;
+    const stillVisible = visibleCategories.some(c => c.id === selectedCategoryId);
+    if (!stillVisible) setSelectedCategoryId('all');
+  }, [selectedCategoryId, visibleCategories]);
 
   // Active category display title
   const activeCategoryTitle = useMemo(() => {
@@ -713,12 +847,28 @@ export default function DineInOrderExperience({
   };
 
   const handleItemCardClick = (item: QuickMenuItem) => {
+    if (!isTakeout && !isSetMenuAvailableNow(item, timingStatus)) {
+      const isLunch = isLunchSetMenuEntity(item);
+      toast.error(
+        lang === 'ja'
+          ? isLunch
+            ? `ランチセットの受付時間は ${timingStatus.lunchHoursLabel} です（現在 ${timingStatus.nowHhmm}）`
+            : `ディナーセットの受付時間は ${timingStatus.dinnerHoursLabel} です（現在 ${timingStatus.nowHhmm}）`
+          : isLunch
+            ? `Lunch sets are available ${timingStatus.lunchHoursLabel} (now ${timingStatus.nowHhmm})`
+            : `Dinner sets are available ${timingStatus.dinnerHoursLabel} (now ${timingStatus.nowHhmm})`,
+        { id: 'dio-set-hours', duration: 4000, icon: '⏰' },
+      );
+      return;
+    }
     setCustImgError(false);
     setCustomizingItem(item);
-    setCustomSpice(item.spiceLevel !== undefined ? item.spiceLevel : 1);
-    setCustomBread('plain_naan');
-    setCustomCurry('dal');
-    setCustomDrink('none');
+    // Force an explicit pick for set/curry required choices (no defaults).
+    setCustomSpice(null);
+    setCustomBread('');
+    setCustomCurry('');
+    setCustomDrink('');
+    setCustomSnack('');
     setCustomNote('');
     setCustomQty(1);
   };
@@ -807,10 +957,13 @@ export default function DineInOrderExperience({
         setShowHistoryModal(true);
         await loadTableOrders();
       } else {
-        toast.error(await errorMessage(res, 'Failed to send order. Please notify staff.'));
+        toast.error(await errorMessage(
+          res,
+          lang === 'ja' ? '注文を送信できませんでした。スタッフにお声がけください。' : 'Failed to send order. Please notify staff.',
+        ));
       }
     } catch {
-      toast.error('Network error. Please try again.');
+      toast.error(lang === 'ja' ? '通信エラーです。もう一度お試しください。' : 'Network error. Please try again.');
     } finally {
       setSubmittingOrder(false);
     }
@@ -834,10 +987,10 @@ export default function DineInOrderExperience({
         toast.success(lang === 'en' ? 'Staff has been notified!' : 'スタッフへ通知しました。まもなくお伺いします！', { icon: '🔔' });
         setShowCallStaffModal(false);
       } else {
-        toast.error('Could not notify staff.');
+        toast.error(lang === 'ja' ? 'スタッフへ通知できませんでした。' : 'Could not notify staff.');
       }
     } catch {
-      toast.error('Network error.');
+      toast.error(lang === 'ja' ? '通信エラーです。もう一度お試しください。' : 'Network error.');
     } finally {
       setCallingStaff(false);
     }
@@ -846,6 +999,14 @@ export default function DineInOrderExperience({
   // Request Bill
   const handleRequestBill = async (paymentMethod: 'REGISTER' | 'ONLINE') => {
     if (requestingBill) return;
+    if (paymentMethod === 'REGISTER' && !payOptions.allowPayAtRegister) {
+      toast.error(lang === 'ja' ? 'レジ会計は現在ご利用いただけません。' : 'Pay at register is currently unavailable.');
+      return;
+    }
+    if (paymentMethod === 'ONLINE' && !payOptions.allowOnlinePay) {
+      toast.error(lang === 'ja' ? 'オンライン決済は現在ご利用いただけません。' : 'Online pay is currently unavailable.');
+      return;
+    }
     setRequestingBill(true);
     try {
       const res = await apiFetch('/api/v1/tables/request-bill', {
@@ -853,17 +1014,26 @@ export default function DineInOrderExperience({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tableNumber: tableNumber.trim(),
+          storeId: selectedStore.id,
           paymentMethod,
         }),
       });
       if (res.ok) {
-        toast.success(lang === 'en' ? 'Bill requested! Please proceed to the cashier.' : 'お会計を受付いたしました。レジカウンターへお越しください。', { duration: 5000, icon: '🧾' });
+        const msg =
+          paymentMethod === 'ONLINE'
+            ? (lang === 'en'
+              ? 'Card payment requested. Staff will assist at your table shortly.'
+              : 'カード決済をご希望として受付しました。スタッフがお席へ伺います。')
+            : (lang === 'en'
+              ? 'Bill requested! Please proceed to the cashier.'
+              : 'お会計を受付いたしました。レジカウンターへお越しください。');
+        toast.success(msg, { duration: 5000, icon: '🧾' });
         setShowCheckoutModal(false);
       } else {
-        toast.error('Could not request bill.');
+        toast.error(await errorMessage(res, lang === 'ja' ? 'お会計を受付できませんでした。' : 'Could not request bill.'));
       }
     } catch {
-      toast.error('Network error.');
+      toast.error(lang === 'ja' ? '通信エラーです。もう一度お試しください。' : 'Network error. Please try again.');
     } finally {
       setRequestingBill(false);
     }
@@ -896,7 +1066,7 @@ export default function DineInOrderExperience({
         <div className="dio-header-inner">
           <div className="dio-header-left">
             <div className="dio-header-logo-wrap">
-              <img src="/adarsha-log.webp" alt="Adarsha" className="dio-header-logo" />
+              <img src="/uploads/adarsha-log.webp" alt="Adarsha" className="dio-header-logo" />
             </div>
 
             <div className="dio-header-brand-wrap">
@@ -946,15 +1116,12 @@ export default function DineInOrderExperience({
                       className="dio-table-pill"
                       onClick={() => {
                         if (onOpenChoiceModal) onOpenChoiceModal();
-                        else {
-                          setNewTableInput(tableNumber);
-                          setShowTableEditModal(true);
-                        }
                       }}
-                      title={lang === 'ja' ? 'お席番号・注文方法の変更' : 'Change table / order type'}
+                      title={lang === 'ja' ? '注文方法の変更（お席番号はQRで固定）' : 'Change order type (table locked to QR)'}
                     >
+                      <QrCode size={11} />
                       <span>{lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}</span>
-                      <ChevronDown size={11} />
+                      {(onOpenChoiceModal || onSwitchToTakeout) && <ChevronDown size={11} />}
                     </button>
 
                     {(onOpenChoiceModal || onSwitchToTakeout) && (
@@ -1156,6 +1323,44 @@ export default function DineInOrderExperience({
       {/* ── SECTION HEADER (Indian Dinner) ── */}
       <div className="dio-section-header-wrap">
         <h2 className="dio-section-title">{activeCategoryTitle}</h2>
+        <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#9a3412', fontWeight: 600 }}>
+          {lang === 'ja'
+            ? `${filteredItems.length}品 · カテゴリから選べます`
+            : `${filteredItems.length} dishes · browse by category`}
+        </p>
+        {!isTakeout && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: '10px 12px',
+              borderRadius: 12,
+              background: timingStatus.isLunchOpenNow || timingStatus.isDinnerOpenNow ? '#fff7ed' : '#fffbeb',
+              border: '1px solid #fed7aa',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#9a3412' }}>
+              {lang === 'ja'
+                ? timingStatus.isLunchOpenNow
+                  ? `☀️ ランチ時間帯 · ランチセット受付中（${timingStatus.lunchHoursLabel}）`
+                  : timingStatus.isDinnerOpenNow
+                    ? `🌙 ディナー時間帯 · ディナーセット受付中（${timingStatus.dinnerHoursLabel}）`
+                    : `⏰ セットメニュー受付時間外（現在 ${timingStatus.nowHhmm}）`
+                : timingStatus.isLunchOpenNow
+                  ? `☀️ Lunch hours · Lunch sets available (${timingStatus.lunchHoursLabel})`
+                  : timingStatus.isDinnerOpenNow
+                    ? `🌙 Dinner hours · Dinner sets available (${timingStatus.dinnerHoursLabel})`
+                    : `⏰ Set menus unavailable now (${timingStatus.nowHhmm})`}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#78716c', fontWeight: 600 }}>
+              {lang === 'ja'
+                ? `ランチセット ${timingStatus.lunchHoursLabel} ／ ディナーセット ${timingStatus.dinnerHoursLabel} · アラカルトは営業中いつでもご注文可`
+                : `Lunch sets ${timingStatus.lunchHoursLabel} · Dinner sets ${timingStatus.dinnerHoursLabel} · Ala carte anytime while open`}
+            </div>
+          </div>
+        )}
         <div className="dio-section-divider" />
       </div>
 
@@ -1182,7 +1387,7 @@ export default function DineInOrderExperience({
               >
                 {/* Food Photo Left */}
                 <div className="dio-item-thumb-wrap">
-                  {item.imageUrl && !failedImages.has(item.id) ? (
+                  {assetUrl(item.imageUrl) && !failedImages.has(item.id) ? (
                     <img
                       src={assetUrl(item.imageUrl)}
                       alt=""
@@ -1575,7 +1780,7 @@ export default function DineInOrderExperience({
                     style={{ background: '#10b981', color: '#fff', border: 'none', borderRadius: 9999, padding: '10px 18px', fontWeight: 800, fontSize: '0.9rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
                   >
                     <RotateCcw size={15} />
-                    <span>{lang === 'ja' ? '新しいお客様・新規注文を開始（卓リセット）' : 'Start New Table Sitting'}</span>
+                    <span>{lang === 'ja' ? 'この端末の履歴をクリアして続ける' : 'Clear this phone & continue'}</span>
                   </button>
                 </div>
               )}
@@ -1639,13 +1844,11 @@ export default function DineInOrderExperience({
                           fontWeight: 800,
                           padding: '3px 8px',
                           borderRadius: 9999,
-                          background: ord.status === 'COMPLETED' ? '#ecfdf5' : '#fff7ed',
-                          color: ord.status === 'COMPLETED' ? '#059669' : '#c2410c',
+                          background: orderStatusMeta(ord.status, lang).bg,
+                          color: orderStatusMeta(ord.status, lang).color,
                         }}
                       >
-                        {ord.status === 'COMPLETED'
-                          ? (lang === 'ja' ? '配膳済' : 'Served')
-                          : (lang === 'ja' ? '厨房で調理中' : 'Cooking in Kitchen')}
+                        {orderStatusMeta(ord.status, lang).label}
                       </span>
                     </div>
 
@@ -1666,7 +1869,7 @@ export default function DineInOrderExperience({
                   style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: '0.78rem', textDecoration: 'underline', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                 >
                   <RotateCcw size={12} />
-                  <span>{lang === 'ja' ? 'テーブルを空席リセット（次のお客様へ）' : 'Reset Table Session'}</span>
+                  <span>{lang === 'ja' ? 'このスマホの注文履歴だけクリア' : 'Clear history on this phone'}</span>
                 </button>
               </div>
             </div>
@@ -1766,27 +1969,49 @@ export default function DineInOrderExperience({
                 </span>
               </div>
 
-              <div
-                className="dio-call-card"
-                onClick={() => handleRequestBill('REGISTER')}
-                style={{ border: '2px solid var(--dio-primary)', background: '#fff7ed' }}
-              >
-                <div className="dio-call-card-icon" style={{ background: '#ffedd5', color: 'var(--dio-primary)' }}>
-                  🏪
+              {payOptions.allowPayAtRegister && (
+                <div
+                  className="dio-call-card"
+                  onClick={() => !requestingBill && handleRequestBill('REGISTER')}
+                  style={{ border: '2px solid var(--dio-primary)', background: '#fff7ed', opacity: requestingBill ? 0.7 : 1 }}
+                >
+                  <div className="dio-call-card-icon" style={{ background: '#ffedd5', color: 'var(--dio-primary)' }}>
+                    🏪
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>{lang === 'en' ? 'Pay at Register' : 'レジカウンターでお支払い'}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--dio-gray)' }}>{lang === 'en' ? 'Cash, PayPay, Credit Card, IC card' : '現金、PayPay、クレジットカード、交通系IC'}</div>
+                  </div>
                 </div>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>{lang === 'en' ? 'Pay at Register' : 'レジカウンターでお支払い'}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--dio-gray)' }}>{lang === 'en' ? 'Cash, PayPay, Credit Card, IC card' : '現金、PayPay、クレジットカード、交通系IC'}</div>
-                </div>
-              </div>
+              )}
 
-              <div className="dio-call-card" onClick={() => handleRequestBill('ONLINE')}>
-                <div className="dio-call-card-icon">💳</div>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>{lang === 'en' ? 'Online Card Pay (Square)' : 'オンライン即時決済'}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--dio-gray)' }}>{lang === 'en' ? 'Pay directly from your phone' : 'スマートフォンから直接お支払い'}</div>
+              {payOptions.allowOnlinePay && (
+                <div
+                  className="dio-call-card"
+                  onClick={() => !requestingBill && handleRequestBill('ONLINE')}
+                  style={{ opacity: requestingBill ? 0.7 : 1 }}
+                >
+                  <div className="dio-call-card-icon">💳</div>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>
+                      {lang === 'en' ? 'Card / cashless at table' : 'カード・キャッシュレス（お席）'}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--dio-gray)' }}>
+                      {payOptions.squareConfigured
+                        ? (lang === 'en' ? 'Staff will process card payment at your table' : 'スタッフがお席でカード決済を承ります')
+                        : (lang === 'en' ? 'Ask staff to bring the card terminal' : 'スタッフが決済端末をお持ちします')}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {!payOptions.allowPayAtRegister && !payOptions.allowOnlinePay && (
+                <div style={{ padding: '14px 16px', borderRadius: 12, background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '0.88rem', color: '#475569', lineHeight: 1.5 }}>
+                  {lang === 'ja'
+                    ? '現在、お客様側からのお会計リクエストは停止中です。店員呼出からスタッフをお呼びください。'
+                    : 'Self-checkout is paused. Please call staff for assistance.'}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1794,22 +2019,60 @@ export default function DineInOrderExperience({
 
       {/* ── MODAL: DISH CUSTOMIZATION SHEET (Matches shop.sakuracto.com design & screenshots) ── */}
       {customizingItem && (() => {
-        const isCurry = (customizingItem.nameJa || '').includes('カレー') || (customizingItem.nameEn || '').toLowerCase().includes('curry');
-        const isSet = (customizingItem.nameJa || '').includes('セット') || (customizingItem.nameEn || '').toLowerCase().includes('set');
+        const custCatId = customizingItem.categoryId || customizingItem.category?.id || '';
+        const custNameEn = (customizingItem.nameEn || '').toLowerCase();
+        const custNameJa = customizingItem.nameJa || '';
+        const curryCategories = new Set(['cat_curry', 'cat_mutton', 'cat_seafood', 'cat_veg']);
+        const isCurry =
+          curryCategories.has(custCatId) ||
+          custNameJa.includes('カレー') ||
+          custNameEn.includes('curry') ||
+          custNameEn.includes('biryani') ||
+          custNameEn.includes('masala') ||
+          custNameJa.includes('ビリヤニ') ||
+          custNameJa.includes('マサラ');
+        const isSet =
+          custCatId === 'cat_lunch_set' ||
+          custNameJa.includes('セット') ||
+          /\bset\b/i.test(customizingItem.nameEn || '');
 
         const selectedBreadObj = NAAN_OPTIONS.find(b => b.id === customBread);
         const selectedCurryObj = CURRY_CHOICE_OPTIONS.find(c => c.id === customCurry);
         const selectedDrinkObj = DRINK_OPTIONS.find(d => d.id === customDrink);
+        const selectedSnackObj = SNACK_OPTIONS.find(s => s.id === customSnack);
 
         const breadAddPrice = (isCurry || isSet) && selectedBreadObj ? selectedBreadObj.price : 0;
         const curryAddPrice = isSet && selectedCurryObj ? selectedCurryObj.price : 0;
         const drinkAddPrice = (isCurry || isSet) && selectedDrinkObj ? selectedDrinkObj.price : 0;
+        const snackAddPrice = isSet && selectedSnackObj ? selectedSnackObj.price : 0;
 
         const basePrice = customizingItem.price || 0;
-        const unitCustomPrice = basePrice + breadAddPrice + curryAddPrice + drinkAddPrice;
+        const unitCustomPrice = basePrice + breadAddPrice + curryAddPrice + drinkAddPrice + snackAddPrice;
         const totalCustomPrice = unitCustomPrice * customQty;
 
+        const missingSetPicks: string[] = [];
+        if (isSet || isCurry) {
+          if (customSpice === null) missingSetPicks.push(lang === 'ja' ? '辛さ' : 'Spice Level');
+          if (!customBread) missingSetPicks.push(lang === 'ja' ? 'ナン' : 'Naan');
+          if (!customDrink) missingSetPicks.push(lang === 'ja' ? 'ドリンク' : 'Drink');
+        }
+        if (isSet) {
+          if (!customCurry) missingSetPicks.push(lang === 'ja' ? 'カレー' : 'Curry');
+          if (!customSnack) missingSetPicks.push(lang === 'ja' ? 'スナック' : 'Snacks');
+        }
+        const setComplete = missingSetPicks.length === 0;
+
         const handleConfirmCustomization = () => {
+          if (!setComplete) {
+            toast.error(
+              lang === 'ja'
+                ? `「${missingSetPicks[0]}」を選んでください`
+                : `Please select ${missingSetPicks[0]}`,
+              { id: 'dio-missing-required', duration: 2500 }
+            );
+            return;
+          }
+
           const optionParts: string[] = [];
           let totalAddPrice = 0;
 
@@ -1837,13 +2100,22 @@ export default function DineInOrderExperience({
               totalAddPrice += selectedCurryObj.price;
             }
 
-            if (selectedDrinkObj && selectedDrinkObj.id !== 'none') {
+            if (selectedDrinkObj) {
               optionParts.push(
                 `${lang === 'ja' ? selectedDrinkObj.nameJa : selectedDrinkObj.nameEn}${
                   selectedDrinkObj.price > 0 ? ` (+¥${selectedDrinkObj.price})` : ''
                 }`
               );
               totalAddPrice += selectedDrinkObj.price;
+            }
+
+            if (isSet && selectedSnackObj) {
+              optionParts.push(
+                `${lang === 'ja' ? selectedSnackObj.nameJa : selectedSnackObj.nameEn}${
+                  selectedSnackObj.price > 0 ? ` (+¥${selectedSnackObj.price})` : ''
+                }`
+              );
+              totalAddPrice += selectedSnackObj.price;
             }
           }
 
@@ -1854,7 +2126,7 @@ export default function DineInOrderExperience({
             nameEn: customizingItem.nameEn,
             price: customizingItem.price,
             quantity: customQty,
-            spiceLevel: isCurry || isSet ? customSpice : undefined,
+            spiceLevel: isCurry || isSet ? (customSpice ?? undefined) : undefined,
             selectedOption: optionParts.length > 0 ? optionParts.join(' / ') : undefined,
             optionPrice: totalAddPrice,
             note: customNote.trim() || undefined,
@@ -1870,11 +2142,7 @@ export default function DineInOrderExperience({
           setCustomizingItem(null);
         };
 
-        const itemImage = customizingItem.imageUrl
-          ? (customizingItem.imageUrl.startsWith('http') || customizingItem.imageUrl.startsWith('/')
-              ? customizingItem.imageUrl
-              : assetUrl(customizingItem.imageUrl))
-          : null;
+        const itemImage = assetUrl(customizingItem.imageUrl) || null;
 
         const categoryBadge = lang === 'ja'
           ? (customizingItem.category?.nameJa || customizingItem.category?.nameEn || 'ディナーメニュー')
@@ -1989,10 +2257,10 @@ export default function DineInOrderExperience({
                 {(isCurry || isSet) && (
                   <div className="dio-opt-card">
                     <div className="dio-opt-card-head">
-                      <h4 className="dio-opt-card-title">{lang === 'ja' ? 'ナン変更' : 'Naan & Rice Options'}</h4>
+                      <h4 className="dio-opt-card-title">{lang === 'ja' ? 'ナン' : 'Naan'}</h4>
                       <div className="dio-opt-card-sub">
                         <span className="dio-opt-card-num">{lang === 'ja' ? '選択 1' : 'Select 1'}</span>
-                        <span className="dio-badge-optional">{lang === 'ja' ? '選択' : 'Optional'}</span>
+                        <span className="dio-badge-required">{lang === 'ja' ? '必須' : 'Required'}</span>
                       </div>
                     </div>
                     <div>
@@ -2051,10 +2319,10 @@ export default function DineInOrderExperience({
                 {(isCurry || isSet) && (
                   <div className="dio-opt-card">
                     <div className="dio-opt-card-head">
-                      <h4 className="dio-opt-card-title">{lang === 'ja' ? 'ドリンク' : 'Drink Choice'}</h4>
+                      <h4 className="dio-opt-card-title">{lang === 'ja' ? 'ドリンク' : 'Drink'}</h4>
                       <div className="dio-opt-card-sub">
                         <span className="dio-opt-card-num">{lang === 'ja' ? '選択 1' : 'Select 1'}</span>
-                        <span className="dio-badge-optional">{lang === 'ja' ? '選択' : 'Optional'}</span>
+                        <span className="dio-badge-required">{lang === 'ja' ? '必須' : 'Required'}</span>
                       </div>
                     </div>
                     <div>
@@ -2078,7 +2346,38 @@ export default function DineInOrderExperience({
                   </div>
                 )}
 
-                {/* Card 5: 特別なご要望 (Special Requests) */}
+                {/* Card 5: スナック (Snacks) - sets only */}
+                {isSet && (
+                  <div className="dio-opt-card">
+                    <div className="dio-opt-card-head">
+                      <h4 className="dio-opt-card-title">{lang === 'ja' ? 'スナック' : 'Snacks'}</h4>
+                      <div className="dio-opt-card-sub">
+                        <span className="dio-opt-card-num">{lang === 'ja' ? '選択 1' : 'Select 1'}</span>
+                        <span className="dio-badge-required">{lang === 'ja' ? '必須' : 'Required'}</span>
+                      </div>
+                    </div>
+                    <div>
+                      {SNACK_OPTIONS.map(opt => {
+                        const isSelected = customSnack === opt.id;
+                        const label = `${lang === 'ja' ? opt.nameJa : opt.nameEn}${opt.price > 0 ? ` [+¥${opt.price}]` : ''}`;
+                        return (
+                          <div
+                            key={opt.id}
+                            className={`dio-opt-row ${isSelected ? 'is-selected' : ''}`}
+                            onClick={() => setCustomSnack(opt.id)}
+                          >
+                            <span className="dio-opt-row-label">{label}</span>
+                            <div className="dio-opt-radio">
+                              {isSelected && <div className="dio-opt-radio-dot" />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Card 6: 特別なご要望 (Special Requests) */}
                 <div className="dio-opt-card">
                   <div className="dio-opt-card-head">
                     <h4 className="dio-opt-card-title">{lang === 'ja' ? '特別なご要望' : 'Special Requests'}</h4>
@@ -2135,10 +2434,19 @@ export default function DineInOrderExperience({
 
               {/* 4. Fixed Bottom Red Button matching screenshot */}
               <div className="dio-cust-bottom-bar">
+                {!setComplete && (
+                  <div style={{ fontSize: '0.78rem', color: '#b45309', fontWeight: 600, marginBottom: 8, textAlign: 'center' }}>
+                    {lang === 'ja'
+                      ? `必須をすべて選んでください（残り: ${missingSetPicks.join('、')}）`
+                      : `Select all required options (left: ${missingSetPicks.join(', ')})`}
+                  </div>
+                )}
                 <button
                   type="button"
                   className="dio-cust-add-btn"
+                  disabled={!setComplete}
                   onClick={handleConfirmCustomization}
+                  style={!setComplete ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
                 >
                   <span>
                     {lang === 'ja'
@@ -2152,7 +2460,7 @@ export default function DineInOrderExperience({
         );
       })()}
 
-      {/* ── MODAL: TABLE NUMBER EDIT ── */}
+      {/* ── MODAL: ORDER MODE (table locked to QR) ── */}
       {showTableEditModal && (
         <div
           className="dio-modal-overlay"
@@ -2165,45 +2473,23 @@ export default function DineInOrderExperience({
             onTouchMove={e => e.stopPropagation()}
           >
             <div className="dio-modal-header">
-              <h3 className="dio-modal-title">🪑 {lang === 'ja' ? 'テーブル番号の変更' : 'Change Table'}</h3>
+              <h3 className="dio-modal-title">🪑 {lang === 'ja' ? 'お席・注文方法' : 'Table & Order Type'}</h3>
               <button type="button" className="dio-modal-close" onClick={() => setShowTableEditModal(false)}>
                 <X size={18} />
               </button>
             </div>
 
             <div className="dio-modal-body">
-              <p style={{ fontSize: '0.85rem', color: 'var(--dio-gray)', margin: '0 0 12px' }}>
-                {lang === 'ja' ? 'お席のステッカーに記載された番号をご入力ください:' : 'Enter the number on your table sticker:'}
-              </p>
-
-              <input
-                type="text"
-                style={{
-                  width: '100%',
-                  border: '1.5px solid #e5e7eb',
-                  borderRadius: 12,
-                  padding: '12px 14px',
-                  fontSize: '1.1rem',
-                  fontWeight: 800,
-                  marginBottom: 16,
-                  outline: 'none',
-                }}
-                value={newTableInput}
-                onChange={e => setNewTableInput(e.target.value)}
-              />
-
-              <button
-                type="button"
-                className="dio-send-order-btn"
-                onClick={() => {
-                  if (!newTableInput.trim()) return;
-                  setTableNumber(newTableInput.trim());
-                  setShowTableEditModal(false);
-                  toast.success(lang === 'ja' ? `お席番号を ${newTableInput.trim()} に変更しました` : `Table updated to ${newTableInput.trim()}`);
-                }}
-              >
-                {lang === 'ja' ? 'テーブル番号を保存' : 'Save Table Number'}
-              </button>
+              <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 14, padding: '14px 16px', marginBottom: 14 }}>
+                <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#9a3412' }}>
+                  {lang === 'ja' ? `お席 ${tableNumber}（QRで確認済み）` : `Table ${tableNumber} (verified by QR)`}
+                </div>
+                <p style={{ margin: '6px 0 0', fontSize: '0.8rem', color: '#9a3412', lineHeight: 1.45 }}>
+                  {lang === 'ja'
+                    ? 'お席番号はテーブルのQRコードに紐づいています。別のお席で注文する場合は、そちらのQRをスキャンしてください。'
+                    : 'Your table is locked to the scanned QR. To order for another seat, scan that table’s QR.'}
+                </p>
+              </div>
 
               {(onOpenChoiceModal || onSwitchToTakeout) && (
                 <button
@@ -2614,12 +2900,12 @@ export default function DineInOrderExperience({
                         <div>
                           <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#374151', marginBottom: 4 }}>
                             {lang === 'ja' ? 'パスワード' : 'Password'} <span style={{ color: '#dc2626' }}>*</span>
-                            {authMode === 'register' && <span style={{ fontSize: '0.72rem', color: '#6b7280', fontWeight: 500, marginLeft: 4 }}>{lang === 'ja' ? '（6文字以上）' : '(min 6 chars)'}</span>}
+                            {authMode === 'register' && <span style={{ fontSize: '0.72rem', color: '#6b7280', fontWeight: 500, marginLeft: 4 }}>{lang === 'ja' ? '（8文字以上）' : '(min 8 chars)'}</span>}
                           </label>
                           <input
                             type="password"
                             required
-                            minLength={authMode === 'register' ? 6 : 1}
+                            minLength={authMode === 'register' ? 8 : 1}
                             value={authPassword}
                             onChange={e => setAuthPassword(e.target.value)}
                             placeholder="••••••••"

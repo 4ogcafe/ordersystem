@@ -12,9 +12,24 @@ apps/web/dist/
 .cache/
 coverage/
 
-# Avoid duplicate image storage across multiple locations
+# ALL site images live ONLY in monorepo-root /uploads/ — never duplicate elsewhere
 apps/web/public/uploads/
 apps/api/public/uploads/
+apps/api/uploads/
+apps/uploads/
+api/uploads/
+public/uploads/
+kalpana-uploads/
+# Brand logos moved into /uploads/ — do not reintroduce copies at public/
+apps/web/public/*.webp
+apps/web/public/*.png
+apps/web/public/*.jpg
+apps/web/public/*.jpeg
+/adarsha-log.webp
+/site-logo-01.webp
+/new-logo.webp
+/logo-white-01.png.webp
+/web-logo-01-01.png.webp
 
 # Environment files & secrets
 .env

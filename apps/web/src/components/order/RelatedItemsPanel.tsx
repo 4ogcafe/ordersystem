@@ -2,6 +2,7 @@ import { X, ShoppingCart, CheckCircle2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useCart } from '../../lib/cart-context';
 import { yen } from '../../lib/format';
+import SafeImage from '../../components/SafeImage';
 
 export interface PanelItem {
   id: string;
@@ -115,16 +116,11 @@ function ItemCard({ item, onAdd }: { item: PanelItem; onAdd: () => void }) {
 
   return (
     <div style={{ minWidth: '140px', maxWidth: '140px', borderRadius: '12px', border: '1px solid #e5dbcd', overflow: 'hidden', flexShrink: 0, scrollSnapAlign: 'start', display: 'flex', flexDirection: 'column', backgroundColor: 'white' }}>
-      <img
-        src={item.img || '/bg-hero-img.webp'}
+      <SafeImage
+        src={item.img}
         alt={item.name}
         loading="lazy"
-        onError={(e) => {
-          const target = e.currentTarget;
-          if (!target.src.endsWith('/bg-hero-img.webp')) {
-            target.src = '/bg-hero-img.webp';
-          }
-        }}
+        onError={(e) => { e.currentTarget.style.display = 'none'; }}
         style={{ width: '100%', height: '90px', objectFit: 'cover' }}
       />
       <div style={{ padding: '8px', flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>

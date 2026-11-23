@@ -6,8 +6,10 @@ import { formatOrderNumber, yen } from '../../lib/format';
 
 /** What a tab should do when it opens from the top bar (e.g. open its "add" form). */
 export interface TabIntent {
-  action: 'add-item' | 'new-offer' | 'add-user' | 'stamp' | 'search';
+  action: 'add-item' | 'new-offer' | 'add-user' | 'stamp' | 'search' | 'section';
   value?: string;
+  /** Sub-section for combined admin pages (Staff & Members / Messages & LINE). */
+  section?: 'staff' | 'members' | 'messages' | 'line';
   nonce: number;
 }
 export type Navigate = (tab: string, intent?: Omit<TabIntent, 'nonce'>) => void;
@@ -134,7 +136,7 @@ export function GlobalSearch({ isAdmin: _isAdmin, onNavigate }: { isAdmin: boole
                 icon: <UserCircle size={16} />,
                 title: member.name,
                 detail: [member.email, member.phone].filter(Boolean).join(' · '),
-                onSelect: () => go('Members', { action: 'search', value: member.email }),
+                onSelect: () => go('Staff & Members', { action: 'search', value: member.email, section: 'members' }),
               }))} />
               <Group title="Menu" items={shown.menuItems.map(item => ({
                 key: item.id,
@@ -148,7 +150,7 @@ export function GlobalSearch({ isAdmin: _isAdmin, onNavigate }: { isAdmin: boole
                 icon: <Mail size={16} />,
                 title: message.name,
                 detail: `${message.type.toLowerCase()}${message.isRead ? '' : ' · unread'}`,
-                onSelect: () => go('Contact Messages'),
+                onSelect: () => go('Messages & LINE', { action: 'section', section: 'messages' }),
               }))} />
             </>
           )}
@@ -235,7 +237,7 @@ export function QuickAdd({ isAdmin, onNavigate }: { isAdmin: boolean; onNavigate
     { label: 'Menu item', detail: 'Add a dish to the menu', icon: <UtensilsCrossed size={16} />, tab: 'Menu Management', action: 'add-item' },
     { label: 'Give a stamp', detail: 'Scan a member at the counter', icon: <Stamp size={16} />, tab: 'Stamps, Offers & Points', action: 'stamp' },
     { label: 'Offer', detail: 'Discount or member special', icon: <Gift size={16} />, tab: 'Stamps, Offers & Points', action: 'new-offer', adminOnly: true },
-    { label: 'Staff user', detail: 'Admin, staff or kitchen account', icon: <UserPlus size={16} />, tab: 'Staff Users', action: 'add-user', adminOnly: true },
+    { label: 'Staff user', detail: 'Admin, staff or kitchen account', icon: <UserPlus size={16} />, tab: 'Staff & Members', action: 'add-user', adminOnly: true },
   ];
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -246,7 +248,21 @@ export function QuickAdd({ isAdmin, onNavigate }: { isAdmin: boolean; onNavigate
       {open && (
         <div className="tb-pop tb-pop-right" role="menu">
           {actions.filter(a => isAdmin || !a.adminOnly).map(a => (
-            <button key={a.label} type="button" role="menuitem" className="tb-row" onClick={() => { onNavigate(a.tab, a.action ? { action: a.action } : undefined); setOpen(false); }}>
+            <button
+              key={a.label}
+              type="button"
+              role="menuitem"
+              className="tb-row"
+              onClick={() => {
+                onNavigate(
+                  a.tab,
+                  a.action
+                    ? { action: a.action, ...(a.action === 'add-user' ? { section: 'staff' as const } : {}) }
+                    : undefined,
+                );
+                setOpen(false);
+              }}
+            >
               <span className="tb-row-icon">{a.icon}</span>
               <span className="tb-row-text"><strong>{a.label}</strong><small>{a.detail}</small></span>
             </button>
@@ -260,11 +276,15 @@ export function QuickAdd({ isAdmin, onNavigate }: { isAdmin: boolean; onNavigate
 export function OrderingStatusToggle() {
   const [orderingEnabled, setOrderingEnabled] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
+  const loadGen = useRef(0);
 
   const load = () => {
+    const gen = ++loadGen.current;
     apiFetch('/api/v1/settings')
       .then(res => res.json())
-      .then(data => setOrderingEnabled(data.orderingEnabled !== false))
+      .then(data => {
+        if (gen === loadGen.current) setOrderingEnabled(data.orderingEnabled !== false);
+      })
       .catch(() => undefined);
   };
 
@@ -285,6 +305,7 @@ export function OrderingStatusToggle() {
         body: JSON.stringify({ orderingEnabled: next }),
       });
       if (res.ok) {
+        loadGen.current += 1;
         setOrderingEnabled(next);
         toast.success(
           next

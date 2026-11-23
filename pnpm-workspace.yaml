@@ -5,6 +5,9 @@ packages:
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
+  core-js: true
   esbuild: true
+  jspdf: true
+  jspdf-autotable: true
   prisma: true
   workerd: true

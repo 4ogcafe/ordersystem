@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
+import { useBodyScrollLock } from '../lib/useBodyScrollLock';
 import { 
   X, 
   MapPin, 
@@ -99,19 +100,16 @@ export default function ReservationModal({
     }
   }, [date]);
 
-  // Lock body scroll when modal is open
+  useBodyScrollLock(isOpen);
+
+  // Close on Escape
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-      const onKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') onClose();
-      };
-      window.addEventListener('keydown', onKeyDown);
-      return () => {
-        document.body.style.overflow = '';
-        window.removeEventListener('keydown', onKeyDown);
-      };
-    }
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, onClose]);
 
   const selectedStore = useMemo(() => {

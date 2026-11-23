@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Star } from 'lucide-react';
 import { loadReviews, type ReviewsData } from '../lib/reviews';
+import SafeImage from '../components/SafeImage';
 
 // The restaurant's Google rating and latest reviews, refreshed on the server about once a month
 // (Admin → Page Settings → Google reviews). Falls back to the score typed in the admin.
@@ -42,13 +43,19 @@ function ReviewCard({
   return (
     <article ref={cardRef} className="gr-card">
       <header>
-        {review.authorPhoto ? (
-          <img src={review.authorPhoto} alt="" width={40} height={40} referrerPolicy="no-referrer" loading="lazy" />
-        ) : (
-          <span className="gr-avatar" aria-hidden="true">
-            {review.authorName.charAt(0)}
-          </span>
-        )}
+        <SafeImage
+          src={review.authorPhoto}
+          alt=""
+          width={40}
+          height={40}
+          referrerPolicy="no-referrer"
+          loading="lazy"
+          fallback={
+            <span className="gr-avatar" aria-hidden="true">
+              {review.authorName.charAt(0)}
+            </span>
+          }
+        />
         <div>
           <strong>{name}</strong>
           <span className="gr-meta">

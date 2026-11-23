@@ -8,18 +8,18 @@ import OrdersTab from '../components/admin/OrdersTab';
 import CashCounterTab from '../components/admin/CashCounterTab';
 import './admin.css';
 import OffersTab from '../components/admin/OffersTab';
-import CustomersTab from '../components/admin/CustomersTab';
-import StaffUsersTab from '../components/admin/StaffUsersTab';
+import StaffAndMembersTab from '../components/admin/StaffAndMembersTab';
 import OverviewTab from '../components/admin/overview/OverviewTab';
 import { GlobalSearch, NotificationBell, OrderingStatusToggle, QuickAdd, type Navigate, type TabIntent } from '../components/admin/TopBar';
 import MenuManagementTab from '../components/admin/MenuManagementTab';
 import PageSettingsTabComponent from '../components/admin/PageSettingsTab';
 import PrinterSettings from '../components/admin/PrinterSettings';
 import ScannerSettings from '../components/admin/ScannerSettings';
-import MessagesTab from '../components/admin/MessagesTab';
+import MessagesAndLineBotTab from '../components/admin/MessagesAndLineBotTab';
 import CareersTab from '../components/admin/CareersTab';
 import BlogPostsTab from '../components/admin/BlogPostsTab';
 import StoreLocationsManager from '../components/admin/StoreLocationsManager';
+import PaymentDevicesTab from '../components/admin/PaymentDevicesTab';
 import { initScannerListener, getScannerConfig, type ScanEventDetail } from '../lib/scanner';
 import { 
   LayoutDashboard, 
@@ -30,7 +30,6 @@ import {
   Banknote,
   Gift,
   Tag,
-  UserCircle,
   MessageSquare, 
   Users, 
   LogOut,
@@ -38,6 +37,7 @@ import {
   Briefcase,
   BookOpen,
   MapPin,
+  CreditCard,
   X
 } from 'lucide-react';
 
@@ -136,9 +136,28 @@ export default function AdminDashboard() {
   // Top-bar search, notifications and Quick Add open a tab, optionally asking it to do something.
   const [intent, setIntent] = useState<TabIntent | null>(null);
   const navigateTo: Navigate = (tab, next) => {
-    setActiveTab(tab);
+    // Legacy sidebar / overview names → combined pages.
+    let resolvedTab = tab;
+    let resolvedNext = next;
+    if (tab === 'Staff Users') {
+      resolvedTab = 'Staff & Members';
+      resolvedNext = { action: next?.action ?? 'section', value: next?.value, section: 'staff' };
+    } else if (tab === 'Members') {
+      resolvedTab = 'Staff & Members';
+      resolvedNext = { action: next?.action ?? 'section', value: next?.value, section: 'members' };
+    } else if (tab === 'Contact Messages') {
+      resolvedTab = 'Messages & LINE';
+      resolvedNext = { action: next?.action ?? 'section', value: next?.value, section: 'messages' };
+    } else if (tab === 'LINE Bot') {
+      resolvedTab = 'Messages & LINE';
+      resolvedNext = { action: next?.action ?? 'section', value: next?.value, section: 'line' };
+    } else if (tab === 'Stamps, Offers & Points') {
+      resolvedTab = 'Stamps & Loyalty';
+      resolvedNext = next ?? { action: 'section', section: 'offers' };
+    }
+    setActiveTab(resolvedTab);
     setSidebarOpen(false);
-    setIntent(prev => (next ? { ...next, nonce: (prev?.nonce ?? 0) + 1 } : null));
+    setIntent(prev => (resolvedNext ? { ...resolvedNext, nonce: (prev?.nonce ?? 0) + 1 } : null));
   };
 
   const handleLogout = async () => {
@@ -164,15 +183,16 @@ export default function AdminDashboard() {
   const tabs = [
     { name: 'Overview', icon: LayoutDashboard },
     { name: 'Orders', icon: ShoppingBag },
+    { name: 'Cash Counter', icon: Banknote },
     { name: 'Menu Management', icon: MenuIcon },
     { name: 'Offers & Coupons', icon: Tag },
     { name: 'Stamps & Loyalty', icon: Gift },
     { name: 'Restaurant Settings', icon: Settings },
     { name: 'Store Locations', icon: MapPin },
+    { name: 'Payment Devices', icon: CreditCard },
     { name: 'Page Settings', icon: ImageIcon },
-    { name: 'Contact Messages', icon: MessageSquare },
-    { name: 'Staff Users', icon: Users },
-    { name: 'Members', icon: UserCircle },
+    { name: 'Messages & LINE', icon: MessageSquare },
+    { name: 'Staff & Members', icon: Users },
     { name: 'Blog Posts', icon: BookOpen },
     { name: 'Careers', icon: Briefcase },
   ].filter(tab => user?.role === 'ADMIN' || STAFF_TABS.includes(tab.name));
@@ -202,7 +222,7 @@ export default function AdminDashboard() {
       }}>
         <div style={{ padding: '2rem 1.5rem', display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
           <div style={{ width: '40px', height: '40px', borderRadius: '8px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <img src="/adarsha-log.webp" alt="Adarsha" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '50%' }} />
+            <img src="/uploads/adarsha-log.webp" alt="Adarsha" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '50%' }} />
           </div>
           <span style={{ fontSize: '1.25rem', fontWeight: '700', color: '#111827', letterSpacing: '-0.5px' }}>Adarsha Admin</span>
           <button type="button" className="adm-close-btn" onClick={() => setSidebarOpen(false)} aria-label="Close menu">
@@ -238,7 +258,7 @@ export default function AdminDashboard() {
               >
                 <Icon size={20} strokeWidth={isActive ? 2.5 : 2} style={{ color: isActive ? '#000' : '#9ca3af' }} />
                 {tab.name}
-                {tab.name === 'Contact Messages' && unreadCount > 0 && (
+                {tab.name === 'Messages & LINE' && unreadCount > 0 && (
                   <span style={{ marginLeft: 'auto', backgroundColor: '#6b7280', color: '#fff', borderRadius: '9999px', padding: '2px 8px', fontSize: '0.75rem', fontWeight: 700 }} aria-label={`${unreadCount} unread`}>
                     {unreadCount}
                   </span>
@@ -327,7 +347,13 @@ export default function AdminDashboard() {
                     : "What's happening in the restaurant right now."
                   : activeTab === 'Cash Counter'
                     ? "POS cash register, table bill settlements, quick walk-in sales, and cash drawer balancing."
-                    : `Manage your restaurant's ${activeTab.toLowerCase()} data and settings.`}
+                    : activeTab === 'Staff & Members'
+                      ? 'Staff login accounts and registered customer members in one place.'
+                      : activeTab === 'Messages & LINE'
+                        ? 'Contact inbox and LINE chatbot settings in one place.'
+                        : activeTab === 'Payment Devices'
+                          ? 'Square Terminal and other payment receiving devices for each store.'
+                          : `Manage your restaurant's ${activeTab.toLowerCase()} data and settings.`}
               </p>
             </div>
           </div>
@@ -336,15 +362,15 @@ export default function AdminDashboard() {
           {activeTab === 'Orders' && <OrdersTab isAdmin={user.role === 'ADMIN'} intent={intent} />}
           {activeTab === 'Cash Counter' && <CashCounterTab user={user} />}
           {activeTab === 'Menu Management' && <MenuManagementTab intent={intent} />}
-          {activeTab === 'Offers & Coupons' && <OffersTab intent={intent} defaultSection="offers" />}
-          {activeTab === 'Stamps & Loyalty' && <OffersTab intent={intent} defaultSection="stamps" />}
-          {activeTab === 'Stamps, Offers & Points' && <OffersTab intent={intent} defaultSection="offers" />}
+          {activeTab === 'Offers & Coupons' && <OffersTab intent={intent} defaultSection="offers" isAdmin={user.role === 'ADMIN'} />}
+          {activeTab === 'Stamps & Loyalty' && <OffersTab intent={intent} defaultSection="stamps" isAdmin={user.role === 'ADMIN'} />}
+          {activeTab === 'Stamps, Offers & Points' && <OffersTab intent={intent} defaultSection="offers" isAdmin={user.role === 'ADMIN'} />}
           {activeTab === 'Restaurant Settings' && <SettingsTab />}
           {activeTab === 'Store Locations' && <StoreLocationsManager />}
+          {activeTab === 'Payment Devices' && <PaymentDevicesTab />}
           {activeTab === 'Page Settings' && <PageSettingsTabComponent onOpenRestaurantSettings={() => navigateTo('Restaurant Settings')} />}
-          {activeTab === 'Contact Messages' && <MessagesTab />}
-          {activeTab === 'Staff Users' && <StaffUsersTab currentUserId={user.id} intent={intent} />}
-          {activeTab === 'Members' && <CustomersTab intent={intent} />}
+          {activeTab === 'Messages & LINE' && <MessagesAndLineBotTab intent={intent} unreadCount={unreadCount} />}
+          {activeTab === 'Staff & Members' && <StaffAndMembersTab currentUserId={user.id} intent={intent} />}
           {activeTab === 'Blog Posts' && <BlogPostsTab />}
           {activeTab === 'Careers' && <CareersTab />}
 

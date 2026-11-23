@@ -4,7 +4,10 @@ import { config } from './config.js';
 import { logger } from './lib/logger.js';
 import { prisma } from './lib/prisma.js';
 import { ensureSquareIndexes } from './lib/square-payments.js';
+import { ensureUploadDir } from './lib/uploads.js';
 import { scheduleReviewRefresh } from './services/google-reviews.js';
+
+ensureUploadDir(config.uploadDir);
 
 const server = createApp().listen(config.port, () => {
   logger.info(`API server running on http://localhost:${config.port}`);

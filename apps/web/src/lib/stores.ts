@@ -14,9 +14,21 @@ export interface StoreLocation {
   rating: number;
   reviewCount: number;
   mapEmbedUrl: string;
+  /** Branch page on ホットペッパーグルメ (empty = hide). */
+  hotpepperUrl?: string;
+  /** Branch page on 食べログ (empty = hide). */
+  tabelogUrl?: string;
   /** WGS84 coordinates for the nearest-store feature (null/absent when unknown). */
   latitude?: number | null;
   longitude?: number | null;
+}
+
+/** True when the URL is a safe Hot Pepper or Tabelog https link. */
+export function isStoreReviewUrl(url: string | null | undefined, kind: 'hotpepper' | 'tabelog'): boolean {
+  const value = (url || '').trim();
+  if (!/^https:\/\//i.test(value)) return false;
+  if (kind === 'hotpepper') return /^https:\/\/([a-z0-9-]+\.)*hotpepper\.jp([/?#]|$)/i.test(value);
+  return /^https:\/\/([a-z0-9-]+\.)*tabelog\.com([/?#]|$)/i.test(value);
 }
 
 export const DEFAULT_STORE_LOCATIONS: StoreLocation[] = [
@@ -235,6 +247,35 @@ export function saveOrderStoreId(storeId: string, source?: StoreSelectionSource)
   }
 }
 
+/** Station-level fallbacks so nearest-store ranking still works before exact coords are saved. */
+const APPROX_STORE_COORDS: Record<string, { lat: number; lng: number }> = {
+  musashisakai: { lat: 35.7019, lng: 139.5437 },
+  higashikoganei: { lat: 35.7011, lng: 139.5249 },
+  musashikoganei: { lat: 35.6999, lng: 139.5077 },
+  'musashikoganei-1': { lat: 35.6999, lng: 139.5077 },
+  kokubunji: { lat: 35.701, lng: 139.4806 },
+  chiba: { lat: 35.611, lng: 140.114 },
+  shinmaruko: { lat: 35.5803, lng: 139.6612 },
+  aroy: { lat: 35.7025, lng: 139.5055 },
+  'musashikoganei-2': { lat: 35.703, lng: 139.503 },
+  takatsu: { lat: 35.603, lng: 139.617 },
+  hachioji: { lat: 35.659, lng: 139.3355 },
+};
+
+function hasCoords(store: StoreLocation): boolean {
+  return typeof store.latitude === 'number' && typeof store.longitude === 'number'
+    && Number.isFinite(store.latitude) && Number.isFinite(store.longitude);
+}
+
+/** Fills missing lat/lng from the known station-level map so distance sort never sees an empty list. */
+export function withApproxCoords(stores: StoreLocation[]): StoreLocation[] {
+  return stores.map(store => {
+    if (hasCoords(store)) return store;
+    const approx = APPROX_STORE_COORDS[store.id];
+    return approx ? { ...store, latitude: approx.lat, longitude: approx.lng } : store;
+  });
+}
+
 /**
  * Loads the branch list. `GET /api/v1/stores` returns a plain array; an `{ stores: [...] }`
  * wrapper is accepted too. Resolves to null when the API is unreachable or returns nothing,
@@ -244,7 +285,7 @@ export async function fetchStores(): Promise<StoreLocation[] | null> {
   try {
     const res = await getPublic<StoreLocation[] | { stores?: StoreLocation[] }>('/api/v1/stores');
     const list = Array.isArray(res) ? res : res?.stores;
-    return Array.isArray(list) && list.length > 0 ? list : null;
+    return Array.isArray(list) && list.length > 0 ? withApproxCoords(list) : null;
   } catch {
     return null;
   }

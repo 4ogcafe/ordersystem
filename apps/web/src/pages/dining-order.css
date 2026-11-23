@@ -1,3 +1,5 @@
+@reference "../index.css";
+
 /* ==========================================================================
    Dine-In Mobile & Tablet Ordering System (店内モバイルオーダー UI/UX)
    Exact match to mobile dining order interface
@@ -19,127 +21,105 @@
 }
 
 .dio-wrapper {
+  @apply min-h-screen antialiased;
+
   background-color: var(--dio-bg);
-  min-height: 100vh;
   padding-bottom: 92px; /* Space for sticky bottom cart bar */
   color: var(--dio-dark);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
 }
 
 /* --------------------------------------------------------------------------
    Top Header (Logo, Brand & Branch, Language Flag Pill)
    -------------------------------------------------------------------------- */
 .dio-header {
-  position: sticky;
+  @apply sticky z-40;
+
   top: 0;
-  z-index: 40;
   background: #ffffff;
   border-bottom: 1px solid var(--dio-border);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
 }
 
 .dio-header-inner {
+  @apply flex items-center justify-between gap-2;
+
   max-width: 800px;
   margin: 0 auto;
   padding: 8px 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
 }
 
 .dio-header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-  min-width: 0;
-}
+    @apply flex items-center gap-2.5 shrink-0 min-w-0;
+  }
 
 .dio-header-logo-wrap {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
+  @apply flex items-center shrink-0;
 }
 
 .dio-header-logo {
+  @apply rounded-full object-cover;
+
   height: 44px;
   width: 44px;
-  border-radius: 50%;
-  object-fit: cover;
   border: 1.5px solid #fed7aa;
   box-shadow: 0 2px 6px rgba(184, 46, 31, 0.12);
   background: #ffffff;
 }
 
 .dio-header-brand-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  min-width: 0;
-}
+    @apply flex flex-col items-start text-left min-w-0;
+  }
 
 .dio-header-title-lines {
-  display: flex;
-  flex-direction: column;
+  @apply flex flex-col;
+
   line-height: 1.15;
 }
 
 .dio-header-brand {
+  @apply font-black whitespace-nowrap;
+
   font-size: 1.25rem;
-  font-weight: 900;
   color: var(--dio-primary);
   line-height: 1.15;
   letter-spacing: -0.01em;
-  white-space: nowrap;
 }
 
 .dio-header-branch {
+  @apply font-extrabold whitespace-nowrap;
+
   font-size: 1.05rem;
-  font-weight: 800;
   color: var(--dio-primary);
   line-height: 1.15;
-  white-space: nowrap;
 }
 
 .dio-header-pills-row {
-  display: flex;
-  align-items: center;
+  @apply flex items-center whitespace-nowrap;
+
   gap: 5px;
   margin-top: 3px;
-  white-space: nowrap;
   flex-wrap: nowrap;
 }
 
 .dio-table-pill {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
+  @apply inline-flex flex-row items-center justify-center gap-[3px] font-bold rounded-full cursor-pointer whitespace-nowrap shrink-0 box-border;
+
   background: #fef2f2;
   border: 1px solid #fecaca;
   color: var(--dio-primary);
   font-size: 0.74rem;
-  font-weight: 700;
   padding: 2px 8px;
-  border-radius: 9999px;
-  cursor: pointer;
-  white-space: nowrap;
   word-break: keep-all;
-  flex-shrink: 0;
   line-height: 1.25;
   box-shadow: 0 1px 2px rgba(184, 46, 31, 0.08);
   transition: all 0.15s ease;
-  box-sizing: border-box;
 }
 
 .dio-table-pill span {
-  white-space: nowrap;
+  @apply whitespace-nowrap inline-block;
+
   word-break: keep-all;
-  display: inline-block;
 }
 
 .dio-table-pill:hover {
@@ -148,32 +128,23 @@
 }
 
 .dio-switch-pill {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
+  @apply inline-flex flex-row items-center justify-center gap-[3px] font-bold rounded-full cursor-pointer whitespace-nowrap shrink-0 box-border;
+
   background: #f8fafc;
   border: 1px solid #cbd5e1;
   color: #334155;
   font-size: 0.72rem;
-  font-weight: 700;
   padding: 2px 8px;
-  border-radius: 9999px;
-  cursor: pointer;
-  white-space: nowrap;
   word-break: keep-all;
-  flex-shrink: 0;
   line-height: 1.25;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   transition: all 0.15s ease;
-  box-sizing: border-box;
 }
 
 .dio-switch-pill span {
-  white-space: nowrap;
+  @apply whitespace-nowrap inline-block;
+
   word-break: keep-all;
-  display: inline-block;
 }
 
 .dio-switch-pill:hover {
@@ -182,38 +153,22 @@
 }
 
 .dio-header-center {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  flex: 1;
-  min-width: 0;
+  @apply flex flex-col items-center justify-center text-center flex-1 min-w-0;
 }
 
 .dio-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  margin-left: auto;
-}
+    @apply flex items-center gap-1.5 shrink-0 ml-auto;
+  }
 
 .dio-user-pill {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  @apply flex items-center gap-1 rounded-full cursor-pointer font-bold shrink-0 whitespace-nowrap;
+
   border: 1.5px solid var(--dio-border);
-  border-radius: 9999px;
   padding: 5px 9px;
   background: #ffffff;
-  cursor: pointer;
   font-size: 0.78rem;
-  font-weight: 700;
   color: var(--dio-dark);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  flex-shrink: 0;
-  white-space: nowrap;
   transition: all 0.15s;
 }
 
@@ -229,29 +184,23 @@
 }
 
 .dio-user-pill-pts {
+  @apply font-extrabold rounded-full;
+
   background: #dcfce7;
   color: #166534;
   font-size: 0.7rem;
-  font-weight: 800;
   padding: 1px 6px;
-  border-radius: 9999px;
   margin-left: 2px;
 }
 
 .dio-flag-pill {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  @apply flex items-center gap-1 rounded-full cursor-pointer font-semibold shrink-0 whitespace-nowrap;
+
   border: 1.5px solid var(--dio-border);
-  border-radius: 9999px;
   padding: 5px 9px;
   background: #ffffff;
-  cursor: pointer;
   font-size: 0.82rem;
-  font-weight: 600;
   box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  flex-shrink: 0;
-  white-space: nowrap;
   transition: all 0.15s;
 }
 
@@ -262,11 +211,12 @@
 
 @media (max-width: 400px) {
   .dio-header-inner {
+    @apply gap-1.5;
+
     padding: 6px 8px;
-    gap: 6px;
-  }
+}
   .dio-header-left {
-    gap: 6px;
+    @apply gap-1.5;
   }
   .dio-header-logo {
     height: 38px;
@@ -283,7 +233,7 @@
     padding: 1.5px 6px;
   }
   .dio-header-right {
-    gap: 4px;
+    @apply gap-1;
   }
   .dio-user-pill {
     padding: 4px 7px;
@@ -297,7 +247,7 @@
 
 @media (max-width: 360px) {
   .dio-header-left {
-    gap: 4px;
+    @apply gap-1;
   }
   .dio-header-logo {
     height: 32px;
@@ -327,45 +277,37 @@
    Horizontal Category Scrolling Bar (Pills with Light Beige/Orange Border)
    -------------------------------------------------------------------------- */
 .dio-categories-bar {
+  @apply overflow-x-auto flex gap-2;
+
   max-width: 800px;
   margin: 0 auto;
   padding: 12px 16px 8px;
-  overflow-x: auto;
-  display: flex;
-  gap: 8px;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   background: #fff;
 }
 
 .dio-categories-bar::-webkit-scrollbar {
-  display: none;
-}
+    @apply hidden;
+  }
 
 .dio-cat-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  @apply inline-flex items-center gap-1.5 rounded-full font-bold whitespace-nowrap cursor-pointer select-none;
+
   padding: 7px 18px;
   background: #ffffff;
   border: 1.5px solid #fed7aa;
-  border-radius: 9999px;
   font-size: 0.88rem;
-  font-weight: 700;
   color: var(--dio-gold-heading);
-  white-space: nowrap;
-  cursor: pointer;
   transition: all 0.15s ease;
-  user-select: none;
 }
 
 .dio-cat-chip-switch {
+  @apply font-extrabold inline-flex items-center;
+
   background: #fff7ed;
   border-color: #fed7aa;
   color: #c2410c;
-  font-weight: 800;
-  display: inline-flex;
-  align-items: center;
   gap: 5px;
   box-shadow: 0 1px 3px rgba(194, 65, 12, 0.08);
 }
@@ -381,10 +323,11 @@
 }
 
 .dio-cat-chip.is-active {
+  @apply font-extrabold;
+
   background: #fff7ed;
   border-color: var(--dio-primary);
   color: var(--dio-primary);
-  font-weight: 800;
   box-shadow: 0 2px 6px rgba(184, 46, 31, 0.15);
 }
 
@@ -392,21 +335,18 @@
    Search & Menu Filter Row
    -------------------------------------------------------------------------- */
 .dio-search-row {
+  @apply flex items-center gap-2.5;
+
   max-width: 800px;
   margin: 0 auto;
   padding: 8px 16px 12px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
   background: #fff;
   border-bottom: 1px solid var(--dio-border);
 }
 
 .dio-search-box {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  @apply flex-1 flex items-center gap-2;
+
   background: #ffffff;
   border: 1.5px solid var(--dio-border);
   border-radius: 10px;
@@ -419,10 +359,9 @@
 }
 
 .dio-search-input {
-  border: none;
+  @apply border-0 bg-transparent flex-1;
+
   outline: none;
-  background: transparent;
-  flex: 1;
   font-size: 0.92rem;
   color: var(--dio-dark);
 }
@@ -432,18 +371,14 @@
 }
 
 .dio-menu-picker-btn {
+  @apply flex items-center gap-2 font-bold whitespace-nowrap cursor-pointer;
+
   border: 1.5px solid var(--dio-border);
   border-radius: 10px;
   padding: 9px 12px;
   background: #ffffff;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 700;
   font-size: 0.88rem;
   color: var(--dio-dark);
-  white-space: nowrap;
-  cursor: pointer;
   transition: all 0.15s;
 }
 
@@ -462,15 +397,17 @@
 }
 
 .dio-section-title {
+  @apply font-black;
+
   font-size: 1.35rem;
-  font-weight: 900;
   color: var(--dio-gold-heading);
   margin: 0 0 6px;
   letter-spacing: -0.01em;
 }
 
 .dio-section-divider {
-  width: 100%;
+  @apply w-full;
+
   height: 2px;
   background: var(--dio-primary);
   border-radius: 2px;
@@ -486,18 +423,15 @@
 }
 
 .dio-item-card {
+  @apply flex items-center gap-3.5 cursor-pointer relative;
+
   background: #ffffff;
   border-radius: 16px;
   border: 1px solid var(--dio-border);
   padding: 12px 14px;
   margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
-  cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
-  position: relative;
 }
 
 .dio-item-card:hover {
@@ -506,64 +440,53 @@
 }
 
 .dio-item-thumb-wrap {
-  position: relative;
+  @apply relative overflow-hidden shrink-0;
+
   width: 90px;
   height: 90px;
   border-radius: 14px;
-  overflow: hidden;
   background: #f8fafc;
-  flex-shrink: 0;
   box-shadow: 0 2px 4px rgba(0,0,0,0.06);
 }
 
 .dio-item-thumb {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
+    @apply w-full h-full object-cover block;
+  }
 
 .dio-item-thumb-fallback {
-  width: 100%;
-  height: 100%;
-  display: grid;
-  place-items: center;
+  @apply w-full h-full grid place-items-center;
+
   background: linear-gradient(135deg, #fef3c7 0%, #fee2e2 100%);
   color: #d97706;
 }
 
 .dio-item-fav-heart {
-  position: absolute;
+  @apply absolute border-0 rounded-full flex items-center justify-center cursor-pointer;
+
   top: 4px;
   left: 4px;
   background: rgba(255, 255, 255, 0.85);
-  border: none;
   width: 24px;
   height: 24px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
   z-index: 5;
 }
 
 .dio-item-content {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
+    @apply flex-1 min-w-0 flex flex-col;
+  }
 
 .dio-item-title {
+  @apply font-extrabold;
+
   font-size: 1.08rem;
-  font-weight: 800;
   color: #111827;
   margin: 0 0 4px;
   line-height: 1.25;
 }
 
 .dio-item-desc {
+  @apply overflow-hidden;
+
   font-size: 0.82rem;
   color: var(--dio-gray);
   line-height: 1.35;
@@ -571,37 +494,29 @@
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 .dio-item-price {
+  @apply font-extrabold mt-auto;
+
   font-size: 1rem;
-  font-weight: 800;
   color: #4b5563;
-  margin-top: auto;
 }
 
 .dio-item-action {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+    @apply shrink-0 flex items-center justify-center;
+  }
 
 /* Red Circular Plus Button */
 .dio-plus-btn {
+  @apply rounded-full flex items-center justify-center font-bold cursor-pointer;
+
   width: 40px;
   height: 40px;
-  border-radius: 50%;
   border: 2px solid var(--dio-primary);
   color: var(--dio-primary);
   background: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   font-size: 1.5rem;
-  font-weight: 700;
-  cursor: pointer;
   transition: all 0.15s ease;
   line-height: 1;
 }
@@ -612,45 +527,38 @@
 }
 
 .dio-in-tray-control {
-  display: flex;
-  align-items: center;
+  @apply flex items-center rounded-full overflow-hidden;
+
   background: var(--dio-primary-light);
   border: 1.5px solid var(--dio-primary);
-  border-radius: 9999px;
-  overflow: hidden;
 }
 
 .dio-in-tray-btn {
-  border: none;
-  background: transparent;
+  @apply border-0 bg-transparent font-extrabold cursor-pointer flex items-center justify-center;
+
   color: var(--dio-primary);
   width: 28px;
   height: 32px;
   font-size: 1.1rem;
-  font-weight: 800;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .dio-in-tray-num {
+  @apply font-extrabold text-center;
+
   font-size: 0.9rem;
-  font-weight: 800;
   color: var(--dio-primary);
   min-width: 20px;
-  text-align: center;
 }
 
 /* --------------------------------------------------------------------------
    Sticky Floating Bottom Cart Bar (Exact Image Style)
    -------------------------------------------------------------------------- */
 .dio-bottom-bar {
-  position: fixed;
+  @apply fixed z-50;
+
   bottom: 0;
   left: 0;
   right: 0;
-  z-index: 50;
   background: #ffffff;
   border-top: 1px solid var(--dio-border);
   border-radius: 20px 20px 0 0;
@@ -659,25 +567,17 @@
 }
 
 .dio-bottom-bar-inner {
+  @apply flex items-center justify-around relative;
+
   max-width: 600px;
   margin: 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  position: relative;
 }
 
 .dio-bottom-nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  background: none;
-  border: none;
+  @apply flex flex-col items-center bg-transparent border-0 font-bold cursor-pointer gap-0.5;
+
   color: var(--dio-gray);
   font-size: 0.75rem;
-  font-weight: 700;
-  cursor: pointer;
-  gap: 2px;
   padding: 6px 12px;
   transition: color 0.15s;
 }
@@ -687,26 +587,19 @@
 }
 
 .dio-center-cart-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  background: none;
-  border: none;
-  cursor: pointer;
+  @apply flex flex-col items-center bg-transparent border-0 cursor-pointer;
+
   transform: translateY(-10px);
 }
 
 .dio-center-cart-circle {
+  @apply rounded-full flex items-center justify-center relative;
+
   width: 52px;
   height: 52px;
-  border-radius: 50%;
   background: var(--dio-primary);
   color: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   box-shadow: 0 4px 14px rgba(184, 46, 31, 0.4);
-  position: relative;
   transition: transform 0.15s ease, background 0.15s;
 }
 
@@ -716,25 +609,22 @@
 }
 
 .dio-center-cart-badge {
-  position: absolute;
+  @apply absolute font-extrabold rounded-full flex items-center justify-center;
+
   top: -3px;
   right: -3px;
   background: #111827;
   color: #ffffff;
   font-size: 0.72rem;
-  font-weight: 800;
   min-width: 18px;
   height: 18px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   border: 2px solid #ffffff;
 }
 
 .dio-center-cart-label {
+  @apply font-extrabold;
+
   font-size: 0.75rem;
-  font-weight: 800;
   color: var(--dio-primary);
   margin-top: 3px;
 }
@@ -750,37 +640,31 @@ body.dio-modal-open {
 }
 
 .dio-modal-overlay {
-  position: fixed;
-  inset: 0;
+  @apply fixed inset-0 z-[100] flex items-end justify-center p-0;
+
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
-  z-index: 100;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 0;
   overscroll-behavior: contain;
   touch-action: none;
 }
 
 @media (min-width: 640px) {
   .dio-modal-overlay {
-    align-items: center;
+    @apply items-center;
+
     padding: 20px;
-  }
+}
 }
 
 .dio-modal-sheet {
+  @apply w-full overflow-y-auto flex flex-col;
+
   background: #fff;
-  width: 100%;
   max-width: 520px;
   border-radius: 20px 20px 0 0;
   max-height: 88vh;
-  overflow-y: auto;
   box-shadow: 0 -10px 30px rgba(0,0,0,0.2);
-  display: flex;
-  flex-direction: column;
   animation: dioSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
@@ -800,65 +684,50 @@ body.dio-modal-open {
 }
 
 .dio-modal-header {
+  @apply flex items-center justify-between sticky z-10;
+
   padding: 16px 20px;
   border-bottom: 1px solid var(--dio-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  position: sticky;
   top: 0;
   background: #fff;
-  z-index: 10;
 }
 
 .dio-modal-title {
+  @apply font-black m-0;
+
   font-size: 1.15rem;
-  font-weight: 900;
   color: var(--dio-dark);
-  margin: 0;
 }
 
 .dio-modal-close {
+  @apply border-0 rounded-full flex items-center justify-center cursor-pointer;
+
   background: #f3f4f6;
-  border: none;
   width: 32px;
   height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
   color: var(--dio-gray-dark);
 }
 
 .dio-modal-body {
+  @apply flex-1;
+
   padding: 20px;
-  flex: 1;
 }
 
 .dio-tray-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  @apply flex items-center justify-between gap-3;
+
   padding: 12px 0;
   border-bottom: 1px dashed var(--dio-border);
-  gap: 12px;
 }
 
 .dio-send-order-btn {
-  width: 100%;
+  @apply w-full border-0 rounded-full font-extrabold flex items-center justify-center gap-2 cursor-pointer;
+
   background: var(--dio-primary);
   color: #fff;
-  border: none;
-  border-radius: 9999px;
   padding: 14px;
   font-size: 1.05rem;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
   margin-top: 16px;
   box-shadow: 0 4px 14px rgba(184, 46, 31, 0.35);
   transition: all 0.15s;
@@ -876,15 +745,13 @@ body.dio-modal-open {
 
 /* Call staff choice cards */
 .dio-call-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+  @apply flex items-center gap-3.5 cursor-pointer;
+
   padding: 14px 16px;
   border: 1.5px solid var(--dio-border);
   border-radius: 14px;
   background: #fff;
   margin-bottom: 10px;
-  cursor: pointer;
   transition: all 0.15s;
 }
 
@@ -894,33 +761,27 @@ body.dio-modal-open {
 }
 
 .dio-call-card-icon {
+  @apply rounded-full flex items-center justify-center shrink-0;
+
   width: 42px;
   height: 42px;
-  border-radius: 50%;
   background: #fee2e2;
   color: var(--dio-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   font-size: 1.25rem;
-  flex-shrink: 0;
 }
 
 /* --------------------------------------------------------------------------
    Dish Customization Sheet (Matches shop.sakuracto.com design exactly)
    -------------------------------------------------------------------------- */
 .dio-cust-sheet {
+  @apply w-full overflow-hidden flex flex-col relative;
+
   background: #faf8f5;
-  width: 100%;
   max-width: 540px;
   border-radius: 20px 20px 0 0;
   height: 90vh;
   max-height: 90vh;
-  overflow: hidden;
   box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25);
-  display: flex;
-  flex-direction: column;
-  position: relative;
   animation: dioSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   overscroll-behavior: contain;
 }
@@ -934,40 +795,29 @@ body.dio-modal-open {
 }
 
 .dio-cust-header {
+  @apply flex items-center justify-between shrink-0 z-30;
+
   padding: 14px 18px;
   background: #ffffff;
   border-bottom: 1px solid #f1f5f9;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-  z-index: 30;
 }
 
 .dio-cust-header-title {
+  @apply font-black m-0 whitespace-nowrap overflow-hidden text-ellipsis;
+
   font-size: 1.15rem;
-  font-weight: 900;
   color: var(--dio-dark);
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   max-width: 80%;
 }
 
 .dio-cust-close-btn {
+  @apply border-0 rounded-full flex items-center justify-center cursor-pointer shrink-0;
+
   background: #f3f4f6;
-  border: none;
   width: 36px;
   height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
   color: #374151;
   transition: all 0.15s;
-  flex-shrink: 0;
 }
 
 .dio-cust-close-btn:hover {
@@ -976,16 +826,17 @@ body.dio-modal-open {
 }
 
 .dio-cust-tab-row {
+  @apply shrink-0;
+
   background: #ffffff;
   padding: 8px 18px 0;
   border-bottom: 1px solid #f1f5f9;
-  flex-shrink: 0;
   z-index: 25;
 }
 
 .dio-cust-scrollable {
-  flex: 1;
-  overflow-y: auto;
+  @apply flex-1 overflow-y-auto;
+
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   touch-action: pan-y;
@@ -997,55 +848,47 @@ body.dio-modal-open {
 }
 
 .dio-cust-hero-img-wrap {
-  width: 100%;
+  @apply w-full overflow-hidden relative;
+
   height: 220px;
   background: #f8fafc;
-  overflow: hidden;
-  position: relative;
 }
 
 .dio-cust-hero-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
+    @apply w-full h-full object-cover block;
+  }
 
 .dio-cust-hero-info {
   padding: 14px 18px 10px;
 }
 
 .dio-cust-hero-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  @apply flex items-start justify-between gap-3;
 }
 
 .dio-cust-hero-title {
+  @apply font-black m-0;
+
   font-size: 1.25rem;
-  font-weight: 900;
   color: var(--dio-dark);
-  margin: 0;
   line-height: 1.25;
 }
 
 .dio-cust-hero-price {
+  @apply font-black whitespace-nowrap;
+
   font-size: 1.25rem;
-  font-weight: 900;
   color: var(--dio-dark);
-  white-space: nowrap;
 }
 
 .dio-cust-badge {
-  display: inline-block;
+  @apply inline-block rounded-full font-extrabold;
+
   background: #fff1f2;
   color: #be123c;
   border: 1px solid #fecdd3;
-  border-radius: 9999px;
   padding: 2px 10px;
   font-size: 0.72rem;
-  font-weight: 800;
   margin-top: 6px;
 }
 
@@ -1064,17 +907,17 @@ body.dio-modal-open {
 }
 
 .dio-cust-tab-item {
-  display: inline-block;
+  @apply inline-block font-extrabold relative;
+
   color: var(--dio-primary);
   font-size: 0.92rem;
-  font-weight: 800;
   padding-bottom: 8px;
-  position: relative;
 }
 
 .dio-cust-tab-item::after {
+  @apply absolute;
+
   content: '';
-  position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
@@ -1084,17 +927,19 @@ body.dio-modal-open {
 }
 
 .dio-cust-body {
+  @apply flex-1;
+
   padding: 0 16px 20px;
-  flex: 1;
 }
 
 .dio-opt-card {
+  @apply overflow-hidden;
+
   background: #ffffff;
   border-radius: 16px;
   border: 1px solid #f1f5f9;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
   margin-bottom: 14px;
-  overflow: hidden;
 }
 
 .dio-opt-card-head {
@@ -1103,52 +948,49 @@ body.dio-modal-open {
 }
 
 .dio-opt-card-title {
+  @apply font-black;
+
   font-size: 1.05rem;
-  font-weight: 900;
   color: var(--dio-dark);
   margin: 0 0 6px;
 }
 
 .dio-opt-card-sub {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
+    @apply flex items-center justify-between;
+  }
 
 .dio-opt-card-num {
+  @apply font-extrabold;
+
   font-size: 0.82rem;
-  font-weight: 800;
   color: #374151;
 }
 
 .dio-badge-required {
+  @apply rounded-full font-extrabold;
+
   background: #fef3c7;
   color: #92400e;
   border: 1px solid #fde68a;
-  border-radius: 9999px;
   padding: 2px 10px;
   font-size: 0.72rem;
-  font-weight: 800;
 }
 
 .dio-badge-optional {
+  @apply rounded-full font-bold;
+
   background: #f1f5f9;
   color: #475569;
-  border-radius: 9999px;
   padding: 2px 10px;
   font-size: 0.72rem;
-  font-weight: 700;
 }
 
 .dio-opt-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  @apply flex items-center justify-between cursor-pointer select-none;
+
   padding: 13px 16px;
   border-bottom: 1px solid #f8fafc;
-  cursor: pointer;
   transition: all 0.15s;
-  user-select: none;
 }
 
 .dio-opt-row:last-child {
@@ -1164,29 +1006,27 @@ body.dio-modal-open {
 }
 
 .dio-opt-row-label {
+  @apply font-bold flex-1;
+
   font-size: 0.92rem;
-  font-weight: 700;
   color: #1f2937;
-  flex: 1;
 }
 
 .dio-opt-radio {
+  @apply flex items-center justify-center shrink-0;
+
   width: 22px;
   height: 22px;
   border-radius: 6px;
   border: 2px solid #cbd5e1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   margin-left: 12px;
-  flex-shrink: 0;
   transition: all 0.15s;
   background: #fff;
 }
 
 .dio-opt-radio.is-circle {
-  border-radius: 50%;
-}
+    @apply rounded-full;
+  }
 
 .dio-opt-row.is-selected .dio-opt-radio {
   border-color: var(--dio-primary);
@@ -1201,99 +1041,84 @@ body.dio-modal-open {
 }
 
 .dio-opt-radio.is-circle .dio-opt-radio-dot {
-  border-radius: 50%;
+  @apply rounded-full;
+
   background: #ffffff;
 }
 
 .dio-qty-card {
+  @apply flex items-center justify-between;
+
   background: #ffffff;
   border-radius: 16px;
   border: 1px solid #f1f5f9;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
   padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   margin-bottom: 14px;
 }
 
 .dio-qty-label {
+  @apply font-extrabold;
+
   font-size: 0.95rem;
-  font-weight: 800;
   color: var(--dio-dark);
 }
 
 .dio-qty-control {
+  @apply rounded-full inline-flex items-center gap-3;
+
   background: #fff1f2;
   border: 1px solid #fecdd3;
-  border-radius: 9999px;
-  display: inline-flex;
-  align-items: center;
   padding: 3px 6px;
-  gap: 12px;
 }
 
 .dio-qty-btn-minus {
+  @apply rounded-full border-0 font-extrabold cursor-pointer grid place-items-center;
+
   width: 30px;
   height: 30px;
-  border-radius: 50%;
-  border: none;
   background: #ffffff;
   color: #6b7280;
   font-size: 1.15rem;
-  font-weight: 800;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .dio-qty-number {
+  @apply font-black text-center;
+
   font-size: 1.05rem;
-  font-weight: 900;
   color: #111827;
   min-width: 24px;
-  text-align: center;
 }
 
 .dio-qty-btn-plus {
+  @apply rounded-full border-0 font-extrabold cursor-pointer grid place-items-center;
+
   width: 30px;
   height: 30px;
-  border-radius: 50%;
-  border: none;
   background: var(--dio-primary);
   color: #ffffff;
   font-size: 1.15rem;
-  font-weight: 800;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
   box-shadow: 0 2px 6px rgba(184, 46, 31, 0.3);
 }
 
 .dio-cust-bottom-bar {
-  flex-shrink: 0;
+  @apply shrink-0 z-30;
+
   background: #ffffff;
   border-top: 1px solid #e5e7eb;
   padding: 12px 16px 14px;
-  z-index: 30;
   box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.06);
 }
 
 .dio-cust-add-btn {
-  width: 100%;
+  @apply w-full border-0 font-black cursor-pointer flex items-center justify-center gap-1.5;
+
   background: var(--dio-primary);
   color: #ffffff;
-  border: none;
   border-radius: 12px;
   padding: 15px 18px;
   font-size: 1.1rem;
-  font-weight: 900;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
   box-shadow: 0 4px 14px rgba(184, 46, 31, 0.35);
   transition: all 0.15s;
 }
@@ -1307,45 +1132,37 @@ body.dio-modal-open {
    QR Scan Preloader (卓上QRコード スキャン専用プレローダー)
    ========================================================================== */
 .dio-qr-preloader {
-  position: fixed;
-  inset: 0;
+  @apply fixed inset-0 flex items-center justify-center overflow-hidden;
+
   z-index: 99999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   background-color: #faf8f5;
   transition: opacity 0.35s ease-out, visibility 0.35s ease-out;
   padding: 16px;
-  overflow: hidden;
 }
 
 .dio-qr-preloader.is-fading-out {
+  @apply pointer-events-none;
+
   opacity: 0;
   visibility: hidden;
-  pointer-events: none;
 }
 
 .dio-qr-preloader-backdrop {
-  position: absolute;
-  inset: 0;
+  @apply absolute inset-0 pointer-events-none;
+
   background: radial-gradient(circle at 50% 35%, rgba(254, 215, 170, 0.35) 0%, rgba(250, 248, 245, 0.98) 75%);
-  pointer-events: none;
 }
 
 .dio-qr-preloader-card {
-  position: relative;
+  @apply relative w-full flex flex-col items-center text-center;
+
   z-index: 2;
-  width: 100%;
   max-width: 360px;
   background: #ffffff;
   border: 1px solid #fed7aa;
   border-radius: 24px;
   padding: 32px 24px 28px;
   box-shadow: 0 16px 48px -8px rgba(184, 46, 31, 0.12), 0 4px 16px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
   animation: dioCardPop 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
@@ -1361,34 +1178,30 @@ body.dio-modal-open {
 }
 
 .dio-qr-preloader-tag {
-  display: inline-flex;
-  align-items: center;
+  @apply inline-flex items-center font-bold rounded-full;
+
   gap: 5px;
   background: #fff7ed;
   border: 1px solid #ffedd5;
   color: #c2410c;
   font-size: 0.75rem;
-  font-weight: 700;
   padding: 4px 12px;
-  border-radius: 9999px;
   margin-bottom: 20px;
   letter-spacing: 0.04em;
 }
 
 .dio-qr-preloader-logo-ring {
-  position: relative;
+  @apply relative rounded-full grid place-items-center;
+
   width: 86px;
   height: 86px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
   margin-bottom: 16px;
 }
 
 .dio-qr-preloader-pulse-glow {
-  position: absolute;
+  @apply absolute rounded-full;
+
   inset: -6px;
-  border-radius: 50%;
   border: 2px dashed #f97316;
   opacity: 0.7;
   animation: dioRotatePulse 8s linear infinite;
@@ -1404,10 +1217,10 @@ body.dio-modal-open {
 }
 
 .dio-qr-preloader-logo-img {
+  @apply rounded-full object-cover;
+
   width: 76px;
   height: 76px;
-  border-radius: 50%;
-  object-fit: cover;
   border: 3px solid #b82e1f;
   box-shadow: 0 4px 14px rgba(184, 46, 31, 0.25);
   animation: dioLogoFloat 3s ease-in-out infinite;
@@ -1427,63 +1240,61 @@ body.dio-modal-open {
 }
 
 .dio-qr-preloader-name {
-  margin: 0;
+  @apply m-0 font-black;
+
   font-size: 1.45rem;
-  font-weight: 900;
   color: var(--dio-primary);
   letter-spacing: 0.02em;
 }
 
 .dio-qr-preloader-branch {
+  @apply font-bold;
+
   margin: 2px 0 0;
   font-size: 0.85rem;
-  font-weight: 700;
   color: #4b5563;
 }
 
 .dio-qr-preloader-seat-badge {
+  @apply rounded-full;
+
   background: #fff7ed;
   border: 1.5px solid #fed7aa;
-  border-radius: 9999px;
   padding: 8px 20px;
   margin-bottom: 22px;
   box-shadow: 0 2px 8px rgba(234, 88, 12, 0.08);
 }
 
 .dio-qr-preloader-seat-inner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
+    @apply flex items-center justify-center gap-2;
+  }
 
 .dio-qr-preloader-seat-icon {
   font-size: 1.05rem;
 }
 
 .dio-qr-preloader-seat-text {
+  @apply font-black;
+
   font-size: 1.05rem;
-  font-weight: 900;
   color: #9a3412;
   letter-spacing: 0.05em;
 }
 
 .dio-qr-preloader-progress-wrap {
-  width: 100%;
+  @apply w-full rounded-full overflow-hidden relative;
+
   max-width: 240px;
   height: 6px;
   background: #f3f4f6;
-  border-radius: 9999px;
-  overflow: hidden;
-  position: relative;
   margin-bottom: 14px;
 }
 
 .dio-qr-preloader-progress-bar {
-  height: 100%;
+  @apply h-full rounded-full;
+
   width: 45%;
   background: linear-gradient(90deg, #ea580c, #b82e1f, #f59e0b);
-  border-radius: 9999px;
   animation: dioProgressSlide 1.5s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 
@@ -1501,9 +1312,9 @@ body.dio-modal-open {
 }
 
 .dio-qr-preloader-status-main {
-  margin: 0;
+  @apply m-0 font-extrabold;
+
   font-size: 0.92rem;
-  font-weight: 800;
   color: #1f2937;
 }
 
@@ -1514,21 +1325,16 @@ body.dio-modal-open {
 }
 
 .dio-qr-preloader-features {
-  width: 100%;
+  @apply w-full flex flex-col gap-1.5 text-left;
+
   border-top: 1px dashed #fed7aa;
   padding-top: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  text-align: left;
 }
 
 .dio-qr-preloader-feat-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  @apply flex items-center gap-2 font-semibold;
+
   font-size: 0.78rem;
-  font-weight: 600;
   color: #4b5563;
 }
 
@@ -1541,7 +1347,8 @@ body.dio-modal-open {
    Scroll to Top Floating Button (最上部へ戻るボタン - QR Scan Menu)
    -------------------------------------------------------------------------- */
 .dio-scroll-top-btn {
-  position: fixed;
+  @apply fixed flex flex-col items-center justify-center cursor-pointer pointer-events-none;
+
   bottom: 82px;
   right: 14px;
   z-index: 45;
@@ -1552,24 +1359,19 @@ body.dio-modal-open {
   border: 1.5px solid #fed7aa;
   border-radius: 14px;
   box-shadow: 0 4px 14px rgba(184, 46, 31, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
   gap: 0px;
   padding: 4px 0 3px;
-  cursor: pointer;
   opacity: 0;
   transform: translateY(14px) scale(0.88);
-  pointer-events: none;
   transition: opacity 0.22s ease-out, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.15s, box-shadow 0.15s;
   -webkit-tap-highlight-color: transparent;
 }
 
 .dio-scroll-top-btn.is-visible {
+  @apply pointer-events-auto;
+
   opacity: 1;
   transform: translateY(0) scale(1);
-  pointer-events: auto;
 }
 
 .dio-scroll-top-btn:hover,
@@ -1582,8 +1384,9 @@ body.dio-modal-open {
 }
 
 .dio-scroll-top-label {
+  @apply font-black;
+
   font-size: 0.62rem;
-  font-weight: 900;
   letter-spacing: 0.05em;
   line-height: 1;
   margin-top: -2px;
@@ -1594,6 +1397,3 @@ body.dio-modal-open {
     right: calc(50% - 280px);
   }
 }
-
-
-

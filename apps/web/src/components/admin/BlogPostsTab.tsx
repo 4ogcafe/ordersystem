@@ -16,6 +16,7 @@ import {
   FileText
 } from 'lucide-react';
 import { apiFetch, assetUrl, errorMessage } from '../../lib/api';
+import SafeImage from '../../components/SafeImage';
 
 export interface BlogPostItem {
   id: string;
@@ -436,15 +437,10 @@ export default function BlogPostsTab() {
                 border: '1px solid #f1f5f9'
               }}>
                 {post.coverImage ? (
-                  <img
-                    src={assetUrl(post.coverImage) || '/bg-hero-img.webp'}
+                  <SafeImage
+                    src={assetUrl(post.coverImage)}
                     alt={post.title}
-                    onError={(e) => {
-                      const target = e.currentTarget;
-                      if (!target.src.endsWith('/bg-hero-img.webp')) {
-                        target.src = '/bg-hero-img.webp';
-                      }
-                    }}
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                 ) : (
@@ -729,15 +725,10 @@ export default function BlogPostsTab() {
                 </div>
                 {editingPost.coverImage && (
                   <div style={{ marginTop: '8px', height: '100px', width: '180px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #e5e7eb' }}>
-                    <img
-                      src={assetUrl(editingPost.coverImage) || '/bg-hero-img.webp'}
+                    <SafeImage
+                      src={assetUrl(editingPost.coverImage)}
                       alt="プレビュー"
-                      onError={(e) => {
-                        const target = e.currentTarget;
-                        if (!target.src.endsWith('/bg-hero-img.webp')) {
-                          target.src = '/bg-hero-img.webp';
-                        }
-                      }}
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
                   </div>

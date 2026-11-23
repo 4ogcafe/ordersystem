@@ -5,6 +5,7 @@ import { apiFetch, assetUrl, errorMessage } from '../../lib/api';
 import { getCategoryIcon } from '../../lib/category-icons';
 import MenuImportModal from './MenuImportModal';
 import type { TabIntent } from './TopBar';
+import SafeImage from '../../components/SafeImage';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Category { id: string; nameEn: string; nameJa: string | null; parentId: string | null; sortOrder: number; }
@@ -1154,15 +1155,10 @@ export default function MenuManagementTab({ intent }: { intent: TabIntent | null
 
                   {item.imageUrl
                     ? (
-                      <img
-                        src={assetUrl(item.imageUrl) || '/bg-hero-img.webp'}
+                      <SafeImage
+                        src={assetUrl(item.imageUrl)}
                         alt={item.nameEn}
-                        onError={(e) => {
-                          const target = e.currentTarget;
-                          if (!target.src.endsWith('/bg-hero-img.webp')) {
-                            target.src = '/bg-hero-img.webp';
-                          }
-                        }}
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         style={{ width: '90px', height: '90px', objectFit: 'cover', borderRadius: '8px', flexShrink: 0 }}
                       />
                     )
@@ -1223,15 +1219,10 @@ export default function MenuManagementTab({ intent }: { intent: TabIntent | null
                   <label style={lbl}>Item image
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                       {form.imageUrl && (
-                        <img
-                          src={assetUrl(form.imageUrl) || '/bg-hero-img.webp'}
+                        <SafeImage
+                          src={assetUrl(form.imageUrl)}
                           alt="preview"
-                          onError={(e) => {
-                            const target = e.currentTarget;
-                            if (!target.src.endsWith('/bg-hero-img.webp')) {
-                              target.src = '/bg-hero-img.webp';
-                            }
-                          }}
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
                           style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '8px', border: '1px solid #e5e7eb', flexShrink: 0 }}
                         />
                       )}

@@ -24,7 +24,7 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, post-chec
 header('Pragma: no-cache');
 header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-$allowedOrigins = ['https://pnglike.com', 'https://www.pnglike.com', 'http://localhost:5173', 'http://localhost:4000', 'http://localhost:3000'];
+$allowedOrigins = ['https://adarsha.jp', 'https://www.adarsha.jp', 'http://localhost:5173', 'http://localhost:4000', 'http://localhost:3000'];
 
 $isAllowedOrigin = false;
 if ($origin !== '') {
@@ -33,7 +33,7 @@ if ($origin !== '') {
     } else {
         $parsed = parse_url($origin);
         $host = $parsed['host'] ?? '';
-        if ($host === 'pnglike.com' || (strlen($host) > 12 && substr($host, -12) === '.pnglike.com')) {
+        if ($host === 'adarsha.jp' || (strlen($host) > 12 && substr($host, -12) === '.adarsha.jp')) {
             $isAllowedOrigin = true;
         }
     }
@@ -44,7 +44,7 @@ if ($isAllowedOrigin) {
     header('Access-Control-Allow-Credentials: true');
     header('Vary: Origin');
 } else {
-    header('Access-Control-Allow-Origin: https://pnglike.com');
+    header('Access-Control-Allow-Origin: https://adarsha.jp');
 }
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
@@ -61,7 +61,7 @@ if ($normalizedPath === '/api' || $normalizedPath === '/api/health' || $normaliz
     echo json_encode([
         'status' => 'ok',
         'message' => 'Adarsha API Gateway is alive',
-        'domain' => 'pnglike.com',
+        'domain' => 'adarsha.jp',
         'php_version' => PHP_VERSION,
         'timestamp' => date('c'),
     ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
@@ -78,6 +78,7 @@ $configCandidates = [
     dirname(__DIR__, 2) . '/adarsha-config.php',
     dirname(__DIR__, 2) . '/kalpana-config.php',
     dirname(__DIR__) . '/adarsha-config.php',
+    dirname(__DIR__, 3) . '/adarsha-config.php',
     __DIR__ . '/config.php',
 ];
 $config = [];
@@ -91,9 +92,66 @@ foreach ($configCandidates as $candidate) {
     }
 }
 
+// When mounted under Laravel (public/api), reuse Laravel .env for DB + APP_KEY.
+$laravelEnvPaths = [
+    dirname(__DIR__, 2) . '/.env',
+    dirname(__DIR__) . '/../.env',
+];
+foreach ($laravelEnvPaths as $envPath) {
+    if (!is_file($envPath) || !empty($config['jwt_secret'])) {
+        continue;
+    }
+    $lines = @file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if (!is_array($lines)) {
+        break;
+    }
+    $envMap = [];
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '' || $line[0] === '#' || strpos($line, '=') === false) {
+            continue;
+        }
+        [$ek, $ev] = explode('=', $line, 2);
+        $ek = trim($ek);
+        $ev = trim($ev);
+        if ($ev !== '' && ($ev[0] === '"' || $ev[0] === "'")) {
+            $ev = trim($ev, "\"'");
+        }
+        $envMap[$ek] = $ev;
+    }
+    $dbConnection = strtolower((string)($envMap['DB_CONNECTION'] ?? ''));
+    if ($dbConnection === 'mysql' || $dbConnection === 'mariadb') {
+        if (empty($config['db_host']) && !empty($envMap['DB_HOST'])) {
+            $config['db_host'] = $envMap['DB_HOST'];
+        }
+        if (empty($config['db_name']) && !empty($envMap['DB_DATABASE'])) {
+            $config['db_name'] = $envMap['DB_DATABASE'];
+        }
+        if (empty($config['db_user']) && !empty($envMap['DB_USERNAME'])) {
+            $config['db_user'] = $envMap['DB_USERNAME'];
+        }
+        if (empty($config['db_pass']) && isset($envMap['DB_PASSWORD'])) {
+            $config['db_pass'] = $envMap['DB_PASSWORD'];
+        }
+    }
+    if (empty($config['jwt_secret']) && !empty($envMap['APP_KEY'])) {
+        // Laravel APP_KEY is base64:... — use the raw key material as HMAC secret.
+        $appKey = $envMap['APP_KEY'];
+        if (str_starts_with($appKey, 'base64:')) {
+            $decoded = base64_decode(substr($appKey, 7), true);
+            $config['jwt_secret'] = ($decoded !== false && strlen($decoded) >= 32)
+                ? $decoded
+                : hash('sha256', $appKey);
+        } else {
+            $config['jwt_secret'] = strlen($appKey) >= 32 ? $appKey : hash('sha256', $appKey);
+        }
+    }
+    break;
+}
+
 // Persist config outside web root so future Git deploys never lose credentials
 $outsideConfig = dirname(__DIR__, 2) . '/adarsha-config.php';
-if (!empty($config['db_pass']) && !is_file($outsideConfig)) {
+if (!empty($config['db_pass']) && !empty($config['jwt_secret']) && !is_file($outsideConfig)) {
     @file_put_contents($outsideConfig, "<?php\n// Auto-persisted outside web root for secure deployment\nreturn " . var_export($config, true) . ";\n");
 }
 
@@ -111,9 +169,14 @@ $cfg = function (string $key, $default = null) use ($config) {
 $dbHost = $cfg('db_host', 'localhost');
 $dbName = $cfg('db_name', 'u309882766_adarsha_db');
 $dbUser = $cfg('db_user', 'u309882766_adarshaRestro');
-$dbPass = $cfg('db_pass', '64650@Mohan');
-$jwtSecret = $cfg('jwt_secret', 'adarsha-live-secret-change-in-production-32chars!!');
-$googlePlacesApiKey = $cfg('google_places_api_key', getenv('GOOGLE_PLACES_API_KEY') ?: 'AIzaSyDl85DWQNGzQomTXbtFuYbR0EFQUG-48yk');
+$dbPass = (string)$cfg('db_pass', '');
+$jwtSecret = (string)$cfg('jwt_secret', '');
+if (strlen($jwtSecret) < 32) {
+    http_response_code(500);
+    echo json_encode(['error' => ['code' => 'SERVER_MISCONFIGURED', 'message' => 'Server authentication is not configured.']]);
+    exit;
+}
+$googlePlacesApiKey = (string)$cfg('google_places_api_key', '');
 
 $pdoOptions = [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -166,21 +229,23 @@ function ensureDefaultDatabaseData(PDO $pdo): array {
             ['id' => 'usr_staff_default',   'email' => 'staff@adarsha.jp',   'name' => 'Adarsha Staff',   'role' => 'STAFF'],
             ['id' => 'usr_kitchen_default', 'email' => 'kitchen@adarsha.jp', 'name' => 'Adarsha Kitchen', 'role' => 'KITCHEN'],
         ];
-        $defaultHash = password_hash('admin123', PASSWORD_BCRYPT);
-        foreach ($defaultUsers as $du) {
-            $check = $pdo->prepare('SELECT id, passwordHash, isActive FROM `User` WHERE LOWER(email) = ? LIMIT 1');
-            $check->execute([strtolower($du['email'])]);
-            $existing = $check->fetch();
-            if (!$existing) {
-                $ins = $pdo->prepare('INSERT INTO `User` (id, email, passwordHash, name, role, isActive, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, 1, ?, ?)');
-                $ins->execute([$du['id'], $du['email'], $defaultHash, $du['name'], $du['role'], $now, $now]);
-                $seeded['user_' . $du['email']] = 1;
-            } else {
-                if (empty($existing['passwordHash'])) {
-                    $upd = $pdo->prepare('UPDATE `User` SET passwordHash = ?, updatedAt = ? WHERE id = ?');
-                    $upd->execute([$defaultHash, $now, $existing['id']]);
-                }
+        $flag = getAppSecretConfig($pdo, 'SECURITY_DEFAULT_ADMIN', ['cleared' => false]);
+        $cleared = !empty($flag['cleared']);
+        if (!$cleared) {
+            foreach ($defaultUsers as $du) {
+                $check = $pdo->prepare('SELECT id, passwordHash FROM `User` WHERE LOWER(email) = ? LIMIT 1');
+                $check->execute([strtolower($du['email'])]);
+                $existing = $check->fetch();
+                if (!$existing || empty($existing['passwordHash'])) continue;
+                if (!password_verify('admin123', $existing['passwordHash'])) continue;
+                $replacement = password_hash(bin2hex(random_bytes(24)), PASSWORD_BCRYPT);
+                $upd = $pdo->prepare('UPDATE `User` SET passwordHash = ?, isActive = 0, updatedAt = ? WHERE id = ?');
+                $upd->execute([$replacement, $now, $existing['id']]);
+                $seeded['disabled_default_password_' . $du['email']] = 1;
             }
+            try {
+                saveAppSecretConfig($pdo, 'SECURITY_DEFAULT_ADMIN', ['cleared' => true, 'at' => $now]);
+            } catch (Throwable $e) {}
         }
     } catch (Exception $e) {}
 
@@ -304,37 +369,88 @@ function ensureDefaultDatabaseData(PDO $pdo): array {
         }
     } catch (Exception $e) {}
 
-    // 6. Menu Items
+    // 4b. Extra dine-in categories (idempotent)
     try {
-        $stmt = $pdo->query('SELECT COUNT(*) FROM `MenuItem`');
-        if ($stmt && (int)$stmt->fetchColumn() === 0) {
-            $itemIns = $pdo->prepare('INSERT INTO `MenuItem` (
-                id, categoryId, nameEn, nameJa, descriptionEn, descriptionJa,
-                price, imageUrl, spiceLevel, isRecommended, isVegetarian, isVegan,
-                isHalal, isGlutenFree, isSoldOut, isOrderable, isActive, sortOrder,
-                menuTypes, allergens, createdAt, updatedAt
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, 1, ?, ?, ?, ?, ?)');
-
-            $samples = [
-                ['item_1', 'cat_curry', 'Butter Chicken Curry', 'バターチキンカレー', 'Creamy tomato-based chicken curry with rich butter aroma.', 'トマトベースの濃厚でコクのあるクリーミーなチキンカレー。', 1200, '/uploads/1792845269-3c46d03a68dd8916.webp', 1, 1, 0, 0, 1, 0, 1, ['LUNCH', 'TAKEOUT', 'GRAND'], ['乳']],
-                ['item_2', 'cat_mutton', 'Keema Curry', 'キーマカレー', 'Minced mutton curry spiced with fragrant whole spices.', 'スパイス香る挽肉の旨味たっぷりキーマカレー。', 1100, '/uploads/1792845269-3c46d03a68dd8916.webp', 3, 1, 0, 0, 1, 0, 2, ['GRAND', 'TAKEOUT'], []],
-                ['item_3', 'cat_bread', 'Cheese Naan', 'チーズナン', 'Freshly baked naan stuffed with melted mozzarella cheese.', 'とろ〜り溶け出すたっぷりチーズの本格ナン。', 550, '/uploads/1793235169-18d888af1f82b668.webp', 0, 1, 1, 0, 1, 0, 1, ['LUNCH', 'TAKEOUT', 'GRAND'], ['乳', '小麦']],
-                ['item_4', 'cat_bread', 'Garlic Naan', 'ガーリックナン', 'Crispy naan topped with fresh chopped garlic and herbs.', '香ばしいガーリックをトッピングした風味豊かなナン。', 400, '/uploads/1793235205-bd02e307eb24c66f.webp', 0, 0, 1, 1, 1, 0, 2, ['GRAND', 'TAKEOUT'], ['小麦']],
-                ['item_5', 'cat_lunch_set', 'Lunch Set A', 'ランチセット A', 'Choice of curry, plain naan or rice, and mini salad.', 'お好みのカレー1種、プレーンナンまたはライス、ミニサラダ付き。', 950, '/uploads/1793237909-e9299426f5e7f773.webp', 1, 1, 0, 0, 1, 0, 1, ['LUNCH'], ['乳', '小麦']],
-                ['item_6', 'cat_lunch_set', 'Lunch Set B (Cheese Naan)', 'チーズナンランチセット', 'Choice of curry, cheese naan, and mini salad.', 'お好みのカレー、チーズナン、ミニサラダがセットになった大満足ランチ。', 1150, '/uploads/1793237909-e9299426f5e7f773.webp', 1, 1, 0, 0, 1, 0, 2, ['LUNCH'], ['乳', '小麦']],
-            ];
-
-            foreach ($samples as $s) {
-                $itemIns->execute([
-                    $s[0], $s[1], $s[2], $s[3], $s[4], $s[5],
-                    $s[6], $s[7], $s[8], $s[9], $s[10], $s[11],
-                    $s[12], $s[13], $s[14],
-                    json_encode($s[15]), json_encode($s[16], JSON_UNESCAPED_UNICODE),
-                    $now, $now
-                ]);
-            }
-            $seeded['menu_items'] = count($samples);
+        $catIns = $pdo->prepare('INSERT IGNORE INTO `Category` (id, nameEn, nameJa, sortOrder, parentId) VALUES (?, ?, ?, ?, ?)');
+        $extraCats = [
+            ['cat_seafood', 'Seafood Curries', 'シーフードカレー', 3, 'cat_grand'],
+            ['cat_veg', 'Vegetarian Curries', 'ベジタリアンカレー', 4, 'cat_grand'],
+            ['cat_tandoori', 'Tandoori & Starters', 'タンドリー・スターター', 5, 'cat_grand'],
+            ['cat_dessert', 'Desserts', 'デザート', 6, 'cat_grand'],
+            ['cat_drinks', 'Drinks', 'ドリンク', 7, 'cat_grand'],
+            ['cat_lunch_drink', 'Lunch Drinks', 'ランチドリンク', 2, 'cat_lunch'],
+            ['cat_dinner_set', 'Dinner Sets', 'ディナーセット', 0, 'cat_grand'],
+        ];
+        foreach ($extraCats as $c) {
+            $catIns->execute($c);
         }
+        $c2m = $pdo->prepare('INSERT IGNORE INTO `_CategoryToMenu` (A, B) VALUES (?, ?)');
+        foreach (['cat_seafood', 'cat_veg', 'cat_tandoori', 'cat_dessert', 'cat_drinks', 'cat_dinner_set'] as $cid) {
+            $c2m->execute([$cid, 'menu_grand']);
+        }
+        $c2m->execute(['cat_lunch_drink', 'menu_lunch']);
+    } catch (Exception $e) {}
+
+    // 6. Menu Items — INSERT IGNORE so sparse DBs grow to a full dine-in catalog
+    try {
+        $itemIns = $pdo->prepare('INSERT IGNORE INTO `MenuItem` (
+            id, categoryId, nameEn, nameJa, descriptionEn, descriptionJa,
+            price, imageUrl, spiceLevel, isRecommended, isVegetarian, isVegan,
+            isHalal, isGlutenFree, isSoldOut, isOrderable, isActive, sortOrder,
+            menuTypes, allergens, createdAt, updatedAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, 1, ?, ?, ?, ?, ?)');
+
+        // id, categoryId, nameEn, nameJa, descEn, descJa, price, image, spice, recommended, veg, vegan, halal, glutenFree, sort, types, allergens
+        $samples = [
+            ['item_1', 'cat_curry', 'Butter Chicken Curry', 'バターチキンカレー', 'Creamy tomato-based chicken curry with rich butter aroma.', 'トマトベースの濃厚でコクのあるクリーミーなチキンカレー。', 1200, '/uploads/1792845269-3c46d03a68dd8916.webp', 1, 1, 0, 0, 1, 0, 1, ['LUNCH', 'TAKEOUT', 'GRAND'], ['乳']],
+            ['item_2', 'cat_mutton', 'Keema Curry', 'キーマカレー', 'Minced mutton curry spiced with fragrant whole spices.', 'スパイス香る挽肉の旨味たっぷりキーマカレー。', 1100, '/uploads/1792845269-3c46d03a68dd8916.webp', 3, 1, 0, 0, 1, 0, 2, ['GRAND', 'TAKEOUT'], []],
+            ['item_3', 'cat_bread', 'Cheese Naan', 'チーズナン', 'Freshly baked naan stuffed with melted mozzarella cheese.', 'とろ〜り溶け出すたっぷりチーズの本格ナン。', 550, '/uploads/1793235169-18d888af1f82b668.webp', 0, 1, 1, 0, 1, 0, 1, ['LUNCH', 'TAKEOUT', 'GRAND'], ['乳', '小麦']],
+            ['item_4', 'cat_bread', 'Garlic Naan', 'ガーリックナン', 'Crispy naan topped with fresh chopped garlic and herbs.', '香ばしいガーリックをトッピングした風味豊かなナン。', 400, '/uploads/1793235205-bd02e307eb24c66f.webp', 0, 0, 1, 1, 1, 0, 2, ['GRAND', 'TAKEOUT'], ['小麦']],
+            ['item_5', 'cat_lunch_set', 'Lunch Set A', 'ランチセット A', 'Choice of curry, plain naan or rice, and mini salad.', 'お好みのカレー1種、プレーンナンまたはライス、ミニサラダ付き。', 950, '/uploads/1793237909-e9299426f5e7f773.webp', 1, 1, 0, 0, 1, 0, 1, ['LUNCH'], ['乳', '小麦']],
+            ['item_6', 'cat_lunch_set', 'Lunch Set B (Cheese Naan)', 'チーズナンランチセット', 'Choice of curry, cheese naan, and mini salad.', 'お好みのカレー、チーズナン、ミニサラダがセットになった大満足ランチ。', 1150, '/uploads/1793237909-e9299426f5e7f773.webp', 1, 1, 0, 0, 1, 0, 2, ['LUNCH'], ['乳', '小麦']],
+            ['item_7', 'cat_curry', 'Chicken Tikka Curry', 'チキンティッカカレー', 'Tandoori chicken simmered in a fragrant masala gravy.', 'タンドール焼きチキンをスパイスソースで煮込んだ人気カレー。', 1250, null, 2, 1, 0, 0, 1, 0, 2, ['LUNCH', 'GRAND', 'TAKEOUT'], ['乳']],
+            ['item_8', 'cat_curry', 'Chicken Curry', 'チキンカレー', 'Classic North Indian chicken curry with onion-tomato gravy.', 'オニオンとトマトの基本スパイスで仕上げた定番チキンカレー。', 1100, null, 2, 0, 0, 0, 1, 0, 3, ['LUNCH', 'GRAND', 'TAKEOUT'], []],
+            ['item_9', 'cat_curry', 'Chicken Spinach Curry', 'チキンほうれん草カレー', 'Tender chicken with creamy spinach sauce.', 'ほうれん草のクリームソースで煮込んだやさしい味わい。', 1250, null, 1, 0, 0, 0, 1, 0, 4, ['GRAND', 'TAKEOUT'], ['乳']],
+            ['item_10', 'cat_mutton', 'Mutton Curry', 'マトンカレー', 'Slow-cooked bone-in mutton in traditional spices.', '骨付きマトンをじっくり煮込んだ本格カレー。', 1400, null, 3, 1, 0, 0, 1, 0, 1, ['GRAND', 'LUNCH', 'TAKEOUT'], []],
+            ['item_11', 'cat_seafood', 'Prawn Curry', '海老カレー', 'Juicy prawns in a lightly spiced coconut-tomato sauce.', 'トマトとココナッツの香りが広がる海老カレー。', 1450, null, 2, 1, 0, 0, 1, 0, 1, ['GRAND', 'TAKEOUT'], []],
+            ['item_12', 'cat_seafood', 'Fish Curry', 'フィッシュカレー', 'Seasonal fish simmered in South Indian style spices.', 'スパイス香る南インド風フィッシュカレー。', 1350, null, 2, 0, 0, 0, 1, 0, 2, ['GRAND', 'TAKEOUT'], []],
+            ['item_13', 'cat_veg', 'Palak Paneer', 'パラックパニール', 'Spinach curry with homemade paneer cheese.', 'ほうれん草と自家製パニールの定番ベジカレー。', 1050, null, 1, 1, 1, 0, 1, 0, 1, ['LUNCH', 'GRAND', 'TAKEOUT'], ['乳']],
+            ['item_14', 'cat_veg', 'Dal Tadka', 'ダルタドカ', 'Yellow lentils tempered with cumin and garlic.', 'クミンとガーリックで香り高いイエローレンティル。', 850, null, 1, 0, 1, 1, 1, 1, 2, ['LUNCH', 'GRAND', 'TAKEOUT'], []],
+            ['item_15', 'cat_veg', 'Chana Masala', 'チャナマサラ', 'Chickpeas cooked in tangy tomato masala.', 'ひよこ豆のトマトマサラ煮込み。', 950, null, 2, 0, 1, 1, 1, 1, 3, ['GRAND', 'TAKEOUT'], []],
+            ['item_16', 'cat_veg', 'Vegetable Curry', '野菜カレー', 'Seasonal mixed vegetables in mild spice gravy.', '旬野菜たっぷりのマイルドなカレー。', 950, null, 1, 0, 1, 1, 1, 0, 4, ['LUNCH', 'GRAND', 'TAKEOUT'], []],
+            ['item_17', 'cat_bread', 'Plain Naan', 'プレーンナン', 'Soft tandoor-baked plain naan.', 'タンドール窯で焼き上げる定番ナン。', 300, null, 0, 0, 1, 1, 1, 0, 3, ['LUNCH', 'GRAND', 'TAKEOUT'], ['小麦']],
+            ['item_18', 'cat_bread', 'Butter Naan', 'バターナン', 'Naan brushed with melted butter.', 'バターを塗った香ばしいナン。', 350, null, 0, 0, 1, 0, 1, 0, 4, ['GRAND', 'TAKEOUT'], ['乳', '小麦']],
+            ['item_19', 'cat_bread', 'Honey Cheese Naan', 'はちみつチーズナン', 'Cheese naan finished with sweet honey.', 'チーズナンにはちみつをかけた人気メニュー。', 600, null, 0, 1, 1, 0, 1, 0, 5, ['GRAND', 'TAKEOUT'], ['乳', '小麦']],
+            ['item_20', 'cat_bread', 'Basmati Rice', 'バスマティライス', 'Fragrant steamed basmati rice.', '香り高いバスマティ米のライス。', 350, null, 0, 0, 1, 1, 1, 1, 6, ['LUNCH', 'GRAND', 'TAKEOUT'], []],
+            ['item_21', 'cat_tandoori', 'Tandoori Chicken (2pc)', 'タンドリーチキン（2本）', 'Charcoal-grilled chicken marinated in yogurt spices.', 'ヨーグルトスパイスに漬けた炭火タンドール焼き。', 900, null, 2, 1, 0, 0, 1, 0, 1, ['GRAND', 'TAKEOUT'], ['乳']],
+            ['item_22', 'cat_tandoori', 'Chicken Tikka (4pc)', 'チキンティッカ（4個）', 'Boneless chicken tikka from the tandoor.', '骨なしチキンをタンドールで香ばしく。', 950, null, 2, 1, 0, 0, 1, 0, 2, ['GRAND', 'TAKEOUT'], ['乳']],
+            ['item_23', 'cat_tandoori', 'Samosa (2pc)', 'サモサ（2個）', 'Crispy pastry filled with spiced potatoes.', 'スパイスポテト入りのサクサクサモサ。', 450, null, 1, 0, 1, 1, 1, 0, 3, ['GRAND', 'TAKEOUT'], ['小麦']],
+            ['item_24', 'cat_tandoori', 'Onion Bhaji', 'オニオンバジ', 'Crispy onion fritters with chickpea batter.', '玉ねぎのサクサク揚げ物。', 450, null, 1, 0, 1, 1, 1, 1, 4, ['GRAND', 'TAKEOUT'], []],
+            ['item_25', 'cat_dessert', 'Gulab Jamun (2pc)', 'グラーブジャムン（2個）', 'Milk dumplings soaked in rose syrup.', 'バラの香りシロップに漬けたミルク団子。', 450, null, 0, 0, 1, 0, 1, 0, 1, ['GRAND'], ['乳']],
+            ['item_26', 'cat_dessert', 'Kheer', 'キール', 'Creamy Indian rice pudding.', 'インド風ライスプリン。', 450, null, 0, 0, 1, 0, 1, 0, 2, ['GRAND'], ['乳']],
+            ['item_27', 'cat_drinks', 'Mango Lassi', 'マンゴーラッシー', 'Sweet yogurt drink with mango pulp.', 'マンゴーたっぷりのヨーグルトドリンク。', 450, null, 0, 1, 1, 0, 1, 0, 1, ['LUNCH', 'GRAND', 'TAKEOUT'], ['乳']],
+            ['item_28', 'cat_drinks', 'Sweet Lassi', 'スイートラッシー', 'Classic sweet yogurt lassi.', 'やさしい甘さの定番ラッシー。', 400, null, 0, 0, 1, 0, 1, 0, 2, ['LUNCH', 'GRAND', 'TAKEOUT'], ['乳']],
+            ['item_29', 'cat_drinks', 'Masala Chai', 'マサラチャイ', 'Spiced Indian milk tea.', 'スパイス香るインドミルクティー。', 350, null, 0, 0, 1, 0, 1, 0, 3, ['LUNCH', 'GRAND'], ['乳']],
+            ['item_30', 'cat_lunch_set', 'Vegetarian Lunch Set', 'ベジタリアンランチセット', 'Veg curry, naan or rice, salad and drink.', 'ベジカレー、ナンまたはライス、サラダ、ドリンク付き。', 1080, null, 1, 0, 1, 0, 1, 0, 3, ['LUNCH'], ['乳', '小麦']],
+            ['item_31', 'cat_curry', 'Chicken Biryani', 'チキンビリヤニ', 'Layered basmati rice with spiced chicken.', 'スパイス香るチキンとバスマティのビリヤニ。', 1300, null, 2, 1, 0, 0, 1, 0, 5, ['GRAND', 'TAKEOUT'], []],
+            ['item_32', 'cat_bread', 'Garlic Cheese Naan', 'ガーリックチーズナン', 'Cheese naan topped with garlic butter.', 'チーズナンにガーリックバターを合わせた贅沢ナン。', 650, null, 0, 1, 1, 0, 1, 0, 7, ['GRAND', 'TAKEOUT'], ['乳', '小麦']],
+            ['item_33', 'cat_dinner_set', 'Dinner Set A', 'ディナーセット A', 'Choice of curry, naan or rice, salad and drink.', 'お好みのカレー、ナンまたはライス、サラダ、ドリンク付きのディナーセット。', 1680, null, 2, 1, 0, 0, 1, 0, 1, ['GRAND'], ['乳', '小麦']],
+            ['item_34', 'cat_dinner_set', 'Dinner Set B (Tandoori)', 'タンドリーディナーセット', 'Tandoori chicken, curry, naan, salad and drink.', 'タンドリーチキン、カレー、ナン、サラダ、ドリンクの贅沢セット。', 1980, null, 2, 1, 0, 0, 1, 0, 2, ['GRAND'], ['乳', '小麦']],
+            ['item_35', 'cat_dinner_set', 'Vegetarian Dinner Set', 'ベジタリアンディナーセット', 'Veg curry, naan or rice, salad and drink.', 'ベジカレー、ナンまたはライス、サラダ、ドリンク付き。', 1580, null, 1, 0, 1, 0, 1, 0, 3, ['GRAND'], ['乳', '小麦']],
+        ];
+
+        $inserted = 0;
+        foreach ($samples as $s) {
+            $ok = $itemIns->execute([
+                $s[0], $s[1], $s[2], $s[3], $s[4], $s[5],
+                $s[6], $s[7], $s[8], $s[9], $s[10], $s[11],
+                $s[12], $s[13], $s[14],
+                json_encode($s[15]), json_encode($s[16], JSON_UNESCAPED_UNICODE),
+                $now, $now
+            ]);
+            if ($ok && $itemIns->rowCount() > 0) $inserted++;
+        }
+        if ($inserted > 0) $seeded['menu_items_added'] = $inserted;
     } catch (Exception $e) {}
 
     // 7. Carousel Slides
@@ -376,7 +492,7 @@ function ensureDefaultDatabaseData(PDO $pdo): array {
                     '本場インドのスパイス30種が織りなす極上カレー：熊谷で味わう香り高い本格インド料理の秘密',
                     "## スパイスは「味付け」ではなく「料理の魂」\n\n本格インド料理におけるスパイスは、単に辛さを加える調味料ではありません。何百年ものアーユルヴェーダ（伝統医学）の知恵に基づき、**食材の旨味を引き出し、身体を内側から整える薬効**を併せ持つ自然の恵みです。\n\nKalpna（カルプナ）熊谷店では、インド各地の特産地から厳選直輸入した**30種類以上の高品質スパイス**を使用。シェフが毎朝その日の気温・湿度に合わせて調合し、挽きたてのフレッシュな状態で調理しています。\n\n### 代表的なキー・スパイスとその特徴\n\n1. **ターメリック（ウコン / Turmeric）**\n   鮮やかな黄金色のベース。ポリフェノールの一種クルクミンを豊富に含み、抗酸化作用や肝機能サポートで知られます。\n2. **クミン（Cumin / ジーラ）**\n   カレー特有の香ばしい芳香を放つ主役。消化促進や食欲増進をサポートします。\n3. **カルダモン（Cardamom）**\n   「スパイスの女王」と称される爽やかで高貴な甘い香り。食後の胃もたれを予防し、リフレッシュ効果をもたらします。\n4. **コリアンダー（Coriander / ダニア）**\n   柑橘系に似た爽やかな香り。複数のスパイス同士の個性をまとめ上げるバランサーです。\n5. **クローブ（Clove）＆ シナモン（Cinnamon）**\n   体を芯から温め、深いコクと甘やかな余韻をカレーに与えます。\n\n> **シェフのひとこと：**\n> 「市販のカレールーとは異なり、小麦粉や過剰な油分に頼らず、玉ねぎやトマト、そしてスパイスの自然なとろみだけで仕上げています。そのため、たっぷり食べても胃もたれせず、食後も身体がポカポカと軽やかです。」\n\n### 辛さはお子様向けマイルドから激辛まで自由自在\n\nKalpnaではスパイスの豊かな香りはそのままに、辛さレベルを甘口（Mild）から激辛（Very Hot）まで細かく調整可能です。スパイスの奥深い魅力をぜひご家族・ご友人とご体感ください。",
                     'インド直輸入の数十種類の厳選スパイスを毎朝調合。ターメリック、クミン、カルダモンなど、体に優しく豊かな香りを引き出すKalpna独自のスパイス調合の秘密と健康効果をお届けします。',
-                    'https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&w=1200&q=80',
+                    '/uploads/1792268627977-04a9cb4d784139f9.jpg',
                     'スパイスのこだわり',
                     json_encode(['スパイス', '熊谷カレー', 'インド料理', '健康', 'ランチ']),
                     'Kalpna シェフ',
@@ -393,7 +509,7 @@ function ensureDefaultDatabaseData(PDO $pdo): array {
                     '特注の備長炭タンドール（土窯）で焼き上げる！外サク中モチの絶品ナン＆タンドリーチキン',
                     "## なぜ「備長炭タンドール」で焼くナンは格別に美味しいのか？\n\nインド料理の醍醐味である「焼きたてナン」と「ジューシーなタンドリーチキン」。その美味しさの決定打となるのが、厨房に鎮座する特注の**備長炭タンドール（土窯）**です。\n\n近年は扱いが容易なガス式や電気式のオーブンを採用する店舗も増えていますが、Kalpna（カルプナ）では本場インドの伝統製法を守り、**高温の備長炭土窯**での手焼き調理に徹底してこだわっています。\n\n### 炭火粘土窯ならではの3つの理由\n\n- **超高温・瞬間焼き上げ（約400℃以上）**\n  タンドール内の高温で一気に焼き上げるため、生地内部の水分を逃しません。外側はパリッと香ばしく、内側はふっくらモチモチの理想的な食感に仕上がります。\n- **遠赤外線効果で芯までふっくら**\n  備長炭から放射される強力な遠赤外線が肉や生地の芯まで素早く熱を伝え、旨味をギュッと閉じ込めます。\n- **芳醇な炭火の燻香**\n  タンドリーチキンから落ちた肉汁が備長炭で煙となり、肉全体を包み込むことで、家庭のオーブンでは決して出せない極上のスモーキーフレーバーが生まれます。\n\n### 一番人気の「とろ〜りチーズナン」\n\n厳選したナチュラルモッツァレラチーズをたっぷりと包み込んでタンドールで焼き上げる「チーズナン」は、当店の一番人気メニューです。熱々をちぎるとトロ〜リと伸びる濃厚チーズと、ほんのり甘いナンの生地がスパイスカレーと抜群の相性を誇ります。\n\nランチセットやテイクアウトでも大好評ですので、ぜひ焼きたての香ばしさをお楽しみください。",
                     'ガスや電気ではなく最高級の備長炭を使用した伝統の土窯（タンドール）。高温で一気に焼き上げるからこそ実現するモチモチのナンとジューシーなタンドリーチキンの魅力をご紹介。',
-                    'https://images.unsplash.com/photo-1589302168068-964664d93dc0?auto=format&fit=crop&w=1200&q=80',
+                    '/uploads/1792268627977-04a9cb4d784139f9.jpg',
                     'シェフのこだわり',
                     json_encode(['チーズナン', 'タンドール窯', '備長炭', '焼き立てナン', 'タンドリーチキン']),
                     'Kalpna シェフ',
@@ -1191,9 +1307,9 @@ function runDatabaseMigrations(PDO $pdo): array {
     try {
         // Restore broken Settings images in AppSecret (PAGE_SETTINGS_EXT) and Settings
         $pdo->exec("UPDATE `AppSecret` SET `publicKey` = REPLACE(`publicKey`, '/uploads/1792892694-9c0fbb49d9a78676.jpg', '/uploads/1792268800986-e39305dca03d0356.jpg') WHERE `id` = 'PAGE_SETTINGS_EXT'");
-        $pdo->exec("UPDATE `AppSecret` SET `publicKey` = REPLACE(`publicKey`, '/uploads/1793190780-e9bb908ae77c6b3d.webp', '/site-logo-01.webp') WHERE `id` = 'PAGE_SETTINGS_EXT'");
+        $pdo->exec("UPDATE `AppSecret` SET `publicKey` = REPLACE(`publicKey`, '/uploads/1793190780-e9bb908ae77c6b3d.webp', '/uploads/site-logo-01.webp') WHERE `id` = 'PAGE_SETTINGS_EXT'");
         $pdo->exec("UPDATE `Settings` SET `contactHeroImage` = '/uploads/1792268800986-e39305dca03d0356.jpg' WHERE `contactHeroImage` = '/uploads/1792892694-9c0fbb49d9a78676.jpg' OR `contactHeroImage` IS NULL OR `contactHeroImage` = ''");
-        $pdo->exec("UPDATE `Settings` SET `footerLogo` = '/site-logo-01.webp' WHERE `footerLogo` = '/uploads/1793190780-e9bb908ae77c6b3d.webp'");
+        $pdo->exec("UPDATE `Settings` SET `footerLogo` = '/uploads/site-logo-01.webp' WHERE `footerLogo` = '/uploads/1793190780-e9bb908ae77c6b3d.webp' OR `footerLogo` = '/site-logo-01.webp' OR `footerLogo` = '/adarsha-log.webp'");
     } catch (Exception $e) {}
 
     try {
@@ -1423,6 +1539,161 @@ try {
     runDatabaseMigrations($pdo);
 }
 
+// Keep expanding the dine-in catalog (INSERT IGNORE) even on already-seeded databases
+try {
+    ensureDefaultDatabaseData($pdo);
+} catch (Throwable $e) {}
+
+// -------------------------------------------------------------
+// Self-cleanup: one canonical food-image store = {project}/uploads/
+// Migrates legacy copies (kalpana-uploads, public/uploads, apps/*/uploads,
+// sibling DOCUMENT_ROOT/uploads) then removes empty duplicate folders.
+// -------------------------------------------------------------
+function adarshaCanonicalUploadsDir(): string {
+    return dirname(__DIR__) . '/uploads';
+}
+
+function adarshaMigrateUploadTree(string $srcDir, string $dstDir): void {
+    if (!is_dir($srcDir)) return;
+    $realSrc = @realpath($srcDir);
+    $realDst = @realpath($dstDir);
+    if ($realSrc && $realDst && $realSrc === $realDst) return;
+
+    if (!is_dir($dstDir)) {
+        @mkdir($dstDir, 0755, true);
+    }
+
+    $files = @scandir($srcDir);
+    if (!$files) return;
+    foreach ($files as $f) {
+        if ($f === '.' || $f === '..') continue;
+        $src = $srcDir . '/' . $f;
+        $dst = $dstDir . '/' . $f;
+        if (is_dir($src)) {
+            // Nested upload folders (rare) — flatten images only
+            adarshaMigrateUploadTree($src, $dstDir);
+            @rmdir($src);
+            continue;
+        }
+        if (!is_file($src)) continue;
+        if (!preg_match('/\.(jpe?g|png|gif|webp|svg|ico)$/i', $f)) {
+            // Drop leftover junk (.php, .htaccess duplicates) from legacy dirs
+            if (strcasecmp($f, '.htaccess') !== 0) {
+                @unlink($src);
+            }
+            continue;
+        }
+        if (!file_exists($dst)) {
+            @copy($src, $dst);
+        }
+        @unlink($src);
+    }
+
+    $leftover = @scandir($srcDir);
+    if (is_array($leftover)) {
+        $leftover = array_values(array_filter($leftover, static fn($n) => $n !== '.' && $n !== '..' && $n !== '.DS_Store'));
+        if (count($leftover) === 0 || (count($leftover) === 1 && strcasecmp($leftover[0], '.htaccess') === 0)) {
+            foreach ($leftover as $n) {
+                @unlink($srcDir . '/' . $n);
+            }
+            @rmdir($srcDir);
+        }
+    }
+}
+
+function cleanupLegacyDuplicateLocations(): void {
+    $uploadsDir = adarshaCanonicalUploadsDir();
+    if (!is_dir($uploadsDir)) {
+        @mkdir($uploadsDir, 0755, true);
+    }
+
+    $projectRoot = dirname(__DIR__);
+    $candidates = [
+        dirname($projectRoot) . '/kalpana-uploads',
+        $projectRoot . '/kalpana-uploads',
+        $projectRoot . '/public/uploads',
+        $projectRoot . '/apps/web/public/uploads',
+        $projectRoot . '/apps/api/uploads',
+        $projectRoot . '/apps/api/public/uploads',
+        $projectRoot . '/api/uploads',
+    ];
+
+    $docRoot = isset($_SERVER['DOCUMENT_ROOT']) ? rtrim((string) $_SERVER['DOCUMENT_ROOT'], '/') : '';
+    if ($docRoot !== '') {
+        $candidates[] = $docRoot . '/uploads';
+        $candidates[] = dirname($docRoot) . '/uploads';
+        $candidates[] = dirname($docRoot) . '/kalpana-uploads';
+        $candidates[] = $docRoot . '/public/uploads';
+        $candidates[] = $docRoot . '/apps/web/public/uploads';
+        $candidates[] = $docRoot . '/apps/api/uploads';
+    }
+
+    foreach ($candidates as $dir) {
+        adarshaMigrateUploadTree($dir, $uploadsDir);
+    }
+
+    // Brand / site logos that used to live at project root or apps/web/public
+    $brandFiles = [
+        'adarsha-log.webp',
+        'site-logo-01.webp',
+        'logo-white-01.png.webp',
+        'new-logo.webp',
+        'web-logo-01-01.png.webp',
+    ];
+    $brandDirs = [
+        $projectRoot,
+        $projectRoot . '/apps/web/public',
+        $projectRoot . '/apps/web/dist',
+        $projectRoot . '/public_html',
+    ];
+    if ($docRoot !== '') {
+        $brandDirs[] = $docRoot;
+        $brandDirs[] = $docRoot . '/apps/web/public';
+    }
+    foreach ($brandDirs as $dir) {
+        $realDir = @realpath($dir);
+        $realUploads = @realpath($uploadsDir);
+        if ($realDir && $realUploads && $realDir === $realUploads) {
+            continue;
+        }
+        foreach ($brandFiles as $name) {
+            $src = $dir . '/' . $name;
+            $dst = $uploadsDir . '/' . $name;
+            if (!is_file($src)) {
+                continue;
+            }
+            if (!file_exists($dst)) {
+                @copy($src, $dst);
+            }
+            @unlink($src);
+        }
+    }
+
+    // Nested public_html tree left on Hostinger (not the live document root)
+    $nestedPub = $projectRoot . '/public_html';
+    if (is_dir($nestedPub) && realpath($nestedPub) !== realpath($projectRoot)) {
+        $nestedUploads = $nestedPub . '/uploads';
+        if (is_dir($nestedUploads)) {
+            adarshaMigrateUploadTree($nestedUploads, $uploadsDir);
+        }
+        try {
+            $it = new RecursiveDirectoryIterator($nestedPub, RecursiveDirectoryIterator::SKIP_DOTS);
+            $files = new RecursiveIteratorIterator($it, RecursiveIteratorIterator::CHILD_FIRST);
+            foreach ($files as $file) {
+                if ($file->isDir()) {
+                    @rmdir($file->getRealPath());
+                } else {
+                    @unlink($file->getRealPath());
+                }
+            }
+            @rmdir($nestedPub);
+        } catch (Exception $e) {
+            // Ignore if permissions prevent full removal
+        }
+    }
+}
+cleanupLegacyDuplicateLocations();
+
 // 3. Routing
 $requestUri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'];
@@ -1442,27 +1713,20 @@ if (($pos = strpos($path, '/api/v1')) !== false) {
 if (empty($subPath)) $subPath = '/';
 
 // -------------------------------------------------------------
-// Fallback handler for /uploads/:file (survives Git deploy resets)
+// Image serve: /uploads/:file and legacy root brand logos
 // -------------------------------------------------------------
-if ($method === 'GET' && preg_match('#^/uploads/([a-zA-Z0-9_.-]+)$#', $subPath, $uploadMatches)) {
+$brandLogoPattern = 'adarsha-log\.webp|site-logo-01\.webp|logo-white-01\.png\.webp|new-logo\.webp|web-logo-01-01\.png\.webp';
+if (
+    $method === 'GET'
+    && (
+        preg_match('#^/uploads/([a-zA-Z0-9_.-]+)$#', $subPath, $uploadMatches)
+        || preg_match('#^/(' . $brandLogoPattern . ')$#i', $subPath, $uploadMatches)
+    )
+) {
     $reqFile = basename($uploadMatches[1]);
     $primaryPath = dirname(__DIR__) . '/uploads/' . $reqFile;
-    $rootPath = dirname(__DIR__) . '/../uploads/' . $reqFile;
-    $backupPath = dirname(__DIR__, 2) . '/kalpana-uploads/' . $reqFile;
 
-    $servePath = null;
-    if (is_file($primaryPath)) {
-        $servePath = $primaryPath;
-    } elseif (is_file($rootPath)) {
-        $servePath = $rootPath;
-    } elseif (is_file($backupPath)) {
-        // Restore into public_html/uploads/ so Apache serves future requests directly
-        if (!is_dir(dirname($primaryPath))) {
-            @mkdir(dirname($primaryPath), 0755, true);
-        }
-        @copy($backupPath, $primaryPath);
-        $servePath = $backupPath;
-    }
+    $servePath = is_file($primaryPath) ? $primaryPath : null;
 
     if ($servePath && is_file($servePath)) {
         $hdr = @file_get_contents($servePath, false, null, 0, 16) ?: '';
@@ -1478,19 +1742,6 @@ if ($method === 'GET' && preg_match('#^/uploads/([a-zA-Z0-9_.-]+)$#', $subPath, 
         header('Cache-Control: public, max-age=31536000, immutable');
         header('Content-Length: ' . filesize($servePath));
         readfile($servePath);
-        exit;
-    }
-
-    // Default fallback image if requested upload file is missing
-    $fallbackDefault = dirname(__DIR__) . '/uploads/1792268440842-f33c95588ddc7e21.webp';
-    if (!is_file($fallbackDefault)) {
-        $fallbackDefault = dirname(__DIR__) . '/uploads/bg-hero-img.webp';
-    }
-    if (is_file($fallbackDefault)) {
-        header('Content-Type: image/webp');
-        header('Cache-Control: public, max-age=86400');
-        header('Content-Length: ' . filesize($fallbackDefault));
-        readfile($fallbackDefault);
         exit;
     }
 
@@ -1516,6 +1767,517 @@ if (($method === 'GET' || $method === 'POST') && ($subPath === '/migrate' || $su
 }
 
 // -------------------------------------------------------------
+// Endpoint: GET /square/public-config (no secrets; Square lives on Node)
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/square/public-config' || $subPath === '/square/public-config/')) {
+    header('Cache-Control: public, max-age=60');
+    echo json_encode([
+        'configured' => false,
+        'environment' => null,
+        'applicationId' => null,
+        'note' => 'Square payment APIs run on the Node API when configured via SQUARE_* env vars.',
+    ]);
+    exit;
+}
+
+// Payment receiving devices registry (AppSecret). Pairing/sync require Node + Square.
+function loadPaymentDevicesPhp(PDO $pdo): array {
+    $ext = getAppSecretConfig($pdo, 'PAYMENT_RECEIVING_DEVICES', ['devices' => []]);
+    return isset($ext['devices']) && is_array($ext['devices']) ? array_values($ext['devices']) : [];
+}
+function savePaymentDevicesPhp(PDO $pdo, array $devices): void {
+    saveAppSecretConfig($pdo, 'PAYMENT_RECEIVING_DEVICES', ['devices' => array_values($devices)]);
+}
+
+function loadPaymentGatewaysPhp(PDO $pdo): array {
+    $ext = getAppSecretConfig($pdo, 'PAYMENT_GATEWAYS', ['gateways' => []]);
+    return isset($ext['gateways']) && is_array($ext['gateways']) ? array_values($ext['gateways']) : [];
+}
+function savePaymentGatewaysPhp(PDO $pdo, array $gateways): void {
+    saveAppSecretConfig($pdo, 'PAYMENT_GATEWAYS', ['gateways' => array_values($gateways)]);
+}
+function maskSecretPhp(string $value): string {
+    if ($value === '') return '';
+    if (strlen($value) <= 8) return '••••••••';
+    return substr($value, 0, 4) . '…' . substr($value, -4);
+}
+function paymentGatewayCatalogPhp(): array {
+    return [
+        ['kind' => 'SQUARE', 'labelJa' => 'Square', 'description' => 'Square 加盟店アカウントを手動接続', 'deviceProvider' => 'SQUARE_TERMINAL', 'defaultCapabilities' => ['CARD', 'IC', 'ID_QUICPAY'],
+            'fields' => [
+                ['key' => 'accessToken', 'labelJa' => 'Access Token', 'secret' => true, 'required' => true],
+                ['key' => 'locationId', 'labelJa' => 'Location ID', 'required' => true],
+                ['key' => 'merchantId', 'labelJa' => 'Merchant ID（任意）'],
+                ['key' => 'environment', 'labelJa' => '環境 (sandbox / production)'],
+                ['key' => 'notes', 'labelJa' => 'メモ'],
+            ]],
+        ['kind' => 'PAYPAY', 'labelJa' => 'PayPay for Business', 'description' => 'PayPay 加盟店を手動接続', 'deviceProvider' => 'QR_DISPLAY', 'defaultCapabilities' => ['PAYPAY'],
+            'fields' => [
+                ['key' => 'merchantId', 'labelJa' => '加盟店 ID / 店舗 ID', 'required' => true],
+                ['key' => 'apiKey', 'labelJa' => 'API Key（任意）', 'secret' => true],
+                ['key' => 'apiSecret', 'labelJa' => 'API Secret（任意）', 'secret' => true],
+                ['key' => 'shopId', 'labelJa' => 'Shop ID（任意）'],
+                ['key' => 'notes', 'labelJa' => 'メモ'],
+            ]],
+        ['kind' => 'RAKUTEN_PAY', 'labelJa' => '楽天ペイ', 'description' => '楽天ペイ加盟店を手動接続', 'deviceProvider' => 'QR_DISPLAY', 'defaultCapabilities' => ['RAKUTEN_PAY'],
+            'fields' => [
+                ['key' => 'merchantId', 'labelJa' => '加盟店番号', 'required' => true],
+                ['key' => 'shopId', 'labelJa' => '店舗番号'],
+                ['key' => 'apiKey', 'labelJa' => 'API Key（任意）', 'secret' => true],
+                ['key' => 'notes', 'labelJa' => 'メモ'],
+            ]],
+        ['kind' => 'D_PAY', 'labelJa' => 'd払い', 'description' => 'd払い加盟店を手動接続', 'deviceProvider' => 'QR_DISPLAY', 'defaultCapabilities' => ['D_PAY'],
+            'fields' => [
+                ['key' => 'merchantId', 'labelJa' => '加盟店 ID', 'required' => true],
+                ['key' => 'shopId', 'labelJa' => '店舗コード'],
+                ['key' => 'notes', 'labelJa' => 'メモ'],
+            ]],
+        ['kind' => 'AU_PAY', 'labelJa' => 'au PAY', 'description' => 'au PAY 加盟店を手動接続', 'deviceProvider' => 'QR_DISPLAY', 'defaultCapabilities' => ['AU_PAY'],
+            'fields' => [
+                ['key' => 'merchantId', 'labelJa' => '加盟店 ID', 'required' => true],
+                ['key' => 'shopId', 'labelJa' => '店舗 ID'],
+                ['key' => 'notes', 'labelJa' => 'メモ'],
+            ]],
+        ['kind' => 'MERPAY', 'labelJa' => 'メルペイ', 'description' => 'メルペイ加盟店を手動接続', 'deviceProvider' => 'QR_DISPLAY', 'defaultCapabilities' => ['MERPAY'],
+            'fields' => [
+                ['key' => 'merchantId', 'labelJa' => '加盟店 ID', 'required' => true],
+                ['key' => 'notes', 'labelJa' => 'メモ'],
+            ]],
+        ['kind' => 'WECHAT_PAY', 'labelJa' => 'WeChat Pay', 'description' => 'WeChat Pay 加盟店を手動接続', 'deviceProvider' => 'QR_DISPLAY', 'defaultCapabilities' => ['WECHAT_PAY'],
+            'fields' => [
+                ['key' => 'merchantId', 'labelJa' => 'Merchant ID (mch_id)', 'required' => true],
+                ['key' => 'apiKey', 'labelJa' => 'API Key', 'secret' => true],
+                ['key' => 'notes', 'labelJa' => 'メモ'],
+            ]],
+        ['kind' => 'GMO_PG', 'labelJa' => 'GMOペイメントゲートウェイ', 'description' => 'GMO-PG を手動接続', 'deviceProvider' => 'CAT_TERMINAL', 'defaultCapabilities' => ['CARD', 'IC', 'ID_QUICPAY', 'PAYPAY', 'RAKUTEN_PAY', 'AU_PAY', 'D_PAY'],
+            'fields' => [
+                ['key' => 'shopId', 'labelJa' => 'Shop ID', 'required' => true],
+                ['key' => 'apiKey', 'labelJa' => 'Shop Pass', 'secret' => true, 'required' => true],
+                ['key' => 'merchantId', 'labelJa' => 'Site ID（任意）'],
+                ['key' => 'notes', 'labelJa' => 'メモ'],
+            ]],
+        ['kind' => 'CAT_MULT', 'labelJa' => 'CAT / マルチ決済端末', 'description' => 'CAT 加盟店情報を手動接続', 'deviceProvider' => 'CAT_TERMINAL', 'defaultCapabilities' => ['CARD', 'IC', 'ID_QUICPAY', 'PAYPAY', 'RAKUTEN_PAY', 'AU_PAY', 'D_PAY', 'WECHAT_PAY'],
+            'fields' => [
+                ['key' => 'merchantId', 'labelJa' => '加盟店番号', 'required' => true],
+                ['key' => 'terminalId', 'labelJa' => '端末 TID'],
+                ['key' => 'notes', 'labelJa' => 'メモ'],
+            ]],
+        ['kind' => 'DIGITAL_WAGE', 'labelJa' => '賃金のデジタル払い（Digital Wage）', 'description' => 'PayPay給与受取など指定資金移動業者への手動接続', 'deviceProvider' => 'MANUAL', 'defaultCapabilities' => ['BANK_TRANSFER'],
+            'fields' => [
+                ['key' => 'wageProvider', 'labelJa' => '指定資金移動業者', 'required' => true, 'placeholder' => 'PayPay給与受取 / 楽天ペイ給与 / au PAY給与 / COIN+'],
+                ['key' => 'wageAccountId', 'labelJa' => '入金用口座番号 / アカウント ID', 'required' => true],
+                ['key' => 'merchantId', 'labelJa' => '事業所・会社コード（任意）'],
+                ['key' => 'notes', 'labelJa' => '労使協定・運用メモ'],
+            ]],
+        ['kind' => 'MANUAL', 'labelJa' => 'その他 / 手動ゲートウェイ', 'description' => '上記以外をメモ付きで手動登録', 'deviceProvider' => 'MANUAL', 'defaultCapabilities' => ['INVOICE', 'BANK_TRANSFER'],
+            'fields' => [
+                ['key' => 'merchantId', 'labelJa' => '加盟店 ID', 'required' => true],
+                ['key' => 'notes', 'labelJa' => '接続内容メモ', 'required' => true],
+            ]],
+    ];
+}
+function toAdminGatewayPhp(array $g): array {
+    $g['hasApiKey'] = !empty($g['apiKey']);
+    $g['hasApiSecret'] = !empty($g['apiSecret']);
+    $g['hasAccessToken'] = !empty($g['accessToken']);
+    $g['apiKey'] = maskSecretPhp((string)($g['apiKey'] ?? ''));
+    $g['apiSecret'] = maskSecretPhp((string)($g['apiSecret'] ?? ''));
+    $g['accessToken'] = maskSecretPhp((string)($g['accessToken'] ?? ''));
+    return $g;
+}
+function normalizeGatewayPhp(array $g): array {
+    $now = date('c');
+    return [
+        'id' => (string)($g['id'] ?? generateUuidV4()),
+        'kind' => (string)($g['kind'] ?? 'MANUAL'),
+        'label' => (string)($g['label'] ?? 'Gateway'),
+        'storeId' => !empty($g['storeId']) ? (string)$g['storeId'] : null,
+        'status' => in_array(($g['status'] ?? ''), ['CONNECTED', 'DISCONNECTED', 'PENDING'], true) ? $g['status'] : 'CONNECTED',
+        'merchantId' => trim((string)($g['merchantId'] ?? '')),
+        'shopId' => trim((string)($g['shopId'] ?? '')),
+        'locationId' => trim((string)($g['locationId'] ?? '')),
+        'terminalId' => trim((string)($g['terminalId'] ?? '')),
+        'wageAccountId' => trim((string)($g['wageAccountId'] ?? '')),
+        'wageProvider' => trim((string)($g['wageProvider'] ?? '')),
+        'environment' => (($g['environment'] ?? '') === 'sandbox') ? 'sandbox' : 'production',
+        'apiKey' => trim((string)($g['apiKey'] ?? '')),
+        'apiSecret' => trim((string)($g['apiSecret'] ?? '')),
+        'accessToken' => trim((string)($g['accessToken'] ?? '')),
+        'notes' => trim((string)($g['notes'] ?? '')),
+        'connectedAt' => $g['connectedAt'] ?? $now,
+        'createdAt' => (string)($g['createdAt'] ?? $now),
+        'updatedAt' => (string)($g['updatedAt'] ?? $now),
+    ];
+}
+
+if ($method === 'GET' && ($subPath === '/square/gateways' || $subPath === '/square/gateways/')) {
+    requireStaffUser($jwtSecret, $pdo);
+    $storeId = isset($_GET['storeId']) ? trim((string)$_GET['storeId']) : '';
+    $kind = isset($_GET['kind']) ? trim((string)$_GET['kind']) : '';
+    $connectedOnly = isset($_GET['connected']) && ($_GET['connected'] === '1' || $_GET['connected'] === 'true');
+    $gateways = array_map('normalizeGatewayPhp', loadPaymentGatewaysPhp($pdo));
+    if ($connectedOnly) $gateways = array_values(array_filter($gateways, fn($g) => ($g['status'] ?? '') === 'CONNECTED'));
+    if ($storeId !== '') {
+        $gateways = array_values(array_filter($gateways, fn($g) => empty($g['storeId']) || ($g['storeId'] ?? '') === $storeId));
+    }
+    if ($kind !== '') {
+        $gateways = array_values(array_filter($gateways, fn($g) => ($g['kind'] ?? '') === $kind));
+    }
+    header('Cache-Control: private, no-store');
+    echo json_encode([
+        'catalog' => paymentGatewayCatalogPhp(),
+        'gateways' => array_map('toAdminGatewayPhp', $gateways),
+        'squareEnvConfigured' => false,
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'POST' && ($subPath === '/square/gateways/connect' || $subPath === '/square/gateways/connect/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $kind = trim((string)($input['kind'] ?? ''));
+    $label = trim((string)($input['label'] ?? ''));
+    $catalog = paymentGatewayCatalogPhp();
+    $meta = null;
+    foreach ($catalog as $c) {
+        if (($c['kind'] ?? '') === $kind) { $meta = $c; break; }
+    }
+    if (!$meta || $label === '') {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'ゲートウェイ種別と表示名は必須です']]);
+        exit;
+    }
+    foreach ($meta['fields'] as $field) {
+        if (empty($field['required'])) continue;
+        $key = $field['key'];
+        if (!isset($input[$key]) || trim((string)$input[$key]) === '') {
+            http_response_code(400);
+            echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => ($field['labelJa'] ?? $key) . ' は必須です']]);
+            exit;
+        }
+    }
+    $now = date('c');
+    $gateway = normalizeGatewayPhp([
+        'id' => generateUuidV4(),
+        'kind' => $kind,
+        'label' => $label,
+        'storeId' => $input['storeId'] ?? null,
+        'status' => 'CONNECTED',
+        'merchantId' => $input['merchantId'] ?? '',
+        'shopId' => $input['shopId'] ?? '',
+        'locationId' => $input['locationId'] ?? '',
+        'terminalId' => $input['terminalId'] ?? '',
+        'wageAccountId' => $input['wageAccountId'] ?? '',
+        'wageProvider' => $input['wageProvider'] ?? '',
+        'environment' => $input['environment'] ?? 'production',
+        'apiKey' => $input['apiKey'] ?? '',
+        'apiSecret' => $input['apiSecret'] ?? '',
+        'accessToken' => $input['accessToken'] ?? '',
+        'notes' => $input['notes'] ?? '',
+        'connectedAt' => $now,
+        'createdAt' => $now,
+        'updatedAt' => $now,
+    ]);
+    $gateways = array_map('normalizeGatewayPhp', loadPaymentGatewaysPhp($pdo));
+    $gateways[] = $gateway;
+    savePaymentGatewaysPhp($pdo, $gateways);
+
+    $device = null;
+    $createDevice = !isset($input['createDevice']) || (bool)$input['createDevice'];
+    if ($createDevice) {
+        $devices = array_map('normalizePaymentDevicePhp', loadPaymentDevicesPhp($pdo));
+        $device = normalizePaymentDevicePhp([
+            'id' => generateUuidV4(),
+            'name' => trim((string)($input['deviceName'] ?? '')) !== '' ? trim((string)$input['deviceName']) : (($meta['labelJa'] ?? 'Gateway') . ' 端末'),
+            'provider' => $meta['deviceProvider'] ?? 'MANUAL',
+            'storeId' => $gateway['storeId'],
+            'isDefault' => false,
+            'isActive' => true,
+            'status' => (($meta['deviceProvider'] ?? '') === 'SQUARE_TERMINAL') ? 'UNPAIRED' : 'READY',
+            'capabilities' => $meta['defaultCapabilities'] ?? ['CARD'],
+            'merchantId' => $gateway['merchantId'] !== '' ? $gateway['merchantId'] : ($gateway['shopId'] !== '' ? $gateway['shopId'] : null),
+            'terminalSerial' => $gateway['terminalId'] !== '' ? $gateway['terminalId'] : null,
+            'notes' => $gateway['notes'] !== '' ? $gateway['notes'] : ('Gateway:' . $gateway['id']),
+            'gatewayId' => $gateway['id'],
+            'createdAt' => $now,
+            'updatedAt' => $now,
+        ]);
+        $devices[] = $device;
+        savePaymentDevicesPhp($pdo, $devices);
+    }
+    http_response_code(201);
+    echo json_encode(['gateway' => toAdminGatewayPhp($gateway), 'device' => $device], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'PATCH' && preg_match('#^/square/gateways/([a-zA-Z0-9_-]+)/?$#', $subPath, $matches)) {
+    requireAdminUser($jwtSecret, $pdo);
+    $id = $matches[1];
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $gateways = array_map('normalizeGatewayPhp', loadPaymentGatewaysPhp($pdo));
+    $found = false;
+    foreach ($gateways as &$g) {
+        if (($g['id'] ?? '') !== $id) continue;
+        $found = true;
+        foreach (['label', 'merchantId', 'shopId', 'locationId', 'terminalId', 'wageAccountId', 'wageProvider', 'environment', 'notes', 'status', 'kind'] as $f) {
+            if (!array_key_exists($f, $input)) continue;
+            $g[$f] = is_string($input[$f]) ? trim($input[$f]) : $input[$f];
+        }
+        if (array_key_exists('storeId', $input)) {
+            $g['storeId'] = $input['storeId'] !== null && $input['storeId'] !== '' ? trim((string)$input['storeId']) : null;
+        }
+        foreach (['apiKey', 'apiSecret', 'accessToken'] as $sf) {
+            if (!array_key_exists($sf, $input)) continue;
+            $val = trim((string)$input[$sf]);
+            if ($val === '' || str_contains($val, '…') || str_contains($val, '•')) continue;
+            $g[$sf] = $val;
+        }
+        $g['updatedAt'] = date('c');
+        if (($g['status'] ?? '') === 'CONNECTED' && empty($g['connectedAt'])) $g['connectedAt'] = date('c');
+        $g = normalizeGatewayPhp($g);
+        $updated = $g;
+        break;
+    }
+    unset($g);
+    if (!$found) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => 'Payment gateway not found']]);
+        exit;
+    }
+    savePaymentGatewaysPhp($pdo, $gateways);
+    echo json_encode(toAdminGatewayPhp($updated), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'DELETE' && preg_match('#^/square/gateways/([a-zA-Z0-9_-]+)/?$#', $subPath, $matches)) {
+    requireAdminUser($jwtSecret, $pdo);
+    $id = $matches[1];
+    $gateways = loadPaymentGatewaysPhp($pdo);
+    $before = count($gateways);
+    $gateways = array_values(array_filter($gateways, fn($g) => ($g['id'] ?? '') !== $id));
+    if (count($gateways) === $before) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => 'Payment gateway not found']]);
+        exit;
+    }
+    savePaymentGatewaysPhp($pdo, $gateways);
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+function defaultCapabilitiesForProviderPhp(string $provider): array {
+    $map = [
+        'SQUARE_TERMINAL' => ['CARD', 'IC', 'ID_QUICPAY'],
+        'CAT_TERMINAL' => ['CARD', 'IC', 'ID_QUICPAY', 'PAYPAY', 'RAKUTEN_PAY', 'D_PAY', 'AU_PAY', 'WECHAT_PAY'],
+        'QR_DISPLAY' => ['PAYPAY', 'RAKUTEN_PAY', 'D_PAY', 'AU_PAY', 'MERPAY', 'WECHAT_PAY'],
+        'CASH_DRAWER' => ['CASH'],
+        'MANUAL' => ['INVOICE', 'BANK_TRANSFER', 'CASH'],
+    ];
+    return $map[$provider] ?? ['CARD'];
+}
+
+function normalizePaymentDevicePhp(array $d): array {
+    $provider = (string)($d['provider'] ?? 'SQUARE_TERMINAL');
+    $allowed = ['SQUARE_TERMINAL', 'CAT_TERMINAL', 'QR_DISPLAY', 'CASH_DRAWER', 'MANUAL'];
+    if (!in_array($provider, $allowed, true)) $provider = 'SQUARE_TERMINAL';
+    $caps = $d['capabilities'] ?? null;
+    if (!is_array($caps) || count($caps) === 0) $caps = defaultCapabilitiesForProviderPhp($provider);
+    $now = date('c');
+    return [
+        'id' => (string)($d['id'] ?? generateUuidV4()),
+        'name' => (string)($d['name'] ?? 'Device'),
+        'provider' => $provider,
+        'squareDeviceId' => (string)($d['squareDeviceId'] ?? ($d['deviceId'] ?? '')),
+        'model' => $d['model'] ?? null,
+        'storeId' => !empty($d['storeId']) ? (string)$d['storeId'] : null,
+        'isDefault' => !empty($d['isDefault']),
+        'isActive' => !isset($d['isActive']) || (bool)$d['isActive'],
+        'status' => (string)($d['status'] ?? ($provider === 'SQUARE_TERMINAL' ? 'UNPAIRED' : 'READY')),
+        'pairingCode' => $d['pairingCode'] ?? null,
+        'pairingExpiresAt' => $d['pairingExpiresAt'] ?? null,
+        'squareDeviceCodeId' => $d['squareDeviceCodeId'] ?? null,
+        'pairedAt' => $d['pairedAt'] ?? null,
+        'lastSyncedAt' => $d['lastSyncedAt'] ?? null,
+        'capabilities' => array_values(array_map('strval', $caps)),
+        'terminalSerial' => isset($d['terminalSerial']) && $d['terminalSerial'] !== '' ? (string)$d['terminalSerial'] : null,
+        'merchantId' => isset($d['merchantId']) && $d['merchantId'] !== '' ? (string)$d['merchantId'] : null,
+        'qrPayload' => isset($d['qrPayload']) && $d['qrPayload'] !== '' ? (string)$d['qrPayload'] : null,
+        'notes' => isset($d['notes']) && $d['notes'] !== '' ? (string)$d['notes'] : null,
+        'gatewayId' => isset($d['gatewayId']) && $d['gatewayId'] !== '' ? (string)$d['gatewayId'] : null,
+        'createdAt' => (string)($d['createdAt'] ?? $now),
+        'updatedAt' => (string)($d['updatedAt'] ?? $now),
+    ];
+}
+
+if ($method === 'GET' && ($subPath === '/square/devices' || $subPath === '/square/devices/')) {
+    requireStaffUser($jwtSecret, $pdo);
+    $storeId = isset($_GET['storeId']) ? trim((string)$_GET['storeId']) : '';
+    $methodFilter = isset($_GET['method']) ? trim((string)$_GET['method']) : '';
+    $providerFilter = isset($_GET['provider']) ? trim((string)$_GET['provider']) : '';
+    $activeOnly = isset($_GET['active']) && ($_GET['active'] === '1' || $_GET['active'] === 'true');
+    $devices = array_map('normalizePaymentDevicePhp', loadPaymentDevicesPhp($pdo));
+    if ($activeOnly) $devices = array_values(array_filter($devices, fn($d) => ($d['isActive'] ?? true) !== false));
+    if ($storeId !== '') {
+        $devices = array_values(array_filter($devices, fn($d) => empty($d['storeId']) || ($d['storeId'] ?? '') === $storeId));
+    }
+    if ($providerFilter !== '') {
+        $devices = array_values(array_filter($devices, fn($d) => ($d['provider'] ?? '') === $providerFilter));
+    }
+    if ($methodFilter !== '') {
+        $devices = array_values(array_filter($devices, function ($d) use ($methodFilter) {
+            $caps = $d['capabilities'] ?? [];
+            return is_array($caps) && in_array($methodFilter, $caps, true);
+        }));
+    }
+    header('Cache-Control: private, no-store');
+    echo json_encode([
+        'configured' => false,
+        'environment' => null,
+        'locationId' => null,
+        'devices' => $devices,
+        'note' => 'Pairing and Square Terminal checkout require the Node API with SQUARE_* configured.',
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'POST' && ($subPath === '/square/devices' || $subPath === '/square/devices/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $name = trim((string)($input['name'] ?? ''));
+    if ($name === '') {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => '端末名は必須です']]);
+        exit;
+    }
+    $provider = trim((string)($input['provider'] ?? 'SQUARE_TERMINAL'));
+    $allowedProviders = ['SQUARE_TERMINAL', 'CAT_TERMINAL', 'QR_DISPLAY', 'CASH_DRAWER', 'MANUAL'];
+    if (!in_array($provider, $allowedProviders, true)) $provider = 'SQUARE_TERMINAL';
+    $devices = array_map('normalizePaymentDevicePhp', loadPaymentDevicesPhp($pdo));
+    $now = date('c');
+    $caps = isset($input['capabilities']) && is_array($input['capabilities']) && count($input['capabilities']) > 0
+        ? array_values(array_map('strval', $input['capabilities']))
+        : defaultCapabilitiesForProviderPhp($provider);
+    $device = normalizePaymentDevicePhp([
+        'id' => generateUuidV4(),
+        'squareDeviceId' => trim((string)($input['squareDeviceId'] ?? '')),
+        'name' => $name,
+        'provider' => $provider,
+        'model' => $input['model'] ?? null,
+        'storeId' => !empty($input['storeId']) ? trim((string)$input['storeId']) : null,
+        'isDefault' => !empty($input['isDefault']) || count($devices) === 0,
+        'isActive' => !isset($input['isActive']) || (bool)$input['isActive'],
+        'status' => !empty($input['status'])
+            ? (string)$input['status']
+            : ($provider === 'SQUARE_TERMINAL'
+                ? (!empty($input['squareDeviceId']) ? 'UNKNOWN' : 'UNPAIRED')
+                : 'READY'),
+        'capabilities' => $caps,
+        'terminalSerial' => $input['terminalSerial'] ?? null,
+        'merchantId' => $input['merchantId'] ?? null,
+        'qrPayload' => $input['qrPayload'] ?? null,
+        'notes' => $input['notes'] ?? null,
+        'gatewayId' => $input['gatewayId'] ?? null,
+        'pairingCode' => null,
+        'pairingExpiresAt' => null,
+        'squareDeviceCodeId' => null,
+        'pairedAt' => null,
+        'lastSyncedAt' => null,
+        'createdAt' => $now,
+        'updatedAt' => $now,
+    ]);
+    if ($device['isDefault']) {
+        foreach ($devices as &$d) {
+            if (($d['storeId'] ?? null) === $device['storeId'] && ($d['provider'] ?? '') === $device['provider']) {
+                $d['isDefault'] = false;
+            }
+        }
+        unset($d);
+    }
+    $devices[] = $device;
+    savePaymentDevicesPhp($pdo, $devices);
+    http_response_code(201);
+    echo json_encode($device, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'PATCH' && preg_match('#^/square/devices/([a-zA-Z0-9_-]+)/?$#', $subPath, $matches)) {
+    requireAdminUser($jwtSecret, $pdo);
+    $id = $matches[1];
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $devices = array_map('normalizePaymentDevicePhp', loadPaymentDevicesPhp($pdo));
+    $found = false;
+    foreach ($devices as &$d) {
+        if (($d['id'] ?? '') !== $id) continue;
+        $found = true;
+        foreach (['name', 'model', 'squareDeviceId', 'status', 'provider', 'terminalSerial', 'merchantId', 'qrPayload', 'notes', 'gatewayId'] as $f) {
+            if (array_key_exists($f, $input)) {
+                if ($input[$f] === null || $input[$f] === '') {
+                    $d[$f] = in_array($f, ['terminalSerial', 'merchantId', 'qrPayload', 'notes', 'model'], true) ? null : ($f === 'squareDeviceId' ? '' : $d[$f]);
+                } else {
+                    $d[$f] = is_string($input[$f]) ? trim($input[$f]) : $input[$f];
+                }
+            }
+        }
+        if (array_key_exists('capabilities', $input) && is_array($input['capabilities'])) {
+            $d['capabilities'] = array_values(array_map('strval', $input['capabilities']));
+        }
+        if (array_key_exists('storeId', $input)) $d['storeId'] = $input['storeId'] !== null && $input['storeId'] !== '' ? trim((string)$input['storeId']) : null;
+        if (array_key_exists('isActive', $input)) $d['isActive'] = (bool)$input['isActive'];
+        if (!empty($input['isDefault'])) {
+            $d['isDefault'] = true;
+            foreach ($devices as &$other) {
+                if (($other['id'] ?? '') === $id) continue;
+                if (($other['storeId'] ?? null) === ($d['storeId'] ?? null) && ($other['provider'] ?? '') === ($d['provider'] ?? '')) {
+                    $other['isDefault'] = false;
+                }
+            }
+            unset($other);
+        }
+        $d = normalizePaymentDevicePhp($d);
+        $d['updatedAt'] = date('c');
+        $updated = $d;
+        break;
+    }
+    unset($d);
+    if (!$found) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => 'Payment device not found']]);
+        exit;
+    }
+    savePaymentDevicesPhp($pdo, $devices);
+    echo json_encode($updated, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'DELETE' && preg_match('#^/square/devices/([a-zA-Z0-9_-]+)/?$#', $subPath, $matches)) {
+    requireAdminUser($jwtSecret, $pdo);
+    $id = $matches[1];
+    $devices = loadPaymentDevicesPhp($pdo);
+    $before = count($devices);
+    $devices = array_values(array_filter($devices, fn($d) => ($d['id'] ?? '') !== $id));
+    if (count($devices) === $before) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => 'Payment device not found']]);
+        exit;
+    }
+    savePaymentDevicesPhp($pdo, $devices);
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+if ($method === 'POST' && (preg_match('#^/square/devices/sync/?$#', $subPath) || preg_match('#^/square/devices/([a-zA-Z0-9_-]+)/pair/?$#', $subPath))) {
+    requireAdminUser($jwtSecret, $pdo);
+    http_response_code(503);
+    echo json_encode([
+        'error' => [
+            'code' => 'SQUARE_NODE_REQUIRED',
+            'message' => 'Pairing and Square sync require the Node API with SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID.',
+        ],
+    ]);
+    exit;
+}
+
+// -------------------------------------------------------------
 // Endpoint: GET /settings
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/settings' || $subPath === '/settings/')) {
@@ -1535,7 +2297,7 @@ if ($method === 'GET' && ($subPath === '/settings' || $subPath === '/settings/')
             }
         }
         // Cast booleans
-        $boolFields = ['orderingEnabled', 'pickupEnabled', 'deliveryEnabled', 'dineInEnabled', 'dineInRequireTableNumber', 'dineInAllowPayAtRegister', 'dineInAllowOnlinePay', 'pointsEnabled', 'stampCardEnabled', 'footerShowHours', 'footerShowSocials'];
+        $boolFields = ['orderingEnabled', 'pickupEnabled', 'deliveryEnabled', 'dineInEnabled', 'dineInRequireTableNumber', 'dineInAllowPayAtRegister', 'dineInAllowOnlinePay', 'pointsEnabled', 'stampCardEnabled', 'stampsEnabled', 'footerShowHours', 'footerShowSocials', 'maintenanceMode'];
         foreach ($boolFields as $bf) {
             if (isset($settings[$bf])) {
                 $settings[$bf] = (bool)$settings[$bf];
@@ -1555,6 +2317,29 @@ if ($method === 'GET' && ($subPath === '/settings' || $subPath === '/settings/')
             }
         }
     } catch (Exception $e) {}
+    if (isset($settings['maintenanceMode'])) {
+        $settings['maintenanceMode'] = (bool)$settings['maintenanceMode'];
+    }
+
+    // Printer configs are kitchen-only; strip for anonymous visitors.
+    $isStaffViewer = false;
+    $peekToken = $_COOKIE['adarsha_session'] ?? $_COOKIE['kalpana_session'] ?? null;
+    if (!$peekToken) $peekToken = getBearerOrCookie('adarsha_session');
+    if (!$peekToken) $peekToken = getBearerOrCookie('kalpana_session');
+    if ($peekToken) {
+        $peekPayload = verifyJwt($peekToken, $jwtSecret);
+        if ($peekPayload && !empty($peekPayload['sub']) && !isset($peekPayload['aud'])) {
+            $peekStmt = $pdo->prepare('SELECT role, isActive FROM User WHERE id = ? LIMIT 1');
+            $peekStmt->execute([$peekPayload['sub']]);
+            $peekUser = $peekStmt->fetch();
+            if ($peekUser && $peekUser['isActive'] && in_array($peekUser['role'], ['ADMIN', 'STAFF', 'KITCHEN'], true)) {
+                $isStaffViewer = true;
+            }
+        }
+    }
+    if (!$isStaffViewer) {
+        unset($settings['printerConfigs']);
+    }
 
     $defaultSettings = [
         'name' => 'Kalpna Indian Cuisine',
@@ -1593,7 +2378,13 @@ if ($method === 'GET' && ($subPath === '/settings' || $subPath === '/settings/')
         'pointsEnabled' => true,
         'stampCardEnabled' => true,
     ];
-    $settings = array_merge($defaultSettings, array_filter($settings, fn($v) => $v !== null && $v !== ''));
+    // Keep false / 0 — array_filter() without a callback would drop geolocationEnabled:false and
+    // the website would treat the missing key as "on".
+    $kept = [];
+    foreach ($settings as $k => $v) {
+        if ($v !== null && $v !== '') $kept[$k] = $v;
+    }
+    $settings = array_merge($defaultSettings, $kept);
     if (isset($settings['addressJa'])) {
         $settings['addressJa'] = str_replace('360-0831', '360-0023', (string)$settings['addressJa']);
     }
@@ -1601,8 +2392,149 @@ if ($method === 'GET' && ($subPath === '/settings' || $subPath === '/settings/')
         $settings['addressEn'] = str_replace('360-0831', '360-0023', (string)$settings['addressEn']);
     }
 
+    $staffToken = $_COOKIE['adarsha_session'] ?? $_COOKIE['kalpana_session'] ?? null;
+    $isStaff = false;
+    if ($staffToken) {
+        $payload = verifyJwt($staffToken, $jwtSecret);
+        if ($payload && !empty($payload['sub']) && !isset($payload['aud'])) {
+            try {
+                $staffStmt = $pdo->prepare('SELECT role, isActive FROM User WHERE id = ? LIMIT 1');
+                $staffStmt->execute([$payload['sub']]);
+                $staffRow = $staffStmt->fetch();
+                $isStaff = $staffRow && !empty($staffRow['isActive']) && in_array($staffRow['role'], ['ADMIN', 'STAFF', 'KITCHEN'], true);
+            } catch (Exception $e) {}
+        }
+    }
+    if (!$isStaff) {
+        unset($settings['printerConfigs']);
+    }
+    // Alias DB stampsEnabled → stampCardEnabled for admin + public UI.
+    $settings['stampCardEnabled'] = stampFlagOn($settings['stampsEnabled'] ?? $settings['stampCardEnabled'] ?? true);
+    header($isStaff ? 'Cache-Control: private, no-store' : 'Cache-Control: public, no-cache');
+    header('Vary: Cookie');
+
     echo json_encode($settings);
     exit;
+}
+
+/** Parse "11:00-15:00, 17:00-22:00" style ranges into [openMin, closeMin] pairs (Asia/Tokyo wall clock). */
+function adarshaParseHourWindows(?string $raw): array {
+    if ($raw === null || $raw === '') return [];
+    $cleaned = preg_replace('/[（(][^）)]*[）)]/u', ' ', $raw);
+    if (!is_string($cleaned)) $cleaned = $raw;
+    preg_match_all('/(\d{1,2}):(\d{2})\s*[-–~〜]\s*(\d{1,2}):(\d{2})/u', $cleaned, $m, PREG_SET_ORDER);
+    $windows = [];
+    foreach ($m as $hit) {
+        $open = ((int)$hit[1]) * 60 + (int)$hit[2];
+        $close = ((int)$hit[3]) * 60 + (int)$hit[4];
+        if ($open >= 0 && $open < $close && $close <= 24 * 60) {
+            $windows[] = [$open, $close];
+        }
+    }
+    return $windows;
+}
+
+function adarshaJstMinutesNow(): int {
+    try {
+        $tz = new DateTimeZone('Asia/Tokyo');
+        $now = new DateTimeImmutable('now', $tz);
+        return ((int)$now->format('G')) * 60 + (int)$now->format('i');
+    } catch (Throwable $e) {
+        return ((int)date('G')) * 60 + (int)date('i');
+    }
+}
+
+function adarshaInAnyWindow(int $mins, array $windows): bool {
+    foreach ($windows as $w) {
+        if ($mins >= $w[0] && $mins <= $w[1]) return true;
+    }
+    return false;
+}
+
+/**
+ * Current lunch/dinner serving windows from Settings (dine-in / order hours).
+ * @return array{lunch:bool,dinner:bool,enforce:bool}
+ */
+function adarshaMealPeriodNow(PDO $pdo): array {
+    $enforce = true;
+    $lunchRaw = '';
+    $dinnerRaw = '';
+    $dineInRaw = '';
+    try {
+        $row = $pdo->query('SELECT * FROM `Settings` WHERE id = \'default\' LIMIT 1')->fetch();
+        if ($row) {
+            if (array_key_exists('enforceOrderTimeWindow', $row)) {
+                $enforce = !in_array($row['enforceOrderTimeWindow'], [0, '0', false, 'false'], true);
+            }
+            $lunchRaw = trim((string)($row['lunchOrderHours'] ?? ''));
+            $dinnerRaw = trim((string)($row['dinnerOrderHours'] ?? ''));
+            $dineInRaw = trim((string)($row['dineInHours'] ?? $row['pickupHours'] ?? ''));
+        }
+    } catch (Throwable $e) {}
+
+    $lunchWindows = adarshaParseHourWindows($lunchRaw);
+    $dinnerWindows = adarshaParseHourWindows($dinnerRaw);
+    $all = adarshaParseHourWindows($dineInRaw !== '' ? $dineInRaw : '11:00-15:00, 17:00-22:30');
+    if (count($lunchWindows) === 0 && count($all) >= 1) $lunchWindows = [$all[0]];
+    if (count($dinnerWindows) === 0 && count($all) >= 2) $dinnerWindows = array_slice($all, 1);
+    if (count($lunchWindows) === 0) $lunchWindows = adarshaParseHourWindows('11:00-15:00');
+    if (count($dinnerWindows) === 0) $dinnerWindows = adarshaParseHourWindows('17:00-22:00');
+
+    $mins = adarshaJstMinutesNow();
+    return [
+        'lunch' => adarshaInAnyWindow($mins, $lunchWindows),
+        'dinner' => adarshaInAnyWindow($mins, $dinnerWindows),
+        'enforce' => $enforce,
+    ];
+}
+
+function adarshaIsLunchSetEntity(string $id, string $nameEn, string $nameJa, $menuTypes = null): bool {
+    $idL = strtolower($id);
+    $en = strtolower($nameEn);
+    $ja = $nameJa;
+    if (
+        strpos($idL, 'dinner_set') !== false ||
+        strpos($en, 'dinner set') !== false ||
+        mb_strpos($ja, 'ディナーセット') !== false
+    ) {
+        return false;
+    }
+    if (
+        strpos($idL, 'lunch_set') !== false ||
+        $idL === 'cat_lunch_drink' ||
+        strpos($en, 'lunch set') !== false ||
+        mb_strpos($ja, 'ランチセット') !== false
+    ) {
+        return true;
+    }
+    $types = is_array($menuTypes) ? $menuTypes : [];
+    if (
+        in_array('LUNCH', $types, true) &&
+        !in_array('GRAND', $types, true) &&
+        !in_array('TAKEOUT', $types, true) &&
+        (mb_strpos($ja, 'セット') !== false || preg_match('/\bset\b/i', $nameEn))
+    ) {
+        return true;
+    }
+    return false;
+}
+
+function adarshaIsDinnerSetEntity(string $id, string $nameEn, string $nameJa): bool {
+    $idL = strtolower($id);
+    $en = strtolower($nameEn);
+    $ja = $nameJa;
+    if (
+        strpos($idL, 'lunch_set') !== false ||
+        strpos($en, 'lunch set') !== false ||
+        mb_strpos($ja, 'ランチセット') !== false
+    ) {
+        return false;
+    }
+    return (
+        strpos($idL, 'dinner_set') !== false ||
+        strpos($en, 'dinner set') !== false ||
+        mb_strpos($ja, 'ディナーセット') !== false
+    );
 }
 
 // -------------------------------------------------------------
@@ -1614,11 +2546,12 @@ if ($method === 'GET' && ($subPath === '/menu/categories' || $subPath === '/menu
 
     $reqFulfillment = strtoupper(trim($_GET['fulfillment'] ?? ''));
     if ($reqFulfillment === 'DINE_IN') {
-        $categories = array_values(array_filter($categories, function ($cat) {
+        $meal = adarshaMealPeriodNow($pdo);
+        $categories = array_values(array_filter($categories, function ($cat) use ($meal) {
             $id = strtolower($cat['id'] ?? '');
             $en = strtolower($cat['nameEn'] ?? '');
             $ja = $cat['nameJa'] ?? '';
-            return !(
+            if (
                 $id === 'cat_takeout' ||
                 strpos($id, 'takeout') !== false ||
                 strpos($en, 'takeout') !== false ||
@@ -1626,7 +2559,16 @@ if ($method === 'GET' && ($subPath === '/menu/categories' || $subPath === '/menu
                 mb_strpos($ja, 'お持ち帰り') !== false ||
                 $id === 'cat_grand' ||
                 $id === 'cat_lunch'
-            );
+            ) {
+                return false;
+            }
+            if (!empty($meal['enforce'])) {
+                $isLunchSet = adarshaIsLunchSetEntity((string)($cat['id'] ?? ''), (string)($cat['nameEn'] ?? ''), (string)($cat['nameJa'] ?? ''));
+                $isDinnerSet = adarshaIsDinnerSetEntity((string)($cat['id'] ?? ''), (string)($cat['nameEn'] ?? ''), (string)($cat['nameJa'] ?? ''));
+                if ($isLunchSet && empty($meal['lunch'])) return false;
+                if ($isDinnerSet && empty($meal['dinner'])) return false;
+            }
+            return true;
         }));
     } elseif ($reqFulfillment === 'TAKEOUT' || $reqFulfillment === 'PICKUP') {
         $categories = array_values(array_filter($categories, function ($cat) {
@@ -1864,14 +2806,6 @@ if ($method === 'DELETE' && preg_match('#^/menu/categories/([a-zA-Z0-9_-]+)/?$#'
 // Endpoint: GET /menu/items
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/menu/items' || $subPath === '/menu/items/')) {
-    // Self-heal broken legacy .jpg or removed bg-hero-img menu item imageUrls if any remain
-    try {
-        $brokenImgCheck = (int)$pdo->query("SELECT COUNT(*) FROM MenuItem WHERE imageUrl LIKE '/uploads/17930%.jpg' OR imageUrl LIKE '/uploads/17931%.jpg' OR imageUrl LIKE '%bg-hero-img%'")->fetchColumn();
-        if ($brokenImgCheck > 0) {
-            runDatabaseMigrations($pdo);
-        }
-    } catch (Exception $e) {}
-
     // 1. Fetch items
     $items = [];
     try {
@@ -1945,7 +2879,8 @@ if ($method === 'GET' && ($subPath === '/menu/items' || $subPath === '/menu/item
 
     $reqFulfillment = strtoupper(trim($_GET['fulfillment'] ?? ''));
     if ($reqFulfillment === 'DINE_IN') {
-        $formatted = array_values(array_filter($formatted, function ($item) {
+        $meal = adarshaMealPeriodNow($pdo);
+        $formatted = array_values(array_filter($formatted, function ($item) use ($meal) {
             $catId = strtolower($item['categoryId'] ?? '');
             $catNameEn = strtolower($item['category']['nameEn'] ?? '');
             $catNameJa = $item['category']['nameJa'] ?? '';
@@ -1968,6 +2903,18 @@ if ($method === 'GET' && ($subPath === '/menu/items' || $subPath === '/menu/item
 
             if (!empty($types) && in_array('TAKEOUT', $types, true) && !in_array('GRAND', $types, true) && !in_array('LUNCH', $types, true)) {
                 return false;
+            }
+
+            if (!empty($meal['enforce'])) {
+                $entityId = (string)($item['categoryId'] ?? '');
+                $entityEn = (string)(($item['category']['nameEn'] ?? '') ?: ($item['nameEn'] ?? ''));
+                $entityJa = (string)(($item['category']['nameJa'] ?? '') ?: ($item['nameJa'] ?? ''));
+                $isLunchSet = adarshaIsLunchSetEntity($entityId, $entityEn, $entityJa, $types)
+                    || adarshaIsLunchSetEntity((string)($item['id'] ?? ''), (string)($item['nameEn'] ?? ''), (string)($item['nameJa'] ?? ''), $types);
+                $isDinnerSet = adarshaIsDinnerSetEntity($entityId, $entityEn, $entityJa)
+                    || adarshaIsDinnerSetEntity((string)($item['id'] ?? ''), (string)($item['nameEn'] ?? ''), (string)($item['nameJa'] ?? ''));
+                if ($isLunchSet && empty($meal['lunch'])) return false;
+                if ($isDinnerSet && empty($meal['dinner'])) return false;
             }
             return true;
         }));
@@ -2472,23 +3419,241 @@ if ($method === 'DELETE' && preg_match('#^/menu/option-groups/([a-zA-Z0-9_-]+)/?
 }
 
 // -------------------------------------------------------------
+// Endpoint: GET /stores  (+ nearest / geocode / mutate)
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/stores' || $subPath === '/stores/')) {
+    header('Cache-Control: public, no-cache');
+    echo json_encode(withStoreCoords(getStoredStoreLocations($pdo)), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'GET' && ($subPath === '/stores/nearest' || $subPath === '/stores/nearest/')) {
+    $lat = isset($_GET['lat']) ? (float)$_GET['lat'] : null;
+    $lng = isset($_GET['lng']) ? (float)$_GET['lng'] : null;
+    $limit = isset($_GET['limit']) ? max(1, min(50, (int)$_GET['limit'])) : 10;
+    $maxKm = isset($_GET['maxKm']) ? (float)$_GET['maxKm'] : null;
+    if ($lat === null || $lng === null || abs($lat) > 90 || abs($lng) > 180) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'lat and lng are required']]);
+        exit;
+    }
+    $ranked = [];
+    foreach (withStoreCoords(getStoredStoreLocations($pdo)) as $store) {
+        if (!storeHasCoords($store)) continue;
+        $distanceKm = round(haversineKm($lat, $lng, (float)$store['latitude'], (float)$store['longitude']), 2);
+        if ($maxKm !== null && $distanceKm > $maxKm) continue;
+        $store['distanceKm'] = $distanceKm;
+        $ranked[] = $store;
+    }
+    usort($ranked, fn($a, $b) => $a['distanceKm'] <=> $b['distanceKm']);
+    $ranked = array_slice($ranked, 0, $limit);
+    header('Cache-Control: no-store');
+    echo json_encode(['origin' => ['lat' => $lat, 'lng' => $lng], 'stores' => $ranked], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'GET' && ($subPath === '/stores/geocode' || $subPath === '/stores/geocode/')) {
+    $q = trim((string)($_GET['q'] ?? ''));
+    if (mb_strlen($q) < 3) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => '郵便番号または住所を入力してください']]);
+        exit;
+    }
+    try {
+        $hit = geocodeJapanAddress($q);
+    } catch (Throwable $e) {
+        http_response_code(503);
+        echo json_encode(['error' => ['code' => 'GEOCODER_UNAVAILABLE', 'message' => '住所検索サービスに接続できませんでした。時間をおいて再度お試しください。']]);
+        exit;
+    }
+    if (!$hit) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => '一致する住所が見つかりませんでした。']]);
+        exit;
+    }
+    header('Cache-Control: public, max-age=86400');
+    echo json_encode($hit, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'POST' && ($subPath === '/stores' || $subPath === '/stores/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $name = trim((string)($input['name'] ?? ''));
+    $address = trim((string)($input['address'] ?? ''));
+    if ($name === '' || $address === '') {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => '店舗名と住所は必須です']]);
+        exit;
+    }
+    $mapEmbedUrl = trim((string)($input['mapEmbedUrl'] ?? ''));
+    if ($mapEmbedUrl !== '' && !isSafeGoogleMapEmbed($mapEmbedUrl)) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'Use a Google Maps embed link']]);
+        exit;
+    }
+    if ($mapEmbedUrl === '') {
+        $mapEmbedUrl = 'https://maps.google.com/maps?q=' . rawurlencode($address . ' ' . $name) . '&t=&z=16&ie=UTF8&iwloc=&output=embed';
+    }
+    $hotpepperUrl = trim((string)($input['hotpepperUrl'] ?? ''));
+    $tabelogUrl = trim((string)($input['tabelogUrl'] ?? ''));
+    if (!isSafeReviewSiteUrl($hotpepperUrl, 'hotpepper')) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'Use an https://www.hotpepper.jp/... link']]);
+        exit;
+    }
+    if (!isSafeReviewSiteUrl($tabelogUrl, 'tabelog')) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'Use an https://tabelog.com/... link']]);
+        exit;
+    }
+    $stores = getStoredStoreLocations($pdo);
+    $newStore = [
+        'id' => trim((string)($input['id'] ?? '')) ?: ('store_' . time()),
+        'number' => str_pad((string)(count($stores) + 1), 2, '0', STR_PAD_LEFT),
+        'name' => $name,
+        'area' => trim((string)($input['area'] ?? '')),
+        'badge' => trim((string)($input['badge'] ?? '🍛 インド料理')),
+        'address' => $address,
+        'access' => trim((string)($input['access'] ?? '')),
+        'hours' => trim((string)($input['hours'] ?? 'ランチ 11:00–16:30 / ディナー 16:30–23:00')),
+        'holiday' => trim((string)($input['holiday'] ?? '年中無休')),
+        'phone' => trim((string)($input['phone'] ?? '')),
+        'rating' => isset($input['rating']) ? (float)$input['rating'] : 4.4,
+        'reviewCount' => isset($input['reviewCount']) ? (int)$input['reviewCount'] : 100,
+        'mapEmbedUrl' => $mapEmbedUrl,
+        'hotpepperUrl' => $hotpepperUrl,
+        'tabelogUrl' => $tabelogUrl,
+        'latitude' => (isset($input['latitude']) && $input['latitude'] !== '' && is_numeric($input['latitude'])) ? (float)$input['latitude'] : null,
+        'longitude' => (isset($input['longitude']) && $input['longitude'] !== '' && is_numeric($input['longitude'])) ? (float)$input['longitude'] : null,
+    ];
+    if (!storeHasCoords($newStore)) {
+        try {
+            $hit = geocodeJapanAddress($address);
+            if ($hit) {
+                $newStore['latitude'] = $hit['lat'];
+                $newStore['longitude'] = $hit['lng'];
+            }
+        } catch (Throwable $e) {}
+    }
+    $stores[] = $newStore;
+    saveStoredStoreLocations($pdo, $stores);
+    echo json_encode(withStoreCoords([$newStore])[0], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'PUT' && ($subPath === '/stores/reorder' || $subPath === '/stores/reorder/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $ids = $input['ids'] ?? null;
+    if (!is_array($ids)) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'ids array required']]);
+        exit;
+    }
+    $byId = [];
+    foreach (getStoredStoreLocations($pdo) as $store) {
+        if (!empty($store['id'])) $byId[$store['id']] = $store;
+    }
+    $reordered = [];
+    foreach ($ids as $i => $id) {
+        if (!isset($byId[$id])) continue;
+        $store = $byId[$id];
+        $store['number'] = str_pad((string)($i + 1), 2, '0', STR_PAD_LEFT);
+        $reordered[] = $store;
+        unset($byId[$id]);
+    }
+    foreach ($byId as $store) $reordered[] = $store;
+    saveStoredStoreLocations($pdo, $reordered);
+    echo json_encode(withStoreCoords($reordered), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'PUT' && preg_match('#^/stores/([a-zA-Z0-9_-]+)/?$#', $subPath, $matches)) {
+    requireAdminUser($jwtSecret, $pdo);
+    $storeId = $matches[1];
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $stores = getStoredStoreLocations($pdo);
+    $found = false;
+    foreach ($stores as $i => $store) {
+        if (($store['id'] ?? '') !== $storeId) continue;
+        $found = true;
+        foreach (['name', 'area', 'badge', 'address', 'access', 'hours', 'holiday', 'phone', 'mapEmbedUrl', 'hotpepperUrl', 'tabelogUrl'] as $field) {
+            if (array_key_exists($field, $input)) $stores[$i][$field] = is_string($input[$field]) ? trim($input[$field]) : $input[$field];
+        }
+        if (array_key_exists('rating', $input)) $stores[$i]['rating'] = (float)$input['rating'];
+        if (array_key_exists('reviewCount', $input)) $stores[$i]['reviewCount'] = (int)$input['reviewCount'];
+        if (array_key_exists('latitude', $input)) {
+            $stores[$i]['latitude'] = ($input['latitude'] === '' || $input['latitude'] === null) ? null : (float)$input['latitude'];
+        }
+        if (array_key_exists('longitude', $input)) {
+            $stores[$i]['longitude'] = ($input['longitude'] === '' || $input['longitude'] === null) ? null : (float)$input['longitude'];
+        }
+        if (!empty($stores[$i]['mapEmbedUrl']) && !isSafeGoogleMapEmbed($stores[$i]['mapEmbedUrl'])) {
+            http_response_code(400);
+            echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'Use a Google Maps embed link']]);
+            exit;
+        }
+        if (!isSafeReviewSiteUrl((string)($stores[$i]['hotpepperUrl'] ?? ''), 'hotpepper')) {
+            http_response_code(400);
+            echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'Use an https://www.hotpepper.jp/... link']]);
+            exit;
+        }
+        if (!isSafeReviewSiteUrl((string)($stores[$i]['tabelogUrl'] ?? ''), 'tabelog')) {
+            http_response_code(400);
+            echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'Use an https://tabelog.com/... link']]);
+            exit;
+        }
+        if (!storeHasCoords($stores[$i]) && !empty($stores[$i]['address'])) {
+            try {
+                $hit = geocodeJapanAddress((string)$stores[$i]['address']);
+                if ($hit) {
+                    $stores[$i]['latitude'] = $hit['lat'];
+                    $stores[$i]['longitude'] = $hit['lng'];
+                }
+            } catch (Throwable $e) {}
+        }
+        break;
+    }
+    if (!$found) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => 'Store not found']]);
+        exit;
+    }
+    saveStoredStoreLocations($pdo, $stores);
+    $updated = null;
+    foreach (withStoreCoords($stores) as $store) {
+        if (($store['id'] ?? '') === $storeId) { $updated = $store; break; }
+    }
+    echo json_encode($updated, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'DELETE' && preg_match('#^/stores/([a-zA-Z0-9_-]+)/?$#', $subPath, $matches)) {
+    requireAdminUser($jwtSecret, $pdo);
+    $storeId = $matches[1];
+    $stores = array_values(array_filter(getStoredStoreLocations($pdo), fn($s) => ($s['id'] ?? '') !== $storeId));
+    foreach ($stores as $i => $store) {
+        $stores[$i]['number'] = str_pad((string)($i + 1), 2, '0', STR_PAD_LEFT);
+    }
+    saveStoredStoreLocations($pdo, $stores);
+    echo json_encode(['success' => true, 'count' => count($stores)]);
+    exit;
+}
+
+// -------------------------------------------------------------
 // Endpoint: GET /carousels
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/carousels' || $subPath === '/carousels/')) {
     $showAll = isset($_GET['all']) && $_GET['all'] === 'true';
     $placement = isset($_GET['placement']) && $_GET['placement'] === 'CONTACT' ? 'CONTACT' : 'HOME';
 
-    // Self-heal any CarouselSlide rows with empty or removed bg-hero-img or stock interior imageUrl
-    try {
-        $emptyCheck = (int)$pdo->query("SELECT COUNT(*) FROM CarouselSlide WHERE imageUrl IS NULL OR imageUrl = '' OR imageUrl LIKE '%bg-hero-img%' OR imageUrl LIKE '%1517248135467%'")->fetchColumn();
-        if ($emptyCheck > 0) {
-            runDatabaseMigrations($pdo);
-        }
-    } catch (Exception $e) {}
-
     if ($showAll) {
+        requireAdminUser($jwtSecret, $pdo);
+        header('Cache-Control: private, no-store');
         $stmt = $pdo->query('SELECT * FROM CarouselSlide ORDER BY sortOrder ASC');
     } else {
+        header('Cache-Control: public, no-cache');
         $stmt = $pdo->prepare('SELECT * FROM CarouselSlide WHERE placement = ? AND isActive = 1 ORDER BY sortOrder ASC');
         $stmt->execute([$placement]);
     }
@@ -2496,14 +3661,8 @@ if ($method === 'GET' && ($subPath === '/carousels' || $subPath === '/carousels/
     $formatted = array_map(function ($s) {
         $s['isActive'] = (bool)$s['isActive'];
         $img = (string)($s['imageUrl'] ?? '');
-        if (($s['placement'] ?? 'HOME') === 'CONTACT') {
-            $s['imageUrl'] = '/uploads/1792268012355-415729a8b06aa65e.webp';
-        } elseif (strpos($img, 'hero-slide-1') !== false || strpos($img, '1793707743') !== false || strpos($img, '1791677310137') !== false || (int)($s['sortOrder'] ?? 0) === 0) {
-            $s['imageUrl'] = '/uploads/hero-slide-1-special-set-v2.webp';
-        } elseif (strpos($img, 'hero-slide-2') !== false || strpos($img, '1793707859') !== false || strpos($img, '1791677360469') !== false || (int)($s['sortOrder'] ?? 0) === 1) {
-            $s['imageUrl'] = '/uploads/hero-slide-2-garlic-naan-v2.webp';
-        } else {
-            $s['imageUrl'] = '/uploads/hero-slide-3-green-salad-v2.webp';
+        if (!isSafePageImage($img)) {
+            $s['imageUrl'] = '';
         }
         return $s;
     }, $slides);
@@ -2529,7 +3688,19 @@ if ($method === 'PUT' && preg_match('#^/carousels/([a-zA-Z0-9_-]+)/?$#', $subPat
             if ($f === 'isActive') {
                 $val = $val ? 1 : 0;
             } elseif ($f === 'sortOrder') {
-                $val = (int)$val;
+                $val = max(0, min(500, (int)$val));
+            } elseif ($f === 'imageUrl' && !isSafePageImage((string)$val)) {
+                http_response_code(400);
+                echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'Image must be an uploaded file, a site image, or an https URL']]);
+                exit;
+            } elseif ($f === 'placement' && $val !== 'HOME' && $val !== 'CONTACT') {
+                http_response_code(400);
+                echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'Placement must be HOME or CONTACT']]);
+                exit;
+            } elseif ($f === 'ctaLink' && $val !== '' && !preg_match('#^(https://|/)#', (string)$val)) {
+                http_response_code(400);
+                echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'Link must start with https:// or /']]);
+                exit;
             }
             $fields[] = "`{$f}` = ?";
             $params[] = $val;
@@ -2577,9 +3748,9 @@ if ($method === 'POST' && ($subPath === '/carousels' || $subPath === '/carousels
     $altEn = trim($input['altEn'] ?? '') ?: ($titleEn ?: $titleJa);
     $imageUrl = trim($input['imageUrl'] ?? '');
 
-    if (empty($imageUrl)) {
+    if (empty($imageUrl) || !isSafePageImage($imageUrl)) {
         http_response_code(400);
-        echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => 'Image URL is required']]);
+        echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => 'Image must be an uploaded file, a site image, or an https URL']]);
         exit;
     }
 
@@ -2655,15 +3826,6 @@ if ($method === 'POST' && ($subPath === '/upload' || $subPath === '/upload/')) {
         exit;
     }
 
-    // Also save a persistent backup copy outside the Git working tree so Git deployments never lose runtime uploads
-    $backupDir = dirname(__DIR__, 2) . '/kalpana-uploads';
-    if (!is_dir($backupDir)) {
-        @mkdir($backupDir, 0755, true);
-    }
-    if (is_dir($backupDir)) {
-        @copy($destination, $backupDir . '/' . $filename);
-    }
-
     http_response_code(201);
     echo json_encode(['imageUrl' => '/uploads/' . $filename]);
     exit;
@@ -2676,7 +3838,7 @@ if ($method === 'PUT' && ($subPath === '/settings' || $subPath === '/settings/')
     $user = requireAdminUser($jwtSecret, $pdo);
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
 
-    // Extended page settings saved to AppSecret
+    // Extended page settings saved to AppSecret (must stay in sync with the Node EXT_KEYS list)
     $extKeys = [
         'aboutStoryImage', 'aboutStoryWatermark', 'aboutStoryOriginTitleJa',
         'aboutStoryOriginTextJa', 'aboutStoryBadgeSubJa', 'aboutStoryBadgeTitleJa',
@@ -2684,6 +3846,16 @@ if ($method === 'PUT' && ($subPath === '/settings' || $subPath === '/settings/')
         'aboutStoryPillar2DescJa', 'aboutStoryPillar3TitleJa', 'aboutStoryPillar3DescJa',
         'aboutStoryPillar4TitleJa', 'aboutStoryPillar4DescJa', 'aboutStoryPillar5TitleJa',
         'aboutStoryPillar5DescJa',
+        'storeLocations',
+        'lunchOrderEnabled', 'lunchOrderHours', 'dinnerOrderEnabled', 'dinnerOrderHours',
+        'takeoutOrderHours', 'enforceOrderTimeWindow',
+        'geolocationEnabled', 'geolocationAutoSelect', 'geolocationMaxDistanceKm',
+        'printerConfigs',
+        'dineInEnabled', 'dineInHours', 'dineInLeadMinutes', 'dineInTaxRatePercent',
+        'dineInTableCount', 'dineInTablePrefix', 'dineInTableNames',
+        'dineInRequireTableNumber', 'dineInAllowPayAtRegister', 'dineInAllowOnlinePay', 'dineInNoteJa',
+        'cashierPaymentMethods',
+        'maintenanceMode', 'maintenanceMessageJa', 'maintenanceMessageEn',
     ];
     $hasExt = false;
     $extData = [];
@@ -2725,6 +3897,33 @@ if ($method === 'PUT' && ($subPath === '/settings' || $subPath === '/settings/')
     // Map stampCardEnabled to stampsEnabled
     if (isset($input['stampCardEnabled'])) {
         $input['stampsEnabled'] = $input['stampCardEnabled'];
+    }
+
+    // Turning the master switch on while every channel is off still hides the order buttons.
+    // Open pickup in that case so the website actually starts taking orders.
+    if (array_key_exists('orderingEnabled', $input) && $input['orderingEnabled']
+        && !array_key_exists('pickupEnabled', $input)
+        && !array_key_exists('deliveryEnabled', $input)
+        && !array_key_exists('dineInEnabled', $input)) {
+        $channelRow = $pdo->query('SELECT pickupEnabled, deliveryEnabled, pickupHours FROM Settings LIMIT 1')->fetch() ?: [];
+        $dineInOn = false;
+        try {
+            $dineStmt = $pdo->prepare('SELECT publicKey FROM AppSecret WHERE id = ?');
+            $dineStmt->execute(['PAGE_SETTINGS_EXT']);
+            $dineRow = $dineStmt->fetch();
+            if ($dineRow && !empty($dineRow['publicKey'])) {
+                $dineExt = json_decode($dineRow['publicKey'], true);
+                $dineInOn = is_array($dineExt) && !empty($dineExt['dineInEnabled']);
+            }
+        } catch (Exception $e) {}
+        $pickupOn = !empty($channelRow['pickupEnabled']);
+        $deliveryOn = !empty($channelRow['deliveryEnabled']);
+        if (!$pickupOn && !$deliveryOn && !$dineInOn) {
+            $input['pickupEnabled'] = true;
+            if (empty($channelRow['pickupHours'])) {
+                $input['pickupHours'] = '11:30-15:00, 17:00-22:00';
+            }
+        }
     }
 
     $updateCols = [];
@@ -2794,6 +3993,7 @@ if ($method === 'PUT' && ($subPath === '/settings' || $subPath === '/settings/')
             $settings[$bf] = (bool)$settings[$bf];
         }
     }
+    $settings['stampCardEnabled'] = stampFlagOn($settings['stampsEnabled'] ?? $settings['stampCardEnabled'] ?? true);
     echo json_encode($settings);
     exit;
 }
@@ -2953,7 +4153,10 @@ function computeOrderQuote(PDO $pdo, array $input, ?array $customer, array $sett
     } elseif (!empty($input['offerId'])) {
         $rawOfferIds = is_array($input['offerId']) ? $input['offerId'] : [$input['offerId']];
     }
-    $targetOfferIds = array_unique(array_filter($rawOfferIds));
+    $targetOfferIds = array_values(array_unique(array_filter($rawOfferIds)));
+    if (count($targetOfferIds) > 5) {
+        throw new Exception('クーポンは一度に5件まで併用できます。', 400);
+    }
 
     $appliedOffers = [];
     $currentSubtotalForDiscount = $subtotal;
@@ -2974,8 +4177,13 @@ function computeOrderQuote(PDO $pdo, array $input, ?array $customer, array $sett
             throw new Exception("特典「{$offer['titleJa']}」は¥" . number_format($minSub) . "以上のご注文でご利用いただけます。", 409);
         }
 
+        if (!empty($offer['oncePerCustomer']) && !$customer) {
+            throw new Exception('この特典は会員ログイン後にお一人様1回限りご利用いただけます。', 401);
+        }
+
         if (!empty($offer['oncePerCustomer']) && $customer) {
-            $checkUsed = $pdo->prepare("SELECT COUNT(*) FROM PickupOrder WHERE customerId = ? AND JSON_UNQUOTE(JSON_EXTRACT(offer, '$.id')) = ? AND status != 'CANCELLED'");
+            // Stacked offers store comma-joined ids; FIND_IN_SET matches each part.
+            $checkUsed = $pdo->prepare("SELECT COUNT(*) FROM PickupOrder WHERE customerId = ? AND offer IS NOT NULL AND FIND_IN_SET(?, JSON_UNQUOTE(JSON_EXTRACT(offer, '$.id'))) > 0 AND status != 'CANCELLED'");
             $checkUsed->execute([$customer['id'], $offer['id']]);
             if ((int)$checkUsed->fetchColumn() > 0) {
                 throw new Exception('この特典はすでにご利用済みです。', 409);
@@ -3102,6 +4310,24 @@ if ($method === 'GET' && ($subPath === '/orders/slots' || $subPath === '/orders/
     $orderingEnabled = $settings['orderingEnabled'] !== null ? (bool)$settings['orderingEnabled'] : true;
     $pickupEnabled = (bool)($settings['pickupEnabled'] ?? false);
     $deliveryEnabled = (bool)($settings['deliveryEnabled'] ?? false);
+    $dineInEnabled = false;
+    try {
+        $dineStmt = $pdo->prepare('SELECT publicKey FROM AppSecret WHERE id = ?');
+        $dineStmt->execute(['PAGE_SETTINGS_EXT']);
+        $dineRow = $dineStmt->fetch();
+        if ($dineRow && !empty($dineRow['publicKey'])) {
+            $dineExt = json_decode($dineRow['publicKey'], true);
+            if (is_array($dineExt) && array_key_exists('dineInEnabled', $dineExt)) {
+                $dineInEnabled = (bool)$dineExt['dineInEnabled'];
+            } elseif (isset($settings['dineInEnabled'])) {
+                $dineInEnabled = (bool)$settings['dineInEnabled'];
+            }
+        } elseif (isset($settings['dineInEnabled'])) {
+            $dineInEnabled = (bool)$settings['dineInEnabled'];
+        }
+    } catch (Exception $e) {
+        $dineInEnabled = isset($settings['dineInEnabled']) ? (bool)$settings['dineInEnabled'] : false;
+    }
     $deliveryFee = (int)($settings['deliveryFee'] ?? 0);
     $deliveryMinOrder = (int)($settings['deliveryMinOrder'] ?? 0);
     $deliveryAreas = !empty($settings['deliveryAreas'])
@@ -3113,7 +4339,7 @@ if ($method === 'GET' && ($subPath === '/orders/slots' || $subPath === '/orders/
 
     header('Cache-Control: no-store');
     echo json_encode([
-        'enabled' => $orderingEnabled && ($pickupEnabled || $deliveryEnabled),
+        'enabled' => $orderingEnabled && ($pickupEnabled || $deliveryEnabled || $dineInEnabled),
         'orderingEnabled' => $orderingEnabled,
         'note' => $orderingEnabled ? ($settings['pickupNoteJa'] ?? '') : 'ただいまオンラインでのご注文を停止しています。',
         'pausedUntil' => $settings['orderingPausedUntil'] ?? null,
@@ -3487,14 +4713,39 @@ if ($method === 'GET' && preg_match('#^/orders/track/([a-zA-Z0-9_-]+)/?$#', $sub
 if ($method === 'GET' && ($subPath === '/orders/table' || $subPath === '/orders/table/')) {
     $tableNum = trim((string)($_GET['table'] ?? ''));
     $tokensParam = trim((string)($_GET['tokens'] ?? ''));
-    $tokens = array_filter(array_map('trim', explode(',', $tokensParam)));
+    $tokens = array_values(array_filter(array_map('trim', explode(',', $tokensParam))));
 
     $orders = [];
     if (!empty($tokens)) {
+        // Possession of order tokens is required for guests; no table-wide dump.
         $placeholders = implode(',', array_fill(0, count($tokens), '?'));
         $stmt = $pdo->prepare("SELECT * FROM PickupOrder WHERE token IN ($placeholders) ORDER BY createdAt ASC");
-        $stmt->execute(array_values($tokens));
+        $stmt->execute($tokens);
         $orders = $stmt->fetchAll();
+    } elseif ($tableNum !== '') {
+        // Fresh QR scan (no orders yet): verified table guests get an empty bill, not 401.
+        $qrToken = getBearerOrCookie('kalpana_qr_session');
+        if (empty($qrToken) && !empty($_SERVER['HTTP_X_QR_SESSION'])) {
+            $qrToken = trim((string)$_SERVER['HTTP_X_QR_SESSION']);
+        }
+        $qrPayload = !empty($qrToken) ? verifyJwt($qrToken, $jwtSecret) : null;
+        $qrOk = is_array($qrPayload)
+            && (($qrPayload['typ'] ?? '') === 'qr_session')
+            && (string)($qrPayload['tableNumber'] ?? '') === $tableNum;
+
+        if ($qrOk) {
+            $orders = [];
+        } else {
+            // Table-number lookup is staff/kitchen only (exposes tokens).
+            requireKitchenUser($jwtSecret, $pdo);
+            $stmt = $pdo->prepare("SELECT * FROM PickupOrder WHERE (tableNumber = ? OR note LIKE ? OR customerName LIKE ?) AND status IN ('NEW', 'CONFIRMED', 'PREPARING', 'READY', 'ACCEPTED') AND createdAt >= DATE_SUB(NOW(), INTERVAL 8 HOUR) ORDER BY createdAt ASC");
+            $stmt->execute([$tableNum, "%[テーブル: {$tableNum}]%", "%テーブル {$tableNum}%"]);
+            $orders = $stmt->fetchAll();
+        }
+    } else {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'PARAMS_REQUIRED', 'message' => 'tokens or table is required']]);
+        exit;
     }
 
     $tokensAllCompleted = false;
@@ -3503,12 +4754,6 @@ if ($method === 'GET' && ($subPath === '/orders/table' || $subPath === '/orders/
             return in_array($o['status'], ['NEW', 'CONFIRMED', 'PREPARING', 'READY', 'ACCEPTED'], true);
         });
         $tokensAllCompleted = count($activeOrders) === 0;
-    }
-
-    if (empty($orders) && $tableNum !== '') {
-        $stmt = $pdo->prepare("SELECT * FROM PickupOrder WHERE (tableNumber = ? OR note LIKE ? OR customerName LIKE ?) AND status IN ('NEW', 'CONFIRMED', 'PREPARING', 'READY', 'ACCEPTED') AND createdAt >= DATE_SUB(NOW(), INTERVAL 8 HOUR) ORDER BY createdAt ASC");
-        $stmt->execute([$tableNum, "%[テーブル: {$tableNum}]%", "%テーブル {$tableNum}%"]);
-        $orders = $stmt->fetchAll();
     }
 
     $formattedOrders = [];
@@ -3562,6 +4807,34 @@ if ($method === 'GET' && ($subPath === '/orders/table' || $subPath === '/orders/
 
     $isTableFree = empty($formattedOrders) || $tokensAllCompleted;
 
+    // Paid = cash-register settlement for these order ids (not merely kitchen COMPLETED).
+    $tablePaid = false;
+    $orderIds = array_values(array_filter(array_map(fn($o) => (string)($o['id'] ?? ''), $orders)));
+    if (!empty($orderIds)) {
+        try {
+            $cashState = loadCashRegisterStateHelper($pdo);
+            $paidIds = [];
+            foreach (($cashState['transactions'] ?? []) as $t) {
+                if (!empty($t['isVoided'])) continue;
+                $ids = [];
+                if (!empty($t['orderId'])) $ids[] = (string)$t['orderId'];
+                if (!empty($t['orderIds']) && is_array($t['orderIds'])) {
+                    foreach ($t['orderIds'] as $oid) $ids[] = (string)$oid;
+                }
+                foreach ($ids as $oid) {
+                    if ($oid !== '') $paidIds[$oid] = true;
+                }
+            }
+            $allPaid = true;
+            foreach ($orderIds as $oid) {
+                if (!isset($paidIds[$oid])) { $allPaid = false; break; }
+            }
+            $tablePaid = $allPaid && count($orderIds) > 0;
+        } catch (Throwable $e) {
+            $tablePaid = false;
+        }
+    }
+
     header('Cache-Control: no-store');
     echo json_encode([
         'tableNumber' => $tableNum,
@@ -3572,6 +4845,7 @@ if ($method === 'GET' && ($subPath === '/orders/table' || $subPath === '/orders/
         'totalItemsCount' => $totalItemsCount,
         'activeSession' => count($formattedOrders) > 0 && !$tokensAllCompleted,
         'allCompleted' => $tokensAllCompleted,
+        'tablePaid' => $tablePaid,
         'isTableFree' => $isTableFree,
     ]);
     exit;
@@ -3581,7 +4855,7 @@ if ($method === 'GET' && ($subPath === '/orders/table' || $subPath === '/orders/
 // Endpoint: POST /tables/reset (Free up / auto-reset table session)
 // -------------------------------------------------------------
 if ($method === 'POST' && ($subPath === '/tables/reset' || $subPath === '/tables/reset/')) {
-    $user = requireStaffUser($jwtSecret, $pdo);
+    $user = requireKitchenUser($jwtSecret, $pdo);
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $tableNum = trim((string)($input['tableNumber'] ?? ''));
     $storeId = trim((string)($input['storeId'] ?? ''));
@@ -3614,11 +4888,77 @@ if ($method === 'POST' && ($subPath === '/tables/reset' || $subPath === '/tables
 }
 
 // -------------------------------------------------------------
+// Endpoint: GET /tables/alerts (Kitchen / cashier live floor alerts from table QR)
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/tables/alerts' || $subPath === '/tables/alerts/')) {
+    requireKitchenUser($jwtSecret, $pdo);
+    $storeFilter = trim((string)($_GET['storeId'] ?? ''));
+    $bag = getAppSecretConfig($pdo, 'TABLE_FLOOR_ALERTS', ['alerts' => []]);
+    $alerts = is_array($bag['alerts'] ?? null) ? $bag['alerts'] : [];
+    $cutoff = time() - (3 * 60 * 60);
+    $live = [];
+    foreach ($alerts as $a) {
+        if (!is_array($a) || !empty($a['ackedAt'])) continue;
+        $ts = isset($a['createdAt']) ? strtotime((string)$a['createdAt']) : 0;
+        if ($ts && $ts < $cutoff) continue;
+        if ($storeFilter !== '' && !empty($a['storeId']) && (string)$a['storeId'] !== $storeFilter) continue;
+        $live[] = [
+            'id' => (string)($a['id'] ?? ''),
+            'storeId' => (string)($a['storeId'] ?? ''),
+            'tableNumber' => (string)($a['tableNumber'] ?? ''),
+            'kind' => (string)($a['kind'] ?? 'CALL'),
+            'reason' => (string)($a['reason'] ?? ''),
+            'message' => (string)($a['message'] ?? ''),
+            'createdAt' => (string)($a['createdAt'] ?? ''),
+        ];
+    }
+    usort($live, function ($x, $y) {
+        return strcmp((string)($y['createdAt'] ?? ''), (string)($x['createdAt'] ?? ''));
+    });
+    header('Cache-Control: no-store');
+    echo json_encode(['alerts' => array_values($live)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// Endpoint: POST /tables/alerts/ack (Mark floor alert handled)
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/tables/alerts/ack' || $subPath === '/tables/alerts/ack/')) {
+    requireKitchenUser($jwtSecret, $pdo);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $ackAll = !empty($input['all']);
+    $ackId = trim((string)($input['id'] ?? ''));
+    $bag = getAppSecretConfig($pdo, 'TABLE_FLOOR_ALERTS', ['alerts' => []]);
+    $alerts = is_array($bag['alerts'] ?? null) ? $bag['alerts'] : [];
+    $nowIso = (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format('c');
+    $changed = false;
+    foreach ($alerts as &$a) {
+        if (!is_array($a)) continue;
+        if ($ackAll || ($ackId !== '' && (string)($a['id'] ?? '') === $ackId)) {
+            if (empty($a['ackedAt'])) {
+                $a['ackedAt'] = $nowIso;
+                $changed = true;
+            }
+        }
+    }
+    unset($a);
+    if (count($alerts) > 80) {
+        $alerts = array_slice($alerts, -80);
+        $changed = true;
+    }
+    if ($changed) {
+        saveAppSecretConfig($pdo, 'TABLE_FLOOR_ALERTS', ['alerts' => array_values($alerts)]);
+    }
+    header('Cache-Control: no-store');
+    echo json_encode(['success' => true]);
+    exit;
+}
+
 // Endpoint: POST /tables/call-staff (Call waiter / staff from table)
 // -------------------------------------------------------------
 if ($method === 'POST' && ($subPath === '/tables/call-staff' || $subPath === '/tables/call-staff/')) {
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $tableNum = trim((string)($input['tableNumber'] ?? ''));
+    $storeId = trim((string)($input['storeId'] ?? ''));
     $reason = trim((string)($input['reason'] ?? 'CALL'));
     $note = trim((string)($input['note'] ?? ''));
 
@@ -3638,6 +4978,7 @@ if ($method === 'POST' && ($subPath === '/tables/call-staff' || $subPath === '/t
 
     $msgId = generateUuidV4();
     $now = (new DateTime('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s.v');
+    $nowIso = (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format('c');
     $content = "【テーブル {$tableNum} 番席より呼出】 {$label}" . ($note ? " ({$note})" : "");
 
     try {
@@ -3645,11 +4986,29 @@ if ($method === 'POST' && ($subPath === '/tables/call-staff' || $subPath === '/t
         $stmt->execute([$msgId, "テーブル {$tableNum} 呼出", $content, $now, $now]);
     } catch (Exception $e) {}
 
+    // Live floor queue for Kitchen / Cash Counter
+    try {
+        $bag = getAppSecretConfig($pdo, 'TABLE_FLOOR_ALERTS', ['alerts' => []]);
+        $alerts = is_array($bag['alerts'] ?? null) ? $bag['alerts'] : [];
+        $alerts[] = [
+            'id' => $msgId,
+            'storeId' => $storeId,
+            'tableNumber' => $tableNum,
+            'kind' => 'CALL',
+            'reason' => $reason,
+            'message' => $content,
+            'createdAt' => $nowIso,
+            'ackedAt' => null,
+        ];
+        if (count($alerts) > 80) $alerts = array_slice($alerts, -80);
+        saveAppSecretConfig($pdo, 'TABLE_FLOOR_ALERTS', ['alerts' => array_values($alerts)]);
+    } catch (Throwable $e) {}
+
     header('Cache-Control: no-store');
     echo json_encode([
         'success' => true,
         'message' => "【{$label}】スタッフへ通知しました。まもなくお席へ伺います。",
-        'calledAt' => (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format('c'),
+        'calledAt' => $nowIso,
     ]);
     exit;
 }
@@ -3660,7 +5019,8 @@ if ($method === 'POST' && ($subPath === '/tables/call-staff' || $subPath === '/t
 if ($method === 'POST' && ($subPath === '/tables/request-bill' || $subPath === '/tables/request-bill/')) {
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $tableNum = trim((string)($input['tableNumber'] ?? ''));
-    $methodType = trim((string)($input['paymentMethod'] ?? 'REGISTER'));
+    $methodType = strtoupper(trim((string)($input['paymentMethod'] ?? 'REGISTER')));
+    if (!in_array($methodType, ['REGISTER', 'ONLINE'], true)) $methodType = 'REGISTER';
 
     if ($tableNum === '') {
         http_response_code(400);
@@ -3668,14 +5028,55 @@ if ($method === 'POST' && ($subPath === '/tables/request-bill' || $subPath === '
         exit;
     }
 
+    // Honor admin dine-in payment toggles (Settings + PAGE_SETTINGS_EXT).
+    $payRegister = true;
+    $payOnline = true;
+    try {
+        $payRow = $pdo->query('SELECT dineInAllowPayAtRegister, dineInAllowOnlinePay FROM Settings LIMIT 1')->fetch() ?: [];
+        if (array_key_exists('dineInAllowPayAtRegister', $payRow)) $payRegister = stampFlagOn($payRow['dineInAllowPayAtRegister']);
+        if (array_key_exists('dineInAllowOnlinePay', $payRow)) $payOnline = stampFlagOn($payRow['dineInAllowOnlinePay']);
+        $ext = getAppSecretConfig($pdo, 'PAGE_SETTINGS_EXT', []);
+        if (array_key_exists('dineInAllowPayAtRegister', $ext)) $payRegister = stampFlagOn($ext['dineInAllowPayAtRegister']);
+        if (array_key_exists('dineInAllowOnlinePay', $ext)) $payOnline = stampFlagOn($ext['dineInAllowOnlinePay']);
+    } catch (Throwable $e) {}
+    if ($methodType === 'REGISTER' && !$payRegister) {
+        http_response_code(409);
+        echo json_encode(['error' => ['code' => 'PAY_REGISTER_DISABLED', 'message' => 'レジ会計は現在ご利用いただけません。']]);
+        exit;
+    }
+    if ($methodType === 'ONLINE' && !$payOnline) {
+        http_response_code(409);
+        echo json_encode(['error' => ['code' => 'PAY_ONLINE_DISABLED', 'message' => 'オンライン決済は現在ご利用いただけません。']]);
+        exit;
+    }
+
+    $storeId = trim((string)($input['storeId'] ?? ''));
     $msgId = generateUuidV4();
     $now = (new DateTime('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s.v');
-    $content = "【テーブル {$tableNum} 番席がお会計を希望されています】 支払い方法: " . ($methodType === 'ONLINE' ? 'オンライン決済' : 'レジでお支払い');
+    $nowIso = (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format('c');
+    $content = "【テーブル {$tableNum} 番席がお会計を希望されています】 支払い方法: " . ($methodType === 'ONLINE' ? 'カード／オンライン決済（席で対応）' : 'レジでお支払い');
 
     try {
         $stmt = $pdo->prepare("INSERT INTO ContactMessage (id, type, name, email, phone, message, status, createdAt, updatedAt) VALUES (?, 'RESERVATION', ?, 'table@adarsha.internal', '00-0000-0000', ?, 'UNREAD', ?, ?)");
         $stmt->execute([$msgId, "テーブル {$tableNum} お会計", $content, $now, $now]);
     } catch (Exception $e) {}
+
+    try {
+        $bag = getAppSecretConfig($pdo, 'TABLE_FLOOR_ALERTS', ['alerts' => []]);
+        $alerts = is_array($bag['alerts'] ?? null) ? $bag['alerts'] : [];
+        $alerts[] = [
+            'id' => $msgId,
+            'storeId' => $storeId,
+            'tableNumber' => $tableNum,
+            'kind' => 'BILL',
+            'reason' => $methodType,
+            'message' => $content,
+            'createdAt' => $nowIso,
+            'ackedAt' => null,
+        ];
+        if (count($alerts) > 80) $alerts = array_slice($alerts, -80);
+        saveAppSecretConfig($pdo, 'TABLE_FLOOR_ALERTS', ['alerts' => array_values($alerts)]);
+    } catch (Throwable $e) {}
 
     header('Cache-Control: no-store');
     echo json_encode([
@@ -3702,23 +5103,30 @@ if ($method === 'POST' && ($subPath === '/qr/validate' || $subPath === '/qr/vali
         $qrCode = $m[1];
     }
 
-    $row = null;
-    if (!empty($qrCode)) {
-        $stmt = $pdo->prepare('SELECT * FROM TableQrCode WHERE qrCode = ? LIMIT 1');
-        $stmt->execute([$qrCode]);
-        $row = $stmt->fetch();
+    if ($qrCode === '' && ($storeId === '' || $tableNumber === '')) {
+        http_response_code(400);
+        echo json_encode([
+            'valid' => false,
+            'error' => [
+                'code' => 'QR_REQUIRED',
+                'message' => 'QRコードをスキャンしてください。'
+            ]
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
     }
 
-    // Fallback: If storeId and tableNumber are provided and valid
-    if (!$row && !empty($storeId) && !empty($tableNumber)) {
+    $row = null;
+    if ($qrCode !== '') {
+        $stmt = $pdo->prepare('SELECT * FROM TableQrCode WHERE qrCode = ? LIMIT 1');
+        $stmt->execute([$qrCode]);
+        $row = $stmt->fetch() ?: null;
+    }
+    // Fallback: printed links that only have store + table (or regenerated qr hash mismatch)
+    if (!$row && $storeId !== '' && $tableNumber !== '') {
+        ensureStoreTableQrCodes($pdo, $jwtSecret);
         $stmt = $pdo->prepare('SELECT * FROM TableQrCode WHERE storeId = ? AND tableNumber = ? LIMIT 1');
         $stmt->execute([$storeId, $tableNumber]);
-        $row = $stmt->fetch();
-        if (!$row) {
-            ensureStoreTableQrCodes($pdo, $jwtSecret);
-            $stmt->execute([$storeId, $tableNumber]);
-            $row = $stmt->fetch();
-        }
+        $row = $stmt->fetch() ?: null;
     }
 
     if (!$row) {
@@ -3884,6 +5292,7 @@ if ($method === 'GET' && ($subPath === '/admin/tables/qr' || $subPath === '/admi
 
     $stmt = $pdo->query('SELECT * FROM TableQrCode ORDER BY storeId ASC, LENGTH(tableNumber) ASC, tableNumber ASC');
     $rows = $stmt ? $stmt->fetchAll() : [];
+    // Return both shapes: { tables: [...] } and raw array consumers
     echo json_encode(['tables' => $rows], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -3933,7 +5342,7 @@ if ($method === 'POST' && ($subPath === '/admin/tables/qr/toggle' || $subPath ==
 // Endpoint: GET /orders
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/orders' || $subPath === '/orders/')) {
-    requireStaffUser($jwtSecret, $pdo);
+    requireKitchenUser($jwtSecret, $pdo);
     $scope = $_GET['scope'] ?? 'active';
     $active = $scope === 'active';
 
@@ -3959,22 +5368,17 @@ if ($method === 'GET' && ($subPath === '/orders' || $subPath === '/orders/')) {
             $o['store'] = $items[0]['store'];
         }
 
-        // Match payment transaction if available (ONLY manual cashier settlement creates transactions!)
+        // Match by order id only (never by orderNumber alone — numbers are shared across branches).
         $matchedTx = null;
         foreach ($transactions as $t) {
-            if (empty($t['isVoided'])) {
-                if (!empty($t['orderId']) && $t['orderId'] === $o['id']) {
-                    $matchedTx = $t;
-                    break;
-                }
-                if (!empty($t['orderNumber']) && (int)$t['orderNumber'] === (int)$o['number']) {
-                    $matchedTx = $t;
-                    break;
-                }
-                if (!empty($t['orderIds']) && is_array($t['orderIds']) && in_array($o['id'], $t['orderIds'], true)) {
-                    $matchedTx = $t;
-                    break;
-                }
+            if (!empty($t['isVoided'])) continue;
+            if (!empty($t['orderId']) && $t['orderId'] === $o['id']) {
+                $matchedTx = $t;
+                break;
+            }
+            if (!empty($t['orderIds']) && is_array($t['orderIds']) && in_array($o['id'], $t['orderIds'], true)) {
+                $matchedTx = $t;
+                break;
             }
         }
 
@@ -4004,7 +5408,7 @@ if ($method === 'GET' && ($subPath === '/orders' || $subPath === '/orders/')) {
 // Endpoint: GET /orders/kitchen
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/orders/kitchen' || $subPath === '/orders/kitchen/')) {
-    requireStaffUser($jwtSecret, $pdo);
+    requireKitchenUser($jwtSecret, $pdo);
 
     $sStmt = $pdo->query('SELECT * FROM Settings LIMIT 1');
     $settings = $sStmt->fetch() ?: [];
@@ -4024,14 +5428,40 @@ if ($method === 'GET' && ($subPath === '/orders/kitchen' || $subPath === '/order
     $cancelledCountStmt = $pdo->query("SELECT COUNT(*) FROM PickupOrder WHERE status = 'CANCELLED' AND DATE(cancelledAt) = CURDATE()");
     $cancelledToday = (int)$cancelledCountStmt->fetchColumn();
 
+    $ext = [];
+    try {
+        $secStmt = $pdo->prepare('SELECT publicKey FROM AppSecret WHERE id = ?');
+        $secStmt->execute(['PAGE_SETTINGS_EXT']);
+        $secRow = $secStmt->fetch();
+        if ($secRow && !empty($secRow['publicKey'])) {
+            $ext = json_decode($secRow['publicKey'], true) ?: [];
+        }
+    } catch (Exception $e) {}
+
     $mapOrder = function($o) {
         unset($o['token'], $o['ip'], $o['email']);
-        $o['items'] = is_string($o['items']) ? json_decode($o['items'], true) : $o['items'];
+        $o['items'] = is_string($o['items']) ? json_decode($o['items'], true) : ($o['items'] ?: []);
         $o['offer'] = is_string($o['offer']) ? json_decode($o['offer'], true) : $o['offer'];
         $o['reward'] = is_string($o['reward']) ? json_decode($o['reward'], true) : $o['reward'];
         $o['deliveryAddress'] = is_string($o['deliveryAddress']) ? json_decode($o['deliveryAddress'], true) : $o['deliveryAddress'];
+        if (!empty($o['items'][0]['store']) && is_array($o['items'][0]['store'])) {
+            $o['store'] = $o['items'][0]['store'];
+            $o['storeId'] = $o['items'][0]['store']['id'] ?? null;
+            $o['storeName'] = $o['items'][0]['store']['name'] ?? null;
+        } else {
+            $o['store'] = null;
+        }
+        $o['dietaryAlert'] = null;
         return $o;
     };
+
+    $itemsToday = 0;
+    foreach ($active as $ao) {
+        $its = is_string($ao['items'] ?? null) ? json_decode($ao['items'], true) : ($ao['items'] ?? []);
+        if (is_array($its)) {
+            foreach ($its as $line) $itemsToday += (int)($line['quantity'] ?? 1);
+        }
+    }
 
     header('Cache-Control: no-store');
     echo json_encode([
@@ -4048,6 +5478,12 @@ if ($method === 'GET' && ($subPath === '/orders/kitchen' || $subPath === '/order
                 'areas' => !empty($settings['deliveryAreas']) ? (is_string($settings['deliveryAreas']) ? json_decode($settings['deliveryAreas'], true) : $settings['deliveryAreas']) : [],
                 'note' => $settings['deliveryNoteJa'] ?? '',
             ],
+            'dineIn' => [
+                'enabled' => !empty($ext['dineInEnabled']),
+                'hours' => $ext['dineInHours'] ?? '',
+                'tableCount' => (int)($ext['dineInTableCount'] ?? 0),
+                'note' => $ext['dineInNoteJa'] ?? '',
+            ],
         ],
         'active' => array_map($mapOrder, $active),
         'done' => array_map($mapOrder, $done),
@@ -4055,10 +5491,10 @@ if ($method === 'GET' && ($subPath === '/orders/kitchen' || $subPath === '/order
             'ordersToday' => $ordersToday,
             'completedToday' => $completedToday,
             'cancelledToday' => $cancelledToday,
-            'itemsToday' => 0,
+            'itemsToday' => $itemsToday,
             'avgPrepMinutes' => null,
         ],
-    ]);
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -4066,7 +5502,7 @@ if ($method === 'GET' && ($subPath === '/orders/kitchen' || $subPath === '/order
 // Endpoint: PATCH /orders/:id/status
 // -------------------------------------------------------------
 if ($method === 'PATCH' && preg_match('#^/orders/([a-zA-Z0-9_-]+)/status/?$#', $subPath, $matches)) {
-    $user = requireStaffUser($jwtSecret, $pdo);
+    $user = requireKitchenUser($jwtSecret, $pdo);
     $orderId = $matches[1];
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $status = strtoupper(trim((string)($input['status'] ?? '')));
@@ -4087,6 +5523,20 @@ if ($method === 'PATCH' && preg_match('#^/orders/([a-zA-Z0-9_-]+)/status/?$#', $
         exit;
     }
 
+    $from = strtoupper((string)($before['status'] ?? ''));
+    $allowed = [
+        'NEW' => ['CONFIRMED', 'READY', 'CANCELLED'],
+        'CONFIRMED' => ['READY', 'COMPLETED', 'CANCELLED', 'CONFIRMED'],
+        'READY' => ['COMPLETED', 'CANCELLED', 'CONFIRMED'],
+        'COMPLETED' => ['READY'],
+        'CANCELLED' => [],
+    ];
+    if (!in_array($status, $allowed[$from] ?? [], true)) {
+        http_response_code(409);
+        echo json_encode(['error' => ['code' => 'INVALID_STATUS_CHANGE', 'message' => "Cannot change an order from {$from} to {$status}"]]);
+        exit;
+    }
+
     $now = date('Y-m-d H:i:s');
     $sets = ['status = ?', 'updatedAt = ?'];
     $params = [$status, $now];
@@ -4094,9 +5544,13 @@ if ($method === 'PATCH' && preg_match('#^/orders/([a-zA-Z0-9_-]+)/status/?$#', $
     if ($status === 'CONFIRMED') {
         $sets[] = 'confirmedAt = ?';
         $params[] = $now;
+        $sets[] = 'readyAt = NULL';
     } elseif ($status === 'READY') {
         $sets[] = 'readyAt = ?';
         $params[] = $now;
+        if ($from === 'COMPLETED') {
+            $sets[] = 'completedAt = NULL';
+        }
     } elseif ($status === 'COMPLETED') {
         $sets[] = 'completedAt = ?';
         $params[] = $now;
@@ -4108,11 +5562,19 @@ if ($method === 'PATCH' && preg_match('#^/orders/([a-zA-Z0-9_-]+)/status/?$#', $
     $params[] = $orderId;
     $pdo->prepare('UPDATE PickupOrder SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($params);
 
+    if ($status === 'COMPLETED' && !empty($before['customerId']) && empty($before['stampAwarded'])) {
+        settleMemberStampOnOrder($pdo, $before);
+    }
+
     if ($status === 'CANCELLED' && !empty($before['customerId']) && (int)$before['pointsUsed'] > 0) {
         $pdo->prepare('UPDATE Customer SET points = points + ? WHERE id = ?')->execute([(int)$before['pointsUsed'], $before['customerId']]);
         $ptId = generateUuidV4();
         $pdo->prepare('INSERT INTO PointTransaction (id, customerId, type, points, balanceAfter, orderId, orderNumber, note, createdAt) VALUES (?, ?, "REFUND", ?, (SELECT points FROM Customer WHERE id = ?), ?, ?, "Order cancelled refund", ?)')
             ->execute([$ptId, $before['customerId'], (int)$before['pointsUsed'], $before['customerId'], $orderId, $before['number'], $now]);
+    }
+
+    if ($status === 'CANCELLED' && !empty($before['customerId'])) {
+        releaseStampRewardForOrder($pdo, $orderId);
     }
 
     echo json_encode(['success' => true, 'status' => $status]);
@@ -4123,7 +5585,7 @@ if ($method === 'PATCH' && preg_match('#^/orders/([a-zA-Z0-9_-]+)/status/?$#', $
 // Endpoint: PATCH /orders/:id/items/:index
 // -------------------------------------------------------------
 if ($method === 'PATCH' && preg_match('#^/orders/([a-zA-Z0-9_-]+)/items/([0-9]+)/?$#', $subPath, $matches)) {
-    requireStaffUser($jwtSecret, $pdo);
+    requireKitchenUser($jwtSecret, $pdo);
     $orderId = $matches[1];
     $idx = (int)$matches[2];
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
@@ -4158,7 +5620,7 @@ if ($method === 'PATCH' && preg_match('#^/orders/([a-zA-Z0-9_-]+)/items/([0-9]+)
 // Endpoint: POST /orders/kitchen/pause
 // -------------------------------------------------------------
 if ($method === 'POST' && ($subPath === '/orders/kitchen/pause' || $subPath === '/orders/kitchen/pause/')) {
-    requireStaffUser($jwtSecret, $pdo);
+    requireKitchenUser($jwtSecret, $pdo);
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $minutes = max(0, min(240, (int)($input['minutes'] ?? 0)));
     $until = $minutes > 0 ? (new DateTime("+$minutes minutes"))->format('Y-m-d H:i:s') : null;
@@ -4291,6 +5753,7 @@ if ($method === 'GET' && ($subPath === '/offers' || $subPath === '/offers/')) {
             'discountValue' => (int)$offer['discountValue'],
             'minSubtotal' => (int)($offer['minSubtotal'] ?? 0),
             'endsAt' => !empty($offer['endsAt']) ? (new DateTime($offer['endsAt']))->format('c') : null,
+            'oncePerCustomer' => !empty($offer['oncePerCustomer']),
         ];
     }
 
@@ -4307,9 +5770,9 @@ if ($method === 'POST' && ($subPath === '/offers' || $subPath === '/offers/')) {
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
 
     $titleJa = trim((string)($input['titleJa'] ?? ''));
-    if ($titleJa === '') {
+    if ($titleJa === '' || mb_strlen($titleJa) > 100) {
         http_response_code(400);
-        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '特典タイトルを入力してください。']]);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '特典タイトルを100文字以内で入力してください。']]);
         exit;
     }
 
@@ -4324,8 +5787,13 @@ if ($method === 'POST' && ($subPath === '/offers' || $subPath === '/offers/')) {
         echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '割引率は100%以下で入力してください。']]);
         exit;
     }
+    if ($discountType === 'AMOUNT' && $discountValue > 1000000) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '割引額は1,000,000円以下で入力してください。']]);
+        exit;
+    }
 
-    $minSubtotal = max(0, (int)($input['minSubtotal'] ?? 0));
+    $minSubtotal = max(0, min(1000000, (int)($input['minSubtotal'] ?? 0)));
 
     $startsAt = null;
     if (!empty($input['startsAt'])) {
@@ -4350,12 +5818,17 @@ if ($method === 'POST' && ($subPath === '/offers' || $subPath === '/offers/')) {
     }
 
     $descriptionJa = isset($input['descriptionJa']) && trim((string)$input['descriptionJa']) !== ''
-        ? trim((string)$input['descriptionJa'])
+        ? mb_substr(trim((string)$input['descriptionJa']), 0, 1000)
         : null;
 
     $imageUrl = isset($input['imageUrl']) && trim((string)$input['imageUrl']) !== ''
         ? trim((string)$input['imageUrl'])
         : null;
+    if ($imageUrl !== null && !isSafePageImage($imageUrl)) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => 'Image must be an uploaded file, a site image, or an https URL']]);
+        exit;
+    }
 
     $oncePerCustomer = !empty($input['oncePerCustomer']) ? 1 : 0;
     $isActive = isset($input['isActive']) ? (!empty($input['isActive']) ? 1 : 0) : 1;
@@ -4442,9 +5915,9 @@ if ($method === 'PUT' && preg_match('#^/offers/([a-zA-Z0-9_-]+)/?$#', $subPath, 
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
 
     $titleJa = trim((string)($input['titleJa'] ?? $current['titleJa']));
-    if ($titleJa === '') {
+    if ($titleJa === '' || mb_strlen($titleJa) > 100) {
         http_response_code(400);
-        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '特典タイトルを入力してください。']]);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '特典タイトルを100文字以内で入力してください。']]);
         exit;
     }
 
@@ -4459,8 +5932,13 @@ if ($method === 'PUT' && preg_match('#^/offers/([a-zA-Z0-9_-]+)/?$#', $subPath, 
         echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '割引率は100%以下で入力してください。']]);
         exit;
     }
+    if ($discountType === 'AMOUNT' && $discountValue > 1000000) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => '割引額は1,000,000円以下で入力してください。']]);
+        exit;
+    }
 
-    $minSubtotal = max(0, (int)($input['minSubtotal'] ?? $current['minSubtotal']));
+    $minSubtotal = max(0, min(1000000, (int)($input['minSubtotal'] ?? $current['minSubtotal'])));
 
     $startsAt = null;
     if (array_key_exists('startsAt', $input)) {
@@ -4491,12 +5969,17 @@ if ($method === 'PUT' && preg_match('#^/offers/([a-zA-Z0-9_-]+)/?$#', $subPath, 
     }
 
     $descriptionJa = array_key_exists('descriptionJa', $input)
-        ? (trim((string)$input['descriptionJa']) !== '' ? trim((string)$input['descriptionJa']) : null)
+        ? (trim((string)$input['descriptionJa']) !== '' ? mb_substr(trim((string)$input['descriptionJa']), 0, 1000) : null)
         : $current['descriptionJa'];
 
     $imageUrl = array_key_exists('imageUrl', $input)
         ? (trim((string)$input['imageUrl']) !== '' ? trim((string)$input['imageUrl']) : null)
         : $current['imageUrl'];
+    if ($imageUrl !== null && $imageUrl !== '' && !isSafePageImage((string)$imageUrl)) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'BAD_REQUEST', 'message' => 'Image must be an uploaded file, a site image, or an https URL']]);
+        exit;
+    }
 
     $oncePerCustomer = array_key_exists('oncePerCustomer', $input)
         ? (!empty($input['oncePerCustomer']) ? 1 : 0)
@@ -4778,7 +6261,7 @@ if ($method === 'GET' && ($subPath === '/reviews' || $subPath === '/reviews/')) 
                 CURLOPT_HTTPHEADER => [
                     'X-Goog-Api-Key: ' . $googlePlacesApiKey,
                     'X-Goog-FieldMask: id,displayName,rating,userRatingCount,googleMapsUri,reviews',
-                    'Referer: https://pnglike.com/',
+                    'Referer: https://adarsha.jp/',
                 ],
             ]);
             $rawResp = curl_exec($ch);
@@ -5048,7 +6531,7 @@ if ($method === 'POST' && ($subPath === '/reviews/admin/search' || $subPath === 
             'Content-Type: application/json',
             'X-Goog-Api-Key: ' . $googlePlacesApiKey,
             'X-Goog-FieldMask: places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount',
-            'Referer: https://pnglike.com/',
+            'Referer: https://adarsha.jp/',
         ],
         CURLOPT_POSTFIELDS => json_encode([
             'textQuery' => $query,
@@ -5124,7 +6607,7 @@ if ($method === 'POST' && ($subPath === '/reviews/admin/refresh' || $subPath ===
         CURLOPT_HTTPHEADER => [
             'X-Goog-Api-Key: ' . $googlePlacesApiKey,
             'X-Goog-FieldMask: id,displayName,rating,userRatingCount,googleMapsUri,reviews',
-            'Referer: https://pnglike.com/',
+            'Referer: https://adarsha.jp/',
         ],
     ]);
     $rawResp = curl_exec($ch);
@@ -5425,11 +6908,8 @@ if ($method === 'DELETE' && preg_match('#^/blogs?/admin/([a-zA-Z0-9_-]+)/?$#', $
 // Endpoint: GET /blogs/:slug (Public single post by slug/id)
 // -------------------------------------------------------------
 if ($method === 'GET' && preg_match('#^/blogs?/([^/]+)/?$#', $subPath, $matches) && !in_array($matches[1], ['admin', 'all'])) {
-    try {
-        $pdo->exec("UPDATE `BlogPost` SET `coverImage` = '/uploads/1792268627977-04a9cb4d784139f9.jpg' WHERE `coverImage` LIKE '%1517248135467%' OR `coverImage` LIKE '%bg-hero-img%'");
-    } catch (Exception $e) {}
     $slugOrId = urldecode($matches[1]);
-    $stmt = $pdo->prepare('SELECT * FROM BlogPost WHERE slug = ? OR id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT * FROM BlogPost WHERE (slug = ? OR id = ?) AND isPublished = 1 LIMIT 1');
     $stmt->execute([$slugOrId, $slugOrId]);
     $post = $stmt->fetch();
 
@@ -5460,9 +6940,6 @@ if ($method === 'GET' && preg_match('#^/blogs?/([^/]+)/?$#', $subPath, $matches)
 // Endpoint: GET /blogs (Public published posts list)
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/blogs' || $subPath === '/blog' || $subPath === '/blogs/' || $subPath === '/blog/')) {
-    try {
-        $pdo->exec("UPDATE `BlogPost` SET `coverImage` = '/uploads/1792268627977-04a9cb4d784139f9.jpg' WHERE `coverImage` LIKE '%1517248135467%' OR `coverImage` LIKE '%bg-hero-img%'");
-    } catch (Exception $e) {}
     $category = $_GET['category'] ?? null;
     $search = $_GET['search'] ?? null;
     $limit = !empty($_GET['limit']) ? min(50, max(1, (int)$_GET['limit'])) : 30;
@@ -5710,6 +7187,243 @@ if ($method === 'DELETE' && preg_match('#^/contact/([a-zA-Z0-9_-]+)/?$#', $subPa
 }
 
 // -------------------------------------------------------------
+// LINE Official Account chatbot (AppSecret: LINE_BOT_CONFIG)
+// -------------------------------------------------------------
+function getDefaultLineBotConfig() {
+    return [
+        'enabled' => false,
+        'channelId' => '',
+        'channelSecret' => '',
+        'channelAccessToken' => '',
+        'basicId' => '',
+        'addFriendUrl' => '',
+        'showFloatButton' => true,
+        'floatButtonLabelJa' => 'LINEで相談',
+        'welcomeMessageJa' => "アダルサ公式LINEへようこそ！\nメニュー・店舗・ご予約・オンライン注文についてお答えします。下のボタンからお選びください。",
+        'fallbackMessageJa' => "申し訳ありません。うまく理解できませんでした。\n「メニュー」「店舗」「営業時間」「注文」「予約」と送ってください。",
+        'quickReplies' => [
+            ['label' => 'メニュー', 'text' => 'メニュー'],
+            ['label' => '店舗一覧', 'text' => '店舗'],
+            ['label' => '営業時間', 'text' => '営業時間'],
+            ['label' => '注文する', 'text' => '注文'],
+            ['label' => '予約する', 'text' => '予約'],
+        ],
+        'keywordReplies' => [
+            ['id' => 'menu', 'keywords' => ['メニュー', 'menu'], 'intent' => 'menu', 'replyJa' => ''],
+            ['id' => 'stores', 'keywords' => ['店舗', '支店', '住所'], 'intent' => 'stores', 'replyJa' => ''],
+            ['id' => 'hours', 'keywords' => ['営業時間', '時間'], 'intent' => 'hours', 'replyJa' => ''],
+            ['id' => 'order', 'keywords' => ['注文', 'オーダー', 'テイクアウト'], 'intent' => 'order', 'replyJa' => ''],
+            ['id' => 'reserve', 'keywords' => ['予約', '席'], 'intent' => 'reserve', 'replyJa' => ''],
+            ['id' => 'contact', 'keywords' => ['電話', 'お問い合わせ'], 'intent' => 'contact', 'replyJa' => ''],
+        ],
+        'siteUrl' => 'https://adarsha.jp',
+    ];
+}
+
+function maskLineSecret($value) {
+    $v = (string)$value;
+    if ($v === '') return '';
+    if (strlen($v) <= 8) return '••••••••';
+    return substr($v, 0, 4) . '…' . substr($v, -4);
+}
+
+function lineKeepSecret($incoming, $previous) {
+    if ($incoming === null) return $previous;
+    $trimmed = trim((string)$incoming);
+    if ($trimmed === '' || strpos($trimmed, '…') !== false || strpos($trimmed, '•') !== false) return $previous;
+    return $trimmed;
+}
+
+function toPublicLineConfig(array $config) {
+    return [
+        'enabled' => !empty($config['enabled']) && !empty($config['addFriendUrl']),
+        'addFriendUrl' => (string)($config['addFriendUrl'] ?? ''),
+        'basicId' => (string)($config['basicId'] ?? ''),
+        'showFloatButton' => ($config['showFloatButton'] ?? true) !== false,
+        'floatButtonLabelJa' => (string)($config['floatButtonLabelJa'] ?? 'LINEで相談'),
+    ];
+}
+
+function toAdminLineConfig(array $config) {
+    $out = $config;
+    $out['channelSecret'] = maskLineSecret($config['channelSecret'] ?? '');
+    $out['channelAccessToken'] = maskLineSecret($config['channelAccessToken'] ?? '');
+    $out['hasChannelSecret'] = !empty($config['channelSecret']);
+    $out['hasChannelAccessToken'] = !empty($config['channelAccessToken']);
+    $out['webhookPath'] = '/api/v1/line/webhook';
+    return $out;
+}
+
+function lineWithQuickReplies(array $message, array $config) {
+    $items = [];
+    foreach (($config['quickReplies'] ?? []) as $q) {
+        $label = mb_substr(trim((string)($q['label'] ?? '')), 0, 20);
+        $text = trim((string)($q['text'] ?? ''));
+        if ($label === '' || $text === '') continue;
+        $items[] = ['type' => 'action', 'action' => ['type' => 'message', 'label' => $label, 'text' => $text]];
+    }
+    if ($items) $message['quickReply'] = ['items' => array_slice($items, 0, 13)];
+    return $message;
+}
+
+function lineFormatStores(PDO $pdo, $site) {
+    $ext = getAppSecretConfig($pdo, 'PAGE_SETTINGS_EXT', []);
+    $stores = isset($ext['storeLocations']) && is_array($ext['storeLocations']) ? $ext['storeLocations'] : [];
+    if (!$stores) return "店舗一覧は公式サイトをご覧ください。\n{$site}/";
+    $lines = ['【アダルサ 店舗一覧】'];
+    foreach (array_slice($stores, 0, 20) as $store) {
+        $name = $store['name'] ?? $store['id'] ?? '店舗';
+        $phone = !empty($store['phone']) ? '  ☎ ' . $store['phone'] : '';
+        $area = !empty($store['area']) ? '（' . $store['area'] . '）' : '';
+        $lines[] = "・{$name}{$area}{$phone}";
+    }
+    $lines[] = "地図・詳細: {$site}/";
+    return implode("\n", $lines);
+}
+
+function lineResolveIntent(PDO $pdo, $intent, $custom, array $config) {
+    $site = rtrim((string)($config['siteUrl'] ?? 'https://adarsha.jp'), '/');
+    $custom = trim((string)$custom);
+    if ($intent === 'text' && $custom !== '') return $custom;
+    if ($intent === 'menu') return $custom !== '' ? $custom : "メニューはこちらからご覧ください。\nランチ: {$site}/menu/lunch\nテイクアウト: {$site}/menu/takeout\nグランド: {$site}/menu/grand";
+    if ($intent === 'order') return $custom !== '' ? $custom : "オンライン注文はこちらです。\n{$site}/order";
+    if ($intent === 'reserve') return $custom !== '' ? $custom : "ご予約は公式サイトの「席を予約する」から、または各店舗へお電話ください。\n{$site}/";
+    if ($intent === 'contact') {
+        if ($custom !== '') return $custom;
+        $phone = '';
+        $email = '';
+        try {
+            $row = $pdo->query('SELECT phone, email FROM Settings LIMIT 1')->fetch();
+            if ($row) { $phone = (string)($row['phone'] ?? ''); $email = (string)($row['email'] ?? ''); }
+        } catch (Exception $e) {}
+        return "お問い合わせ\n" . ($phone ? "代表電話: {$phone}\n" : '') . ($email ? "メール: {$email}\n" : '') . "フォーム: {$site}/contact";
+    }
+    if ($intent === 'hours') {
+        if ($custom !== '') return $custom;
+        return "【営業時間】\nランチ 11:00–16:30 / ディナー 16:30–23:00（店舗により異なる場合あり）\n詳細: {$site}/";
+    }
+    if ($intent === 'stores') return $custom !== '' ? $custom : lineFormatStores($pdo, $site);
+    return $custom !== '' ? $custom : (string)($config['fallbackMessageJa'] ?? '');
+}
+
+function lineBuildReply(PDO $pdo, $userText, array $config) {
+    $text = trim((string)$userText);
+    $lower = mb_strtolower($text);
+    foreach (($config['keywordReplies'] ?? []) as $rule) {
+        $keywords = is_array($rule['keywords'] ?? null) ? $rule['keywords'] : [];
+        $hit = false;
+        foreach ($keywords as $kw) {
+            $kw = trim((string)$kw);
+            if ($kw === '') continue;
+            if (mb_stripos($text, $kw) !== false || mb_stripos($lower, mb_strtolower($kw)) !== false) { $hit = true; break; }
+        }
+        if (!$hit) continue;
+        $body = lineResolveIntent($pdo, $rule['intent'] ?? 'text', $rule['replyJa'] ?? '', $config);
+        return [lineWithQuickReplies(['type' => 'text', 'text' => $body], $config)];
+    }
+    return [lineWithQuickReplies(['type' => 'text', 'text' => (string)($config['fallbackMessageJa'] ?? '')], $config)];
+}
+
+function lineReplyMessages($replyToken, array $messages, $accessToken) {
+    if (!$replyToken || !$accessToken || !$messages) return;
+    $ch = curl_init('https://api.line.me/v2/bot/message/reply');
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $accessToken],
+        CURLOPT_POSTFIELDS => json_encode(['replyToken' => $replyToken, 'messages' => array_slice($messages, 0, 5)], JSON_UNESCAPED_UNICODE),
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 8,
+    ]);
+    curl_exec($ch);
+    curl_close($ch);
+}
+
+// GET /line/public
+if ($method === 'GET' && ($subPath === '/line/public' || $subPath === '/line/public/')) {
+    $config = getAppSecretConfig($pdo, 'LINE_BOT_CONFIG', getDefaultLineBotConfig());
+    header('Cache-Control: public, max-age=60');
+    echo json_encode(toPublicLineConfig($config), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// GET /line/config (admin)
+if ($method === 'GET' && ($subPath === '/line/config' || $subPath === '/line/config/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $config = getAppSecretConfig($pdo, 'LINE_BOT_CONFIG', getDefaultLineBotConfig());
+    header('Cache-Control: private, no-store');
+    echo json_encode(toAdminLineConfig($config), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// PUT /line/config (admin)
+if ($method === 'PUT' && ($subPath === '/line/config' || $subPath === '/line/config/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $current = getAppSecretConfig($pdo, 'LINE_BOT_CONFIG', getDefaultLineBotConfig());
+    $merged = array_merge($current, is_array($input) ? $input : []);
+    $merged['channelSecret'] = lineKeepSecret($input['channelSecret'] ?? null, $current['channelSecret'] ?? '');
+    $merged['channelAccessToken'] = lineKeepSecret($input['channelAccessToken'] ?? null, $current['channelAccessToken'] ?? '');
+    $merged['enabled'] = !empty($merged['enabled']);
+    $merged['showFloatButton'] = ($merged['showFloatButton'] ?? true) !== false;
+    saveAppSecretConfig($pdo, 'LINE_BOT_CONFIG', $merged);
+    echo json_encode(toAdminLineConfig($merged), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// POST /line/preview (admin)
+if ($method === 'POST' && ($subPath === '/line/preview' || $subPath === '/line/preview/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $text = trim((string)($input['text'] ?? ''));
+    if ($text === '') {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'text required']]);
+        exit;
+    }
+    $config = getAppSecretConfig($pdo, 'LINE_BOT_CONFIG', getDefaultLineBotConfig());
+    echo json_encode(['messages' => lineBuildReply($pdo, $text, $config)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// POST /line/webhook
+if ($method === 'POST' && ($subPath === '/line/webhook' || $subPath === '/line/webhook/')) {
+    $raw = file_get_contents('php://input');
+    $config = getAppSecretConfig($pdo, 'LINE_BOT_CONFIG', getDefaultLineBotConfig());
+    if (empty($config['enabled']) || empty($config['channelSecret']) || empty($config['channelAccessToken'])) {
+        echo json_encode(['ok' => true, 'ignored' => true]);
+        exit;
+    }
+    $signature = $_SERVER['HTTP_X_LINE_SIGNATURE'] ?? '';
+    $digest = base64_encode(hash_hmac('sha256', $raw, $config['channelSecret'], true));
+    if (!$signature || !hash_equals($digest, $signature)) {
+        http_response_code(401);
+        echo json_encode(['error' => ['code' => 'UNAUTHORIZED', 'message' => 'Invalid LINE signature']]);
+        exit;
+    }
+    $payload = json_decode($raw, true) ?: [];
+    echo json_encode(['ok' => true]);
+    // Flush response before slow LINE API calls when possible
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    }
+    foreach (($payload['events'] ?? []) as $event) {
+        $type = (string)($event['type'] ?? '');
+        $replyToken = (string)($event['replyToken'] ?? '');
+        if ($type === 'follow' || $type === 'join') {
+            $msgs = [lineWithQuickReplies(['type' => 'text', 'text' => (string)$config['welcomeMessageJa']], $config)];
+            lineReplyMessages($replyToken, $msgs, $config['channelAccessToken']);
+            continue;
+        }
+        if ($type !== 'message') continue;
+        $msg = $event['message'] ?? null;
+        if (!is_array($msg) || ($msg['type'] ?? '') !== 'text' || empty($msg['text'])) continue;
+        $msgs = lineBuildReply($pdo, (string)$msg['text'], $config);
+        lineReplyMessages($replyToken, $msgs, $config['channelAccessToken']);
+    }
+    exit;
+}
+
+// -------------------------------------------------------------
 // Shared: Game Configuration Helpers (AppSecret: MINI_GAME_CONFIG)
 // -------------------------------------------------------------
 function getDefaultGameConfig() {
@@ -5945,7 +7659,7 @@ if ($method === 'GET' && ($subPath === '/game/status' || $subPath === '/game/sta
 // Endpoint: GET /dashboard/stats
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/dashboard/stats' || $subPath === '/dashboard/stats/')) {
-    requireStaffUser($jwtSecret, $pdo);
+    requireKitchenUser($jwtSecret, $pdo);
 
     $menuItemsCount = (int)$pdo->query('SELECT COUNT(*) FROM MenuItem')->fetchColumn();
     $soldOutItemsCount = (int)$pdo->query('SELECT COUNT(*) FROM MenuItem WHERE isSoldOut = 1')->fetchColumn();
@@ -5984,11 +7698,51 @@ if ($method === 'GET' && ($subPath === '/dashboard/stats' || $subPath === '/dash
 }
 
 // -------------------------------------------------------------
+function resolveOrderStoreIdPhp(array $order, array $stores): ?string {
+    if (!empty($order['items'])) {
+        $items = is_string($order['items']) ? json_decode($order['items'], true) : $order['items'];
+        if (is_array($items) && !empty($items[0]['store']['id'])) {
+            $sid = (string)$items[0]['store']['id'];
+            foreach ($stores as $s) {
+                if (($s['id'] ?? '') === $sid) return $sid;
+            }
+        }
+        if (is_array($items) && !empty($items[0]['store']['name'])) {
+            $name = (string)$items[0]['store']['name'];
+            foreach ($stores as $s) {
+                if (str_contains($name, (string)($s['name'] ?? '')) || str_contains((string)($s['name'] ?? ''), $name)) {
+                    return (string)$s['id'];
+                }
+            }
+        }
+    }
+    $note = (string)($order['note'] ?? '');
+    if ($note !== '' && preg_match('/【(?:ご注文|お受け取り|受取|ご予約希望|予約)?店舗:\s*([^】]+)】/u', $note, $m)) {
+        $raw = trim($m[1]);
+        foreach ($stores as $s) {
+            $sn = (string)($s['name'] ?? '');
+            $sid = (string)($s['id'] ?? '');
+            if ($raw !== '' && ($sid === $raw || str_contains($raw, $sn) || str_contains($sn, $raw) || str_contains($raw, $sid))) {
+                return $sid;
+            }
+        }
+    }
+    return null;
+}
+function orderMatchesStorePhp(array $order, ?string $storeId, array $stores): bool {
+    if ($storeId === null || $storeId === '' || $storeId === 'ALL') return true;
+    $resolved = resolveOrderStoreIdPhp($order, $stores);
+    return $resolved !== null && $resolved === $storeId;
+}
+
 // Endpoint: GET /dashboard/live
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/dashboard/live' || $subPath === '/dashboard/live/')) {
-    $user = requireStaffUser($jwtSecret, $pdo);
+    $user = requireKitchenUser($jwtSecret, $pdo);
     $isAdmin = ($user['role'] === 'ADMIN');
+    $storeIdFilter = isset($_GET['storeId']) ? trim((string)$_GET['storeId']) : '';
+    if ($storeIdFilter === 'ALL') $storeIdFilter = '';
+    $storesList = getStoredStoreLocations($pdo);
 
     $now = new DateTime('now', new DateTimeZone('Asia/Tokyo'));
     $nowIso = $now->format('c');
@@ -5999,16 +7753,17 @@ if ($method === 'GET' && ($subPath === '/dashboard/live' || $subPath === '/dashb
     $todayOrders = [];
     $recentOrders = [];
     try {
-        $stmtOpen = $pdo->prepare("SELECT status, pickupAt, number, customerName FROM PickupOrder WHERE status IN ('NEW', 'CONFIRMED', 'READY') ORDER BY pickupAt ASC");
+        $stmtOpen = $pdo->prepare("SELECT status, pickupAt, number, customerName, note, items FROM PickupOrder WHERE status IN ('NEW', 'CONFIRMED', 'READY') ORDER BY pickupAt ASC");
         $stmtOpen->execute();
-        $openOrders = $stmtOpen->fetchAll();
+        $openOrders = array_values(array_filter($stmtOpen->fetchAll(), fn($o) => orderMatchesStorePhp($o, $storeIdFilter !== '' ? $storeIdFilter : null, $storesList)));
 
-        $stmtToday = $pdo->prepare("SELECT status, grandTotal, total FROM PickupOrder WHERE createdAt >= ?");
+        $stmtToday = $pdo->prepare("SELECT status, grandTotal, total, note, items FROM PickupOrder WHERE createdAt >= ?");
         $stmtToday->execute([$todayStart]);
-        $todayOrders = $stmtToday->fetchAll();
+        $todayOrders = array_values(array_filter($stmtToday->fetchAll(), fn($o) => orderMatchesStorePhp($o, $storeIdFilter !== '' ? $storeIdFilter : null, $storesList)));
 
-        $stmtRecent = $pdo->query("SELECT id, number, status, fulfillment, customerName, customerId, grandTotal, total, createdAt, pickupAt FROM PickupOrder ORDER BY createdAt DESC LIMIT 8");
-        $recentOrders = $stmtRecent->fetchAll();
+        $limit = $storeIdFilter !== '' ? 40 : 8;
+        $stmtRecent = $pdo->query("SELECT id, number, status, fulfillment, customerName, customerId, grandTotal, total, createdAt, pickupAt, note, items FROM PickupOrder ORDER BY createdAt DESC LIMIT " . (int)$limit);
+        $recentOrders = array_slice(array_values(array_filter($stmtRecent->fetchAll(), fn($o) => orderMatchesStorePhp($o, $storeIdFilter !== '' ? $storeIdFilter : null, $storesList))), 0, 8);
     } catch (Exception $e) {}
 
     // Unread messages & recent messages
@@ -6082,15 +7837,42 @@ if ($method === 'GET' && ($subPath === '/dashboard/live' || $subPath === '/dashb
     }
 
     // Settings for ordering
-    $settingsStmt = $pdo->query('SELECT orderingEnabled, pickupEnabled, deliveryEnabled, orderingPausedUntil, stampRewards, stampsEnabled FROM Settings LIMIT 1');
-    $set = $settingsStmt->fetch() ?: [];
+    $set = [];
+    try {
+        $settingsStmt = $pdo->query('SELECT orderingEnabled, pickupEnabled, deliveryEnabled, orderingPausedUntil, stampRewards, stampsEnabled FROM Settings LIMIT 1');
+        $set = $settingsStmt->fetch() ?: [];
+    } catch (\Throwable $e) {}
+    $extLive = getAppSecretConfig($pdo, 'PAGE_SETTINGS_EXT', []);
+    $masterOn = !isset($set['orderingEnabled']) || (bool)$set['orderingEnabled'];
+    $pausedRaw = $set['orderingPausedUntil'] ?? null;
+    $pausedActive = false;
+    if (!empty($pausedRaw)) {
+        $pausedTs = strtotime((string)$pausedRaw);
+        $pausedActive = $pausedTs !== false && $pausedTs > time();
+    }
+    $pickupOn = $masterOn && !$pausedActive && !empty($set['pickupEnabled']);
+    $deliveryOn = $masterOn && !$pausedActive && !empty($set['deliveryEnabled']);
+    $dineInFlag = !empty($extLive['dineInEnabled']);
+    $dineInOn = $masterOn && !$pausedActive && $dineInFlag;
+    $maintenanceMode = !empty($extLive['maintenanceMode']);
 
     $orderingState = [
-        'pausedUntil' => $set['orderingPausedUntil'] ?? null,
-        'pickup' => ['enabled' => (bool)($set['pickupEnabled'] ?? false)],
-        'delivery' => ['enabled' => (bool)($set['deliveryEnabled'] ?? false)],
-        'stampCard' => (bool)($set['stampsEnabled'] ?? false),
+        'pausedUntil' => $pausedActive ? $pausedRaw : null,
+        'pickup' => ['enabled' => $pickupOn],
+        'delivery' => ['enabled' => $deliveryOn],
+        'dineIn' => ['enabled' => $dineInOn],
+        'stampCard' => stampFlagOn($set['stampsEnabled'] ?? true),
         'liveOffers' => $liveOffers,
+        'masterEnabled' => $masterOn,
+        'switches' => [
+            'orderingEnabled' => $masterOn,
+            'pickupEnabled' => !empty($set['pickupEnabled']),
+            'deliveryEnabled' => !empty($set['deliveryEnabled']),
+            'dineInEnabled' => $dineInFlag,
+        ],
+        'maintenanceMode' => $maintenanceMode,
+        'maintenanceMessageJa' => (string)($extLive['maintenanceMessageJa'] ?? ''),
+        'maintenanceMessageEn' => (string)($extLive['maintenanceMessageEn'] ?? ''),
     ];
 
     $formattedRecent = array_map(function ($ro) use ($isAdmin) {
@@ -6107,9 +7889,36 @@ if ($method === 'GET' && ($subPath === '/dashboard/live' || $subPath === '/dashb
         ];
     }, $recentOrders);
 
+    $registerLive = null;
+    $devicesLive = ['active' => 0, 'paired' => 0];
+    if ($storeIdFilter !== '') {
+        try {
+            $regState = loadCashRegisterMultiHelper($pdo);
+            $branch = $regState['byStore'][$storeIdFilter] ?? null;
+            $shift = $branch['currentShift'] ?? null;
+            $registerLive = !empty($shift['isOpen'])
+                ? ['isOpen' => true, 'openedAt' => $shift['openedAt'] ?? null, 'openedBy' => $shift['openedBy'] ?? null, 'startingFloat' => $shift['startingFloat'] ?? null]
+                : ['isOpen' => false];
+        } catch (\Throwable $e) {
+            $registerLive = ['isOpen' => false];
+        }
+        try {
+            $devs = array_map('normalizePaymentDevicePhp', loadPaymentDevicesPhp($pdo));
+            $scoped = array_values(array_filter($devs, function ($d) use ($storeIdFilter) {
+                if (($d['isActive'] ?? true) === false) return false;
+                return empty($d['storeId']) || ($d['storeId'] ?? '') === $storeIdFilter;
+            }));
+            $devicesLive = [
+                'active' => count($scoped),
+                'paired' => count(array_filter($scoped, fn($d) => ($d['provider'] ?? '') !== 'SQUARE_TERMINAL' || !empty($d['squareDeviceId']))),
+            ];
+        } catch (\Throwable $e) {}
+    }
+
     header('Cache-Control: no-store');
     echo json_encode([
         'serverTime' => $nowIso,
+        'storeId' => $storeIdFilter !== '' ? $storeIdFilter : null,
         'open' => [
             'NEW' => $newCount,
             'CONFIRMED' => $confirmedCount,
@@ -6124,6 +7933,8 @@ if ($method === 'GET' && ($subPath === '/dashboard/live' || $subPath === '/dashb
             'sales' => $isAdmin ? $salesToday : null,
         ],
         'ordering' => $orderingState,
+        'register' => $registerLive,
+        'devices' => $devicesLive,
         'recentOrders' => $formattedRecent,
         'messages' => [
             'unread' => $unreadMessages,
@@ -6135,6 +7946,75 @@ if ($method === 'GET' && ($subPath === '/dashboard/live' || $subPath === '/dashb
             'soldOut' => $soldOutItems,
         ],
     ]);
+    exit;
+}
+
+// Endpoint: GET /dashboard/branches
+if ($method === 'GET' && ($subPath === '/dashboard/branches' || $subPath === '/dashboard/branches/')) {
+    $user = requireKitchenUser($jwtSecret, $pdo);
+    $isAdmin = ($user['role'] === 'ADMIN');
+    $storesList = getStoredStoreLocations($pdo);
+    $now = new DateTime('now', new DateTimeZone('Asia/Tokyo'));
+    $todayStart = $now->format('Y-m-d') . ' 00:00:00';
+    $openOrders = [];
+    $todayOrders = [];
+    try {
+        $stmtOpen = $pdo->prepare("SELECT status, pickupAt, note, items FROM PickupOrder WHERE status IN ('NEW', 'CONFIRMED', 'READY')");
+        $stmtOpen->execute();
+        $openOrders = $stmtOpen->fetchAll();
+        $stmtToday = $pdo->prepare("SELECT status, grandTotal, total, note, items FROM PickupOrder WHERE createdAt >= ?");
+        $stmtToday->execute([$todayStart]);
+        $todayOrders = $stmtToday->fetchAll();
+    } catch (\Throwable $e) {}
+    $regState = ['byStore' => []];
+    try { $regState = loadCashRegisterMultiHelper($pdo); } catch (\Throwable $e) {}
+    $devs = [];
+    try { $devs = array_map('normalizePaymentDevicePhp', loadPaymentDevicesPhp($pdo)); } catch (\Throwable $e) {}
+
+    $branches = [];
+    foreach ($storesList as $store) {
+        $sid = (string)($store['id'] ?? '');
+        if ($sid === '') continue;
+        $open = array_values(array_filter($openOrders, fn($o) => orderMatchesStorePhp($o, $sid, $storesList)));
+        $today = array_values(array_filter($todayOrders, fn($o) => orderMatchesStorePhp($o, $sid, $storesList)));
+        $completed = array_values(array_filter($today, fn($o) => ($o['status'] ?? '') === 'COMPLETED'));
+        $late = 0;
+        foreach ($open as $o) {
+            if (($o['status'] ?? '') !== 'READY' && !empty($o['pickupAt']) && strtotime($o['pickupAt']) < $now->getTimestamp()) $late++;
+        }
+        $shift = $regState['byStore'][$sid]['currentShift'] ?? null;
+        $storeDevs = array_values(array_filter($devs, function ($d) use ($sid) {
+            if (($d['isActive'] ?? true) === false) return false;
+            return empty($d['storeId']) || ($d['storeId'] ?? '') === $sid;
+        }));
+        $sales = 0;
+        foreach ($completed as $c) $sales += (int)($c['grandTotal'] ?? $c['total'] ?? 0);
+        $branches[] = [
+            'storeId' => $sid,
+            'name' => (string)($store['name'] ?? $sid),
+            'area' => (string)($store['area'] ?? ''),
+            'phone' => (string)($store['phone'] ?? ''),
+            'open' => [
+                'NEW' => count(array_filter($open, fn($o) => ($o['status'] ?? '') === 'NEW')),
+                'CONFIRMED' => count(array_filter($open, fn($o) => ($o['status'] ?? '') === 'CONFIRMED')),
+                'READY' => count(array_filter($open, fn($o) => ($o['status'] ?? '') === 'READY')),
+                'late' => $late,
+                'total' => count($open),
+            ],
+            'today' => [
+                'placed' => count(array_filter($today, fn($o) => ($o['status'] ?? '') !== 'CANCELLED')),
+                'completed' => count($completed),
+                'cancelled' => count(array_filter($today, fn($o) => ($o['status'] ?? '') === 'CANCELLED')),
+                'sales' => $isAdmin ? $sales : null,
+            ],
+            'register' => !empty($shift['isOpen'])
+                ? ['isOpen' => true, 'openedAt' => $shift['openedAt'] ?? null, 'openedBy' => $shift['openedBy'] ?? null]
+                : ['isOpen' => false],
+            'devices' => ['active' => count($storeDevs)],
+        ];
+    }
+    header('Cache-Control: no-store');
+    echo json_encode(['serverTime' => $now->format('c'), 'branches' => $branches], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -6369,10 +8249,406 @@ if ($method === 'GET' && ($subPath === '/dashboard/analytics' || $subPath === '/
 }
 
 // -------------------------------------------------------------
+// Shared: load orders for analytics export (JSON / CSV / PDF)
+// -------------------------------------------------------------
+function dashboardOrdersExportPeriod(): array {
+    $range = $_GET['range'] ?? '7d';
+    $tz = new DateTimeZone('Asia/Tokyo');
+    $now = new DateTime('now', $tz);
+    $end = clone $now;
+    $start = clone $now;
+    if ($range === 'today') {
+        $start->setTime(0, 0, 0);
+    } elseif ($range === 'yesterday') {
+        $start->modify('-1 day')->setTime(0, 0, 0);
+        $end->setTime(0, 0, 0);
+    } elseif ($range === '30d') {
+        $start->modify('-30 days')->setTime(0, 0, 0);
+    } elseif ($range === '90d') {
+        $start->modify('-90 days')->setTime(0, 0, 0);
+    } elseif ($range === 'month') {
+        $start->modify('first day of this month')->setTime(0, 0, 0);
+    } elseif ($range === 'custom' && !empty($_GET['from']) && !empty($_GET['to'])) {
+        $start = DateTime::createFromFormat('Y-m-d', $_GET['from'], $tz) ?: $start;
+        $start->setTime(0, 0, 0);
+        $end = DateTime::createFromFormat('Y-m-d', $_GET['to'], $tz) ?: $end;
+        $end->modify('+1 day')->setTime(0, 0, 0);
+    } else {
+        $start->modify('-7 days')->setTime(0, 0, 0);
+    }
+    return [$range, $start, $end];
+}
+
+function loadDashboardOrdersExport(PDO $pdo): array {
+    [$range, $start, $end] = dashboardOrdersExportPeriod();
+    $startDb = $start->format('Y-m-d H:i:s');
+    $endDb = $end->format('Y-m-d H:i:s');
+    $rows = [];
+    try {
+        $stmt = $pdo->prepare("SELECT number, status, fulfillment, createdAt, pickupAt, customerId, customerName, phone, note, subtotal, total, tax, taxRate, grandTotal, deliveryFee, pointsDiscount, offer, reward, items FROM PickupOrder WHERE createdAt >= ? AND createdAt < ? ORDER BY createdAt ASC LIMIT 20000");
+        $stmt->execute([$startDb, $endDb]);
+        $rows = $stmt->fetchAll() ?: [];
+    } catch (\Throwable $e) {}
+
+    $orders = [];
+    $completed = 0;
+    $cancelled = 0;
+    $sales = 0;
+    $taxTotal = 0;
+    $byType = ['pickup' => 0, 'delivery' => 0, 'dineIn' => 0];
+    $taxBuckets = [
+        'rate8' => ['count' => 0, 'exclusive' => 0, 'tax' => 0, 'inclusive' => 0],
+        'rate10' => ['count' => 0, 'exclusive' => 0, 'tax' => 0, 'inclusive' => 0],
+    ];
+    foreach ($rows as $order) {
+        $items = [];
+        $itemCount = 0;
+        $decoded = json_decode($order['items'] ?? '[]', true);
+        if (is_array($decoded)) {
+            foreach ($decoded as $line) {
+                $qty = (int)($line['quantity'] ?? 0);
+                $itemCount += $qty;
+                $items[] = $qty . '×' . ($line['nameJa'] ?? $line['nameEn'] ?? 'item');
+            }
+        }
+        $offer = json_decode($order['offer'] ?? 'null', true);
+        $reward = json_decode($order['reward'] ?? 'null', true);
+        $paid = (int)($order['grandTotal'] ?? $order['total'] ?? 0);
+        $tax = (int)($order['tax'] ?? 0);
+        $status = (string)($order['status'] ?? '');
+        $fulfillment = (string)($order['fulfillment'] ?? 'PICKUP');
+        $taxRate = isset($order['taxRate']) ? (int)$order['taxRate'] : null;
+        if ($taxRate !== 8 && $taxRate !== 10) {
+            $taxRate = ($fulfillment === 'DINE_IN' || (int)($order['deliveryFee'] ?? 0) > 0) ? 10 : 8;
+        }
+        if ($tax <= 0 && $paid > 0) {
+            $tax = (int)floor(($paid * $taxRate) / (100 + $taxRate));
+        }
+        if ($status === 'COMPLETED') {
+            $completed++;
+            $sales += $paid;
+            $taxTotal += $tax;
+            $exclusive = max(0, $paid - $tax);
+            $bucketKey = $taxRate === 10 ? 'rate10' : 'rate8';
+            $taxBuckets[$bucketKey]['count']++;
+            $taxBuckets[$bucketKey]['exclusive'] += $exclusive;
+            $taxBuckets[$bucketKey]['tax'] += $tax;
+            $taxBuckets[$bucketKey]['inclusive'] += $paid;
+        }
+        if ($status === 'CANCELLED') $cancelled++;
+        if ($fulfillment === 'DELIVERY') $byType['delivery']++;
+        elseif ($fulfillment === 'DINE_IN') $byType['dineIn']++;
+        else $byType['pickup']++;
+
+        $tableNumber = null;
+        $note = (string)($order['note'] ?? '');
+        if ($note !== '' && preg_match('/\[テーブル[:\s]*([^\]]+)\]/u', $note, $tm)) {
+            $tableNumber = trim($tm[1]);
+        }
+
+        $toIso = function ($value) {
+            if (!$value) return '';
+            try {
+                $dt = new DateTime((string)$value, new DateTimeZone('Asia/Tokyo'));
+                return $dt->format('c');
+            } catch (\Throwable $e) {
+                return (string)$value;
+            }
+        };
+
+        $orders[] = [
+            'number' => (int)($order['number'] ?? 0),
+            'status' => $status,
+            'fulfillment' => $fulfillment,
+            'createdAt' => $toIso($order['createdAt'] ?? ''),
+            'pickupAt' => $toIso($order['pickupAt'] ?? ''),
+            'customerName' => (string)($order['customerName'] ?? ''),
+            'member' => !empty($order['customerId']),
+            'phone' => !empty($order['phone']) ? (string)$order['phone'] : null,
+            'tableNumber' => $tableNumber,
+            'items' => implode('、', $items),
+            'itemCount' => $itemCount,
+            'subtotal' => (int)($order['subtotal'] ?? $order['total'] ?? 0),
+            'offerDiscount' => is_array($offer) ? (int)($offer['discount'] ?? 0) : 0,
+            'rewardDiscount' => is_array($reward) ? (int)($reward['discount'] ?? 0) : 0,
+            'pointsDiscount' => (int)($order['pointsDiscount'] ?? 0),
+            'tax' => $tax,
+            'taxRate' => $taxRate,
+            'deliveryFee' => (int)($order['deliveryFee'] ?? 0),
+            'paid' => $paid,
+        ];
+    }
+
+    $days = [];
+    $cursor = clone $start;
+    $last = (clone $end)->modify('-1 second');
+    while ($cursor <= $last) {
+        $days[] = $cursor->format('Y-m-d');
+        $cursor->modify('+1 day');
+        if (count($days) > 400) break;
+    }
+
+    $restaurantName = '本格インド料理 アダルサ';
+    $addressJa = '';
+    $phone = '';
+    $email = '';
+    try {
+        $set = $pdo->query('SELECT name, addressJa, phone, email FROM Settings LIMIT 1')->fetch() ?: [];
+        if (!empty($set['name'])) $restaurantName = (string)$set['name'];
+        $addressJa = (string)($set['addressJa'] ?? '');
+        $phone = (string)($set['phone'] ?? '');
+        $email = (string)($set['email'] ?? '');
+    } catch (\Throwable $e) {}
+
+    return [
+        'restaurantName' => $restaurantName,
+        'addressJa' => $addressJa,
+        'phone' => $phone,
+        'email' => $email,
+        'period' => [
+            'range' => $range,
+            'start' => $start->format('c'),
+            'end' => $end->format('c'),
+            'days' => $days,
+        ],
+        'timezone' => 'Asia/Tokyo',
+        'summary' => [
+            'totalOrders' => count($orders),
+            'completed' => $completed,
+            'cancelled' => $cancelled,
+            'sales' => $sales,
+            'tax' => $taxTotal,
+            'exclusive' => $taxBuckets['rate8']['exclusive'] + $taxBuckets['rate10']['exclusive'],
+            'averageOrder' => $completed > 0 ? (int)round($sales / $completed) : 0,
+            'byType' => $byType,
+            'taxBuckets' => $taxBuckets,
+        ],
+        'orders' => $orders,
+        'generatedAt' => (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format('c'),
+        '_start' => $start,
+        '_end' => $end,
+    ];
+}
+
+// -------------------------------------------------------------
+// Endpoint: GET /dashboard/analytics/orders (JSON for PDF export)
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/dashboard/analytics/orders' || $subPath === '/dashboard/analytics/orders/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $data = loadDashboardOrdersExport($pdo);
+    unset($data['_start'], $data['_end']);
+    header('Cache-Control: no-store');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: GET /dashboard/analytics/orders.csv
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/dashboard/analytics/orders.csv' || $subPath === '/dashboard/analytics/orders.csv/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $data = loadDashboardOrdersExport($pdo);
+    $csvCell = function ($value) {
+        $text = $value === null ? '' : (string)$value;
+        if (preg_match('/^[=+\-@\t\r]/', $text)) $text = "'" . $text;
+        if (preg_match('/[",\n\r]/', $text)) $text = '"' . str_replace('"', '""', $text) . '"';
+        return $text;
+    };
+    $header = ['Placed', 'Order no.', 'Status', 'Type', 'Due', 'Customer', 'Member', 'Items', 'Subtotal', 'Offer discount', 'Stamp reward', 'Points used (¥)', 'Tax', 'Delivery fee', 'Paid (tax incl.)'];
+    $lines = [implode(',', $header)];
+    foreach ($data['orders'] as $order) {
+        $lines[] = implode(',', array_map($csvCell, [
+            $order['createdAt'],
+            $order['number'],
+            $order['status'],
+            $order['fulfillment'],
+            $order['pickupAt'],
+            $order['customerName'],
+            !empty($order['member']) ? 'yes' : 'no',
+            $order['items'],
+            $order['subtotal'],
+            $order['offerDiscount'],
+            $order['rewardDiscount'],
+            $order['pointsDiscount'],
+            $order['tax'],
+            $order['deliveryFee'],
+            $order['paid'],
+        ]));
+    }
+    $days = $data['period']['days'];
+    $name = 'adarsha-orders-' . ($days[0] ?? 'start') . '_' . ($days[count($days) - 1] ?? 'end') . '.csv';
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $name . '"');
+    header('Cache-Control: no-store');
+    echo "\xEF\xBB\xBF" . implode("\r\n", $lines);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: GET /dashboard/export  (config backup, no customer PII)
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/dashboard/export' || $subPath === '/dashboard/export/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $settings = null;
+    try {
+        $settings = $pdo->query('SELECT * FROM Settings LIMIT 1')->fetch() ?: null;
+    } catch (\Throwable $e) {}
+    $categories = [];
+    $menuItems = [];
+    $offers = [];
+    $carousels = [];
+    try { $categories = $pdo->query('SELECT * FROM Category ORDER BY sortOrder ASC')->fetchAll() ?: []; } catch (\Throwable $e) {}
+    try { $menuItems = $pdo->query('SELECT * FROM MenuItem ORDER BY categoryId ASC, sortOrder ASC')->fetchAll() ?: []; } catch (\Throwable $e) {}
+    try { $offers = $pdo->query('SELECT * FROM Offer ORDER BY createdAt DESC')->fetchAll() ?: []; } catch (\Throwable $e) {}
+    try { $carousels = $pdo->query('SELECT * FROM CarouselSlide ORDER BY sortOrder ASC')->fetchAll() ?: []; } catch (\Throwable $e) {}
+
+    $secretIds = ['PAGE_SETTINGS_EXT', 'PAYMENT_RECEIVING_DEVICES', 'PAYMENT_GATEWAYS', 'LINE_BOT_CONFIG', 'MINI_GAME_CONFIG'];
+    $secrets = [];
+    $pageExt = [];
+    foreach ($secretIds as $sid) {
+        $cfg = getAppSecretConfig($pdo, $sid, []);
+        if (is_array($cfg)) {
+            foreach (['channelSecret', 'channelAccessToken', 'accessToken', 'secret', 'privateKey', 'webhookSecret', 'apiKey'] as $strip) {
+                unset($cfg[$strip]);
+            }
+        }
+        $secrets[$sid] = $cfg;
+        if ($sid === 'PAGE_SETTINGS_EXT' && is_array($cfg)) $pageExt = $cfg;
+    }
+
+    $payload = [
+        'version' => 1,
+        'exportedAt' => date('c'),
+        'app' => 'adarsha',
+        'data' => [
+            'settings' => $settings,
+            'pageExt' => $pageExt,
+            'categories' => $categories,
+            'menuItems' => $menuItems,
+            'offers' => $offers,
+            'carousels' => $carousels,
+            'secrets' => $secrets,
+        ],
+    ];
+    $day = (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d');
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename="adarsha-backup-' . $day . '.json"');
+    header('Cache-Control: no-store');
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Endpoint: POST /dashboard/import
+// -------------------------------------------------------------
+if ($method === 'POST' && ($subPath === '/dashboard/import' || $subPath === '/dashboard/import/')) {
+    requireAdminUser($jwtSecret, $pdo);
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $sectionsIn = isset($input['sections']) && is_array($input['sections']) ? $input['sections'] : [];
+    $data = isset($input['data']) && is_array($input['data']) ? $input['data'] : $input;
+    $sections = [
+        'settings' => !array_key_exists('settings', $sectionsIn) || !empty($sectionsIn['settings']),
+        'pageExt' => !array_key_exists('pageExt', $sectionsIn) || !empty($sectionsIn['pageExt']),
+        'categories' => !empty($sectionsIn['categories']),
+        'menuItems' => !empty($sectionsIn['menuItems']),
+        'offers' => !empty($sectionsIn['offers']),
+        'carousels' => !empty($sectionsIn['carousels']),
+        'secrets' => !empty($sectionsIn['secrets']),
+    ];
+    $imported = ['ok' => true];
+
+    if ($sections['settings'] && !empty($data['settings']) && is_array($data['settings'])) {
+        $row = $data['settings'];
+        unset($row['id']);
+        $cols = [];
+        try {
+            $cols = $pdo->query('SHOW COLUMNS FROM Settings')->fetchAll(PDO::FETCH_COLUMN) ?: [];
+        } catch (\Throwable $e) {}
+        $sets = [];
+        $vals = [];
+        foreach ($row as $k => $v) {
+            if (!in_array($k, $cols, true) || $k === 'id') continue;
+            $sets[] = "`$k` = ?";
+            if (is_bool($v)) $vals[] = $v ? 1 : 0;
+            elseif (is_array($v) || is_object($v)) $vals[] = json_encode($v, JSON_UNESCAPED_UNICODE);
+            else $vals[] = $v;
+        }
+        if ($sets) {
+            $existingId = null;
+            try {
+                $existingId = $pdo->query('SELECT id FROM Settings LIMIT 1')->fetchColumn();
+            } catch (\Throwable $e) {}
+            if ($existingId) {
+                $pdo->prepare('UPDATE Settings SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute([...$vals, $existingId]);
+            }
+            $imported['settings'] = 1;
+        }
+    }
+
+    if ($sections['pageExt'] && !empty($data['pageExt']) && is_array($data['pageExt'])) {
+        saveAppSecretConfig($pdo, 'PAGE_SETTINGS_EXT', $data['pageExt']);
+        $imported['pageExt'] = 1;
+    }
+
+    if ($sections['secrets'] && !empty($data['secrets']) && is_array($data['secrets'])) {
+        $n = 0;
+        foreach (['PAYMENT_RECEIVING_DEVICES', 'PAYMENT_GATEWAYS', 'LINE_BOT_CONFIG', 'MINI_GAME_CONFIG'] as $sid) {
+            if (!isset($data['secrets'][$sid]) || !is_array($data['secrets'][$sid])) continue;
+            saveAppSecretConfig($pdo, $sid, $data['secrets'][$sid]);
+            $n++;
+        }
+        $imported['secrets'] = $n;
+    }
+
+    $upsertById = function (string $table, array $rows) use ($pdo): int {
+        $n = 0;
+        foreach ($rows as $row) {
+            if (empty($row['id'])) continue;
+            $id = $row['id'];
+            unset($row['id'], $row['category'], $row['variants'], $row['optionGroups'], $row['parent'], $row['subCategories'], $row['menus'], $row['items']);
+            $cols = array_keys($row);
+            if (!$cols) continue;
+            $placeholders = implode(',', array_fill(0, count($cols), '?'));
+            $colSql = '`' . implode('`,`', $cols) . '`';
+            $updates = implode(',', array_map(fn($c) => "`$c`=VALUES(`$c`)", $cols));
+            $vals = [];
+            foreach ($cols as $c) {
+                $v = $row[$c];
+                if (is_bool($v)) $vals[] = $v ? 1 : 0;
+                elseif (is_array($v) || is_object($v)) $vals[] = json_encode($v, JSON_UNESCAPED_UNICODE);
+                else $vals[] = $v;
+            }
+            try {
+                $pdo->prepare("INSERT INTO `$table` (`id`,$colSql) VALUES (?,$placeholders) ON DUPLICATE KEY UPDATE $updates")
+                    ->execute([$id, ...$vals]);
+                $n++;
+            } catch (\Throwable $e) {}
+        }
+        return $n;
+    };
+
+    if ($sections['categories'] && !empty($data['categories']) && is_array($data['categories'])) {
+        $imported['categories'] = $upsertById('Category', $data['categories']);
+    }
+    if ($sections['menuItems'] && !empty($data['menuItems']) && is_array($data['menuItems'])) {
+        $imported['menuItems'] = $upsertById('MenuItem', $data['menuItems']);
+    }
+    if ($sections['offers'] && !empty($data['offers']) && is_array($data['offers'])) {
+        $imported['offers'] = $upsertById('Offer', $data['offers']);
+    }
+    if ($sections['carousels'] && !empty($data['carousels']) && is_array($data['carousels'])) {
+        $imported['carousels'] = $upsertById('CarouselSlide', $data['carousels']);
+    }
+
+    echo json_encode(['success' => true, 'imported' => $imported], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// -------------------------------------------------------------
 // Endpoint: GET /dashboard/notifications
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/dashboard/notifications' || $subPath === '/dashboard/notifications/')) {
-    $user = requireStaffUser($jwtSecret, $pdo);
+    $user = requireKitchenUser($jwtSecret, $pdo);
 
     $notes = [];
     try {
@@ -6429,9 +8705,11 @@ function verifyJwt($jwt, $secret) {
     $parts = explode('.', $jwt);
     if (count($parts) !== 3) return null;
     list($headb64, $bodyb64, $sigb64) = $parts;
+    $header = json_decode(base64UrlDecode($headb64), true);
+    if (!is_array($header) || ($header['alg'] ?? '') !== 'HS256') return null;
     $sig = base64UrlDecode($sigb64);
     $expectedSig = hash_hmac('sha256', "$headb64.$bodyb64", $secret, true);
-    if (!hash_equals($sig, $expectedSig)) return null;
+    if (!is_string($sig) || strlen($sig) !== strlen($expectedSig) || !hash_equals($expectedSig, $sig)) return null;
     $payload = json_decode(base64UrlDecode($bodyb64), true);
     if (!$payload || !isset($payload['exp']) || $payload['exp'] < time()) return null;
     return $payload;
@@ -6527,8 +8805,176 @@ function generateUuidV4() {
     return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
 }
 
-function requireStaffUser($secret, $pdo) {
-    $token = getBearerOrCookie('kalpana_session');
+function isSafePageImage($value) {
+    if (!is_string($value)) return false;
+    $value = trim($value);
+    if ($value === '' || preg_match('/[\s\'"<>()\\\\]/', $value) || strpos($value, '..') !== false) return false;
+    if (preg_match('#^/uploads/[\w.-]+$#', $value)) return true;
+    if (preg_match('#^/(?:[\w.-]+/)*[\w.-]+\.(?:webp|png|jpe?g|gif)$#', $value)) return true;
+    return strncmp($value, 'https://', 8) === 0;
+}
+
+function loadPageSettingsExt(PDO $pdo): array {
+    try {
+        $stmt = $pdo->prepare('SELECT publicKey FROM AppSecret WHERE id = ?');
+        $stmt->execute(['PAGE_SETTINGS_EXT']);
+        $row = $stmt->fetch();
+        if ($row && !empty($row['publicKey'])) {
+            $data = json_decode($row['publicKey'], true);
+            return is_array($data) ? $data : [];
+        }
+    } catch (Exception $e) {}
+    return [];
+}
+
+function savePageSettingsExt(PDO $pdo, array $data): void {
+    $encoded = json_encode($data, JSON_UNESCAPED_UNICODE);
+    $stmt = $pdo->prepare('
+        INSERT INTO AppSecret (id, publicKey, privateKey)
+        VALUES (?, ?, "")
+        ON DUPLICATE KEY UPDATE publicKey = VALUES(publicKey)
+    ');
+    $stmt->execute(['PAGE_SETTINGS_EXT', $encoded]);
+}
+
+function approxStoreCoords(): array {
+    return [
+        'musashisakai' => ['lat' => 35.7019, 'lng' => 139.5437],
+        'higashikoganei' => ['lat' => 35.7011, 'lng' => 139.5249],
+        'musashikoganei' => ['lat' => 35.6999, 'lng' => 139.5077],
+        'musashikoganei-1' => ['lat' => 35.6999, 'lng' => 139.5077],
+        'kokubunji' => ['lat' => 35.701, 'lng' => 139.4806],
+        'chiba' => ['lat' => 35.611, 'lng' => 140.114],
+        'shinmaruko' => ['lat' => 35.5803, 'lng' => 139.6612],
+        'aroy' => ['lat' => 35.7025, 'lng' => 139.5055],
+        'musashikoganei-2' => ['lat' => 35.703, 'lng' => 139.503],
+        'takatsu' => ['lat' => 35.603, 'lng' => 139.617],
+        'hachioji' => ['lat' => 35.659, 'lng' => 139.3355],
+    ];
+}
+
+function storeHasCoords($store): bool {
+    return isset($store['latitude'], $store['longitude'])
+        && is_numeric($store['latitude']) && is_numeric($store['longitude'])
+        && abs((float)$store['latitude']) <= 90 && abs((float)$store['longitude']) <= 180;
+}
+
+function withStoreCoords(array $stores): array {
+    $approx = approxStoreCoords();
+    $out = [];
+    foreach ($stores as $store) {
+        if (!is_array($store)) continue;
+        if (storeHasCoords($store)) {
+            $store['latitude'] = (float)$store['latitude'];
+            $store['longitude'] = (float)$store['longitude'];
+            $out[] = $store;
+            continue;
+        }
+        $id = (string)($store['id'] ?? '');
+        if ($id !== '' && isset($approx[$id])) {
+            $store['latitude'] = $approx[$id]['lat'];
+            $store['longitude'] = $approx[$id]['lng'];
+            $store['coordsApproximate'] = true;
+        } else {
+            $store['latitude'] = null;
+            $store['longitude'] = null;
+        }
+        $out[] = $store;
+    }
+    return $out;
+}
+
+function getStoredStoreLocations(PDO $pdo): array {
+    $ext = loadPageSettingsExt($pdo);
+    if (!empty($ext['storeLocations']) && is_array($ext['storeLocations'])) {
+        return array_values($ext['storeLocations']);
+    }
+    try {
+        $row = $pdo->query('SELECT storeLocations FROM Settings LIMIT 1')->fetch();
+        if (!empty($row['storeLocations'])) {
+            $parsed = is_string($row['storeLocations']) ? json_decode($row['storeLocations'], true) : $row['storeLocations'];
+            if (is_array($parsed) && count($parsed) > 0) return array_values($parsed);
+        }
+    } catch (Exception $e) {}
+    return [];
+}
+
+function saveStoredStoreLocations(PDO $pdo, array $stores): void {
+    $ext = loadPageSettingsExt($pdo);
+    $ext['storeLocations'] = array_values($stores);
+    savePageSettingsExt($pdo, $ext);
+}
+
+function haversineKm(float $lat1, float $lng1, float $lat2, float $lng2): float {
+    $earth = 6371.0088;
+    $dLat = deg2rad($lat2 - $lat1);
+    $dLng = deg2rad($lng2 - $lng1);
+    $h = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+    return 2 * $earth * asin(min(1, sqrt($h)));
+}
+
+function isSafeGoogleMapEmbed($value): bool {
+    if (!is_string($value)) return false;
+    $value = trim($value);
+    if ($value === '') return true;
+    if (preg_match('/[\s\'"<>()\\\\]/', $value) || strpos($value, '..') !== false) return false;
+    return (bool)preg_match('#^https://(([a-z0-9-]+\.)*google\.(com|co\.jp|co\.uk)/maps|maps\.google\.(com|co\.jp|co\.uk)/)#i', $value);
+}
+
+/** Per-branch Hot Pepper / Tabelog pages (https only, matching host). */
+function isSafeReviewSiteUrl($value, string $kind): bool {
+    if (!is_string($value)) return false;
+    $value = trim($value);
+    if ($value === '') return true;
+    if (preg_match('/[\s\'"<>()\\\\]/', $value) || strpos($value, '..') !== false) return false;
+    if ($kind === 'hotpepper') {
+        return (bool)preg_match('#^https://([a-z0-9-]+\.)*hotpepper\.jp([/?#]|$)#i', $value);
+    }
+    return (bool)preg_match('#^https://([a-z0-9-]+\.)*tabelog\.com([/?#]|$)#i', $value);
+}
+
+function geocodeJapanAddress(string $rawQuery): ?array {
+    $query = trim(preg_replace('/\s+/u', ' ', $rawQuery));
+    $query = preg_replace_callback('/[０-９]/u', function ($m) {
+        return mb_convert_kana($m[0], 'n', 'UTF-8');
+    }, $query) ?? $query;
+    $query = str_replace(['－', 'ー', '−', '‐'], '-', $query);
+    if ($query === '') return null;
+
+    $params = [
+        'format' => 'jsonv2',
+        'limit' => '1',
+        'countrycodes' => 'jp',
+        'accept-language' => 'ja',
+    ];
+    if (preg_match('/^〒?\s*(\d{3})-?(\d{4})$/u', $query, $m)) {
+        $params['postalcode'] = $m[1] . '-' . $m[2];
+    } else {
+        $params['q'] = preg_replace('/^〒?\s*\d{3}-?\d{4}\s*/u', '', $query);
+    }
+    $url = 'https://nominatim.openstreetmap.org/search?' . http_build_query($params);
+    $ctx = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => "User-Agent: AdarshaRestaurantWeb/1.0 (store-locator)\r\nAccept: application/json\r\n",
+            'timeout' => 6,
+        ],
+    ]);
+    $body = @file_get_contents($url, false, $ctx);
+    if ($body === false) throw new RuntimeException('GEOCODER_UNAVAILABLE');
+    $rows = json_decode($body, true);
+    if (!is_array($rows) || empty($rows[0]['lat']) || empty($rows[0]['lon'])) return null;
+    return [
+        'lat' => (float)$rows[0]['lat'],
+        'lng' => (float)$rows[0]['lon'],
+        'label' => (string)($rows[0]['display_name'] ?? $query),
+    ];
+}
+
+function requireActiveStaffSession($secret, $pdo) {
+    $token = $_COOKIE['adarsha_session'] ?? $_COOKIE['kalpana_session'] ?? null;
+    if (!$token) $token = getBearerOrCookie('adarsha_session');
+    if (!$token) $token = getBearerOrCookie('kalpana_session');
     if (!$token) {
         http_response_code(401);
         echo json_encode(['error' => ['code' => 'UNAUTHORIZED', 'message' => 'Staff login required']]);
@@ -6551,8 +8997,30 @@ function requireStaffUser($secret, $pdo) {
     return $user;
 }
 
+/** ADMIN + STAFF only (matches Node requireStaff). */
+function requireStaffUser($secret, $pdo) {
+    $user = requireActiveStaffSession($secret, $pdo);
+    if (!in_array($user['role'], ['ADMIN', 'STAFF'], true)) {
+        http_response_code(403);
+        echo json_encode(['error' => ['code' => 'FORBIDDEN', 'message' => 'Staff permissions required']]);
+        exit;
+    }
+    return $user;
+}
+
+/** ADMIN + STAFF + KITCHEN (matches Node requireKitchen). */
+function requireKitchenUser($secret, $pdo) {
+    $user = requireActiveStaffSession($secret, $pdo);
+    if (!in_array($user['role'], ['ADMIN', 'STAFF', 'KITCHEN'], true)) {
+        http_response_code(403);
+        echo json_encode(['error' => ['code' => 'FORBIDDEN', 'message' => 'Kitchen permissions required']]);
+        exit;
+    }
+    return $user;
+}
+
 function requireAdminUser($secret, $pdo) {
-    $user = requireStaffUser($secret, $pdo);
+    $user = requireActiveStaffSession($secret, $pdo);
     if ($user['role'] !== 'ADMIN') {
         http_response_code(403);
         echo json_encode(['error' => ['code' => 'FORBIDDEN', 'message' => 'Admin permissions required']]);
@@ -6666,14 +9134,17 @@ if ($method === 'POST' && ($subPath === '/auth/login' || $subPath === '/auth/log
     $rememberMe = !empty($input['rememberMe']);
     $cookieExpires = $rememberMe ? (time() + $ttl) : 0; // 0 = session cookie (expires on browser close or system reset)
 
-    setcookie('kalpana_session', $token, [
+    $cookieOpts = [
         'expires' => $cookieExpires,
         'path' => '/',
         'domain' => '',
         'secure' => true,
         'httponly' => true,
         'samesite' => 'Lax',
-    ]);
+    ];
+    // Keep both names so Node (adarsha_session) and legacy PHP (kalpana_session) stay in sync.
+    setcookie('adarsha_session', $token, $cookieOpts);
+    setcookie('kalpana_session', $token, $cookieOpts);
 
     echo json_encode(['user' => $sessionUser, 'token' => $token, 'rememberMe' => $rememberMe]);
     exit;
@@ -6683,14 +9154,16 @@ if ($method === 'POST' && ($subPath === '/auth/login' || $subPath === '/auth/log
 // Endpoint: POST /auth/logout
 // -------------------------------------------------------------
 if ($method === 'POST' && ($subPath === '/auth/logout' || $subPath === '/auth/logout/')) {
-    setcookie('kalpana_session', '', [
+    $clearOpts = [
         'expires' => time() - 3600,
         'path' => '/',
         'domain' => '',
         'secure' => true,
         'httponly' => true,
         'samesite' => 'Lax',
-    ]);
+    ];
+    setcookie('adarsha_session', '', $clearOpts);
+    setcookie('kalpana_session', '', $clearOpts);
     http_response_code(204);
     exit;
 }
@@ -6699,7 +9172,9 @@ if ($method === 'POST' && ($subPath === '/auth/logout' || $subPath === '/auth/lo
 // Endpoint: GET /auth/me
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/auth/me' || $subPath === '/auth/me/')) {
-    $token = getBearerOrCookie('kalpana_session');
+    $token = $_COOKIE['adarsha_session'] ?? $_COOKIE['kalpana_session'] ?? null;
+    if (!$token) $token = getBearerOrCookie('adarsha_session');
+    if (!$token) $token = getBearerOrCookie('kalpana_session');
     if (!$token) {
         http_response_code(401);
         echo json_encode(['error' => ['code' => 'UNAUTHORIZED', 'message' => 'Not authenticated']]);
@@ -6749,12 +9224,442 @@ function newMemberCode() {
     return $code;
 }
 
+function stampFlagOn($value): bool {
+    return !in_array($value, [false, 0, '0', 'false', 'FALSE'], true);
+}
+
+function normalizeMemberCodePhp(string $input): string {
+    $code = strtoupper(trim($input));
+    $code = preg_replace('/^(ADARSHA|KALPNA|KALPANA):/i', '', $code) ?? $code;
+    return preg_replace('/[\s-]/', '', $code) ?? $code;
+}
+
+function loadStampConfig(PDO $pdo): array {
+    $row = [];
+    try {
+        $stmt = $pdo->query('SELECT stampsEnabled, stampsPerCard, stampMinAmount, stampCooldownHours, stampRewardValidDays, stampRewards FROM Settings LIMIT 1');
+        $row = $stmt ? ($stmt->fetch() ?: []) : [];
+    } catch (Throwable $e) {
+        $row = [];
+    }
+    $perCard = (int)($row['stampsPerCard'] ?? 10);
+    if ($perCard < 2) $perCard = 2;
+    if ($perCard > 30) $perCard = 30;
+    $rewardsRaw = $row['stampRewards'] ?? null;
+    if (is_string($rewardsRaw)) $rewardsRaw = json_decode($rewardsRaw, true);
+    if (!is_array($rewardsRaw) || count($rewardsRaw) === 0) {
+        $rewardsRaw = [
+            ['at' => 5, 'titleJa' => '次回セットのナングレードアップ無料', 'kind' => 'PERK', 'amount' => 0],
+            ['at' => 10, 'titleJa' => '次回1グループ 1,000円引き', 'kind' => 'AMOUNT_OFF', 'amount' => 1000],
+        ];
+    }
+    $rewards = [];
+    foreach ($rewardsRaw as $r) {
+        if (!is_array($r)) continue;
+        $at = (int)($r['at'] ?? 0);
+        if ($at < 1 || $at > $perCard) continue;
+        $kind = (($r['kind'] ?? '') === 'AMOUNT_OFF') ? 'AMOUNT_OFF' : 'PERK';
+        $rewards[] = [
+            'at' => $at,
+            'titleJa' => trim((string)($r['titleJa'] ?? '')),
+            'kind' => $kind,
+            'amount' => $kind === 'AMOUNT_OFF' ? (int)($r['amount'] ?? 0) : 0,
+        ];
+    }
+    usort($rewards, fn($a, $b) => $a['at'] <=> $b['at']);
+    return [
+        'enabled' => stampFlagOn($row['stampsEnabled'] ?? true),
+        'perCard' => $perCard,
+        'minAmount' => isset($row['stampMinAmount']) ? (int)$row['stampMinAmount'] : 1000,
+        'cooldownHours' => isset($row['stampCooldownHours']) ? (int)$row['stampCooldownHours'] : 6,
+        'rewardValidDays' => isset($row['stampRewardValidDays']) ? (int)$row['stampRewardValidDays'] : 0,
+        'rewards' => $rewards,
+    ];
+}
+
+function ensureMemberCode(PDO $pdo, array $customer): string {
+    $code = trim((string)($customer['memberCode'] ?? ''));
+    if ($code !== '') return $code;
+    for ($i = 0; $i < 8; $i++) {
+        $code = newMemberCode();
+        try {
+            $upd = $pdo->prepare('UPDATE Customer SET memberCode = ? WHERE id = ? AND (memberCode IS NULL OR memberCode = "")');
+            $upd->execute([$code, $customer['id']]);
+            if ($upd->rowCount() > 0) return $code;
+            $again = $pdo->prepare('SELECT memberCode FROM Customer WHERE id = ? LIMIT 1');
+            $again->execute([$customer['id']]);
+            $row = $again->fetch();
+            if (!empty($row['memberCode'])) return (string)$row['memberCode'];
+        } catch (Throwable $e) {
+            // unique collision — retry
+        }
+    }
+    return $code;
+}
+
+function stampCardPayload(PDO $pdo, string $customerId): array {
+    $config = loadStampConfig($pdo);
+    $custStmt = $pdo->prepare('SELECT * FROM Customer WHERE id = ? AND deletedAt IS NULL LIMIT 1');
+    $custStmt->execute([$customerId]);
+    $customer = $custStmt->fetch();
+    if (!$customer) {
+        return [
+            'enabled' => $config['enabled'],
+            'memberCode' => '',
+            'perCard' => $config['perCard'],
+            'stamps' => 0,
+            'totalStamps' => 0,
+            'completedCards' => 0,
+            'lastStampAt' => null,
+            'nextStampAt' => null,
+            'rules' => [
+                'minAmount' => $config['minAmount'],
+                'cooldownHours' => $config['cooldownHours'],
+                'rewardValidDays' => $config['rewardValidDays'],
+            ],
+            'milestones' => $config['rewards'],
+            'rewards' => [],
+            'pastRewards' => [],
+            'history' => [],
+        ];
+    }
+
+    $memberCode = ensureMemberCode($pdo, $customer);
+    $now = time();
+    $lastStampAt = $customer['lastStampAt'] ?? null;
+    $nextStampAt = null;
+    if ($lastStampAt && $config['cooldownHours'] > 0) {
+        $nextTs = strtotime($lastStampAt) + ($config['cooldownHours'] * 3600);
+        if ($nextTs > $now) $nextStampAt = date('c', $nextTs);
+    }
+
+    $histStmt = $pdo->prepare('SELECT * FROM Stamp WHERE customerId = ? ORDER BY createdAt DESC LIMIT 50');
+    $histStmt->execute([$customerId]);
+    $history = $histStmt->fetchAll() ?: [];
+
+    $rewStmt = $pdo->prepare('SELECT * FROM StampReward WHERE customerId = ? ORDER BY earnedAt DESC LIMIT 50');
+    $rewStmt->execute([$customerId]);
+    $allRewards = $rewStmt->fetchAll() ?: [];
+
+    $publicReward = function (array $r, ?string $statusOverride = null): array {
+        return [
+            'id' => $r['id'],
+            'titleJa' => $r['titleJa'],
+            'kind' => $r['kind'],
+            'amount' => (int)($r['amount'] ?? 0),
+            'at' => $r['at'] ?? null,
+            'card' => $r['card'] ?? null,
+            'status' => $statusOverride ?? $r['status'],
+            'earnedAt' => $r['earnedAt'] ?? null,
+            'expiresAt' => $r['expiresAt'] ?? null,
+            'usedAt' => $r['usedAt'] ?? null,
+        ];
+    };
+
+    $usable = [];
+    $past = [];
+    foreach ($allRewards as $r) {
+        $expired = !empty($r['expiresAt']) && strtotime($r['expiresAt']) <= $now;
+        if (($r['status'] ?? '') === 'AVAILABLE' && !$expired) {
+            $usable[] = $publicReward($r);
+        } else {
+            $past[] = $publicReward($r, (($r['status'] ?? '') === 'AVAILABLE' && $expired) ? 'EXPIRED' : ($r['status'] ?? 'USED'));
+        }
+    }
+
+    return [
+        'enabled' => $config['enabled'],
+        'memberCode' => $memberCode,
+        'perCard' => $config['perCard'],
+        'stamps' => min((int)($customer['stampCount'] ?? 0), $config['perCard']),
+        'totalStamps' => (int)($customer['stampTotal'] ?? 0),
+        'completedCards' => (int)($customer['stampCardsCompleted'] ?? 0),
+        'lastStampAt' => $lastStampAt,
+        'nextStampAt' => $nextStampAt,
+        'rules' => [
+            'minAmount' => $config['minAmount'],
+            'cooldownHours' => $config['cooldownHours'],
+            'rewardValidDays' => $config['rewardValidDays'],
+        ],
+        'milestones' => array_map(fn($m) => [
+            'at' => $m['at'],
+            'titleJa' => $m['titleJa'],
+            'kind' => $m['kind'],
+            'amount' => $m['amount'],
+        ], $config['rewards']),
+        'rewards' => $usable,
+        'pastRewards' => $past,
+        'history' => array_map(fn($s) => [
+            'id' => $s['id'],
+            'card' => (int)$s['card'],
+            'position' => (int)$s['position'],
+            'source' => $s['source'],
+            'amount' => isset($s['amount']) ? (int)$s['amount'] : null,
+            'orderNumber' => isset($s['orderNumber']) ? (int)$s['orderNumber'] : null,
+            'createdAt' => $s['createdAt'],
+        ], $history),
+    ];
+}
+
+/**
+ * Award one stamp when rules allow. Returns status array matching Node awardStamp.
+ */
+function awardStampPhp(PDO $pdo, string $customerId, array $input): array {
+    $config = loadStampConfig($pdo);
+    if (!$config['enabled']) return ['status' => 'DISABLED'];
+    $amount = (int)($input['amount'] ?? 0);
+    $source = ($input['source'] ?? 'STAFF') === 'ORDER' ? 'ORDER' : 'STAFF';
+    if ($source !== 'STAFF' && $amount < $config['minAmount']) {
+        return ['status' => 'BELOW_MINIMUM', 'minAmount' => $config['minAmount']];
+    }
+
+    $now = date('Y-m-d H:i:s');
+    $bypass = !empty($input['bypassCooldown']);
+    if ($bypass || $config['cooldownHours'] <= 0) {
+        $upd = $pdo->prepare('UPDATE Customer SET stampCount = stampCount + 1, stampTotal = stampTotal + 1, lastStampAt = ?, updatedAt = ? WHERE id = ? AND deletedAt IS NULL');
+        $upd->execute([$now, $now, $customerId]);
+    } else {
+        $cutoff = date('Y-m-d H:i:s', time() - ($config['cooldownHours'] * 3600));
+        $upd = $pdo->prepare('UPDATE Customer SET stampCount = stampCount + 1, stampTotal = stampTotal + 1, lastStampAt = ?, updatedAt = ? WHERE id = ? AND deletedAt IS NULL AND (lastStampAt IS NULL OR lastStampAt <= ?)');
+        $upd->execute([$now, $now, $customerId, $cutoff]);
+    }
+
+    if ($upd->rowCount() === 0) {
+        $chk = $pdo->prepare('SELECT lastStampAt FROM Customer WHERE id = ? AND deletedAt IS NULL LIMIT 1');
+        $chk->execute([$customerId]);
+        $row = $chk->fetch();
+        if (!$row) return ['status' => 'NOT_FOUND'];
+        $nextAt = null;
+        if (!empty($row['lastStampAt']) && $config['cooldownHours'] > 0) {
+            $nextAt = date('c', strtotime($row['lastStampAt']) + ($config['cooldownHours'] * 3600));
+        }
+        return ['status' => 'TOO_SOON', 'nextAt' => $nextAt ?? date('c')];
+    }
+
+    $cust = $pdo->prepare('SELECT stampCount, stampCardsCompleted FROM Customer WHERE id = ? LIMIT 1');
+    $cust->execute([$customerId]);
+    $c = $cust->fetch() ?: [];
+    $count = (int)($c['stampCount'] ?? 1);
+    $position = min($count, $config['perCard']);
+    $card = (int)($c['stampCardsCompleted'] ?? 0) + 1;
+    $cardCompleted = $position >= $config['perCard'];
+
+    $note = trim((string)($input['note'] ?? ''));
+    if ($bypass) $note = $note !== '' ? ($note . ' (Cooldown override)') : 'Cooldown override';
+
+    $stampId = generateUuidV4();
+    $pdo->prepare('INSERT INTO Stamp (id, customerId, card, position, source, amount, orderId, orderNumber, userId, note, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        ->execute([
+            $stampId,
+            $customerId,
+            $card,
+            $position,
+            $source,
+            $amount,
+            $input['orderId'] ?? null,
+            isset($input['orderNumber']) ? (int)$input['orderNumber'] : null,
+            $input['userId'] ?? null,
+            $note !== '' ? $note : null,
+            $now,
+        ]);
+
+    $earnedRewards = [];
+    foreach ($config['rewards'] as $rule) {
+        if ((int)$rule['at'] !== $position || $rule['titleJa'] === '') continue;
+        $earnedRewards[] = $rule;
+        $expiresAt = null;
+        if ($config['rewardValidDays'] > 0) {
+            $expiresAt = date('Y-m-d H:i:s', time() + ($config['rewardValidDays'] * 86400));
+        }
+        $pdo->prepare('INSERT INTO StampReward (id, customerId, titleJa, kind, amount, at, card, status, earnedAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?, ?, "AVAILABLE", ?, ?)')
+            ->execute([
+                generateUuidV4(),
+                $customerId,
+                $rule['titleJa'],
+                $rule['kind'],
+                $rule['amount'],
+                $position,
+                $card,
+                $now,
+                $expiresAt,
+            ]);
+    }
+
+    if ($cardCompleted) {
+        $pdo->prepare('UPDATE Customer SET stampCount = 0, stampCardsCompleted = stampCardsCompleted + 1 WHERE id = ? AND stampCount = ?')
+            ->execute([$customerId, $count]);
+    }
+
+    return [
+        'status' => 'AWARDED',
+        'position' => $position,
+        'perCard' => $config['perCard'],
+        'cardCompleted' => $cardCompleted,
+        'rewards' => array_map(fn($r) => [
+            'titleJa' => $r['titleJa'],
+            'kind' => $r['kind'],
+            'amount' => $r['amount'],
+        ], $earnedRewards),
+    ];
+}
+
+function settleMemberStampOnOrder(PDO $pdo, array $order): void {
+    $customerId = (string)($order['customerId'] ?? '');
+    if ($customerId === '') return;
+    if (!empty($order['stampAwarded'])) return;
+    $amount = (int)($order['total'] ?? 0) + (int)($order['tax'] ?? 0);
+    $result = awardStampPhp($pdo, $customerId, [
+        'source' => 'ORDER',
+        'amount' => $amount,
+        'orderId' => $order['id'] ?? null,
+        'orderNumber' => isset($order['number']) ? (int)$order['number'] : null,
+    ]);
+    if (($result['status'] ?? '') === 'AWARDED') {
+        $pdo->prepare('UPDATE PickupOrder SET stampAwarded = 1 WHERE id = ?')->execute([$order['id']]);
+    }
+}
+
+function releaseStampRewardForOrder(PDO $pdo, string $orderId): void {
+    $pdo->prepare('UPDATE StampReward SET status = "AVAILABLE", usedAt = NULL, orderId = NULL, orderNumber = NULL WHERE orderId = ? AND status = "USED"')
+        ->execute([$orderId]);
+}
+
+function findCustomerByMemberCode(PDO $pdo, string $rawCode): ?array {
+    $code = normalizeMemberCodePhp($rawCode);
+    if (!preg_match('/^[2-9A-HJKMNP-Z]{8}$/', $code)) return null;
+    $stmt = $pdo->prepare('SELECT * FROM Customer WHERE memberCode = ? AND deletedAt IS NULL AND (isActive IS NULL OR isActive = 1) LIMIT 1');
+    $stmt->execute([$code]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function smtpRead($fp): string {
+    $data = '';
+    while (!feof($fp)) {
+        $line = fgets($fp, 515);
+        if ($line === false) break;
+        $data .= $line;
+        if (isset($line[3]) && $line[3] === ' ') break;
+    }
+    return $data;
+}
+
+function smtpExpect($fp, array $codes, string $label): string {
+    $resp = smtpRead($fp);
+    $code = (int)substr($resp, 0, 3);
+    if (!in_array($code, $codes, true)) {
+        throw new RuntimeException($label . ' failed: ' . trim(preg_replace('/\s+/', ' ', $resp)));
+    }
+    return $resp;
+}
+
+function smtpCmd($fp, string $cmd, array $codes, string $label): string {
+    if (fwrite($fp, $cmd . "\r\n") === false) {
+        throw new RuntimeException($label . ' failed: socket write error');
+    }
+    return smtpExpect($fp, $codes, $label);
+}
+
+/** Send one HTML message through an authenticated SMTP server (Gmail: smtp.gmail.com:587). */
+function smtpSendMessage(string $host, int $port, string $user, string $pass, string $fromEmail, string $fromName, string $toEmail, string $subject, string $html): void {
+    $remote = ($port === 465 ? 'ssl://' : 'tcp://') . $host . ':' . $port;
+    $context = stream_context_create([
+        'ssl' => [
+            'verify_peer' => true,
+            'verify_peer_name' => true,
+            'allow_self_signed' => false,
+        ],
+    ]);
+    $errno = 0;
+    $errstr = '';
+    $fp = @stream_socket_client($remote, $errno, $errstr, 20, STREAM_CLIENT_CONNECT, $context);
+    if (!$fp) {
+        throw new RuntimeException('connect failed (' . $errno . ') ' . $errstr);
+    }
+    stream_set_timeout($fp, 20);
+    try {
+        smtpExpect($fp, [220], 'greeting');
+        smtpCmd($fp, 'EHLO adarsha.jp', [250], 'EHLO');
+        if ($port !== 465) {
+            smtpCmd($fp, 'STARTTLS', [220], 'STARTTLS');
+            $crypto = stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+            if ($crypto !== true) {
+                throw new RuntimeException('STARTTLS failed');
+            }
+            smtpCmd($fp, 'EHLO adarsha.jp', [250], 'EHLO');
+        }
+        smtpCmd($fp, 'AUTH LOGIN', [334], 'AUTH');
+        smtpCmd($fp, base64_encode($user), [334], 'AUTH');
+        smtpCmd($fp, base64_encode($pass), [235], 'AUTH');
+        smtpCmd($fp, 'MAIL FROM:<' . $fromEmail . '>', [250], 'MAIL FROM');
+        smtpCmd($fp, 'RCPT TO:<' . $toEmail . '>', [250, 251], 'RCPT TO');
+        smtpCmd($fp, 'DATA', [354], 'DATA');
+        $body = preg_replace("/\r\n|\r|\n/", "\r\n", $html);
+        $body = preg_replace('/^\./m', '..', $body);
+        $encodedName = '=?UTF-8?B?' . base64_encode($fromName) . '?=';
+        $payload = "From: {$encodedName} <{$fromEmail}>\r\n"
+            . "To: <{$toEmail}>\r\n"
+            . "Subject: {$subject}\r\n"
+            . "MIME-Version: 1.0\r\n"
+            . "Content-Type: text/html; charset=UTF-8\r\n"
+            . "Content-Transfer-Encoding: 8bit\r\n"
+            . "\r\n" . $body . "\r\n.";
+        smtpCmd($fp, $payload, [250], 'message');
+        smtpCmd($fp, 'QUIT', [221], 'QUIT');
+    } finally {
+        fclose($fp);
+    }
+}
+
+function hashVerificationCode(string $code): string {
+    global $jwtSecret;
+    return substr(hash_hmac('sha256', 'code:' . $code, (string)$jwtSecret), 0, 32);
+}
+
+function hashVerificationToken(string $token): string {
+    global $jwtSecret;
+    return hash_hmac('sha256', 'token:' . $token, (string)$jwtSecret);
+}
+
+function verificationCodeMatches(string $stored, string $code): bool {
+    if ($stored === '' || $code === '') return false;
+    $hashed = hashVerificationCode($code);
+    if (strlen($stored) === strlen($hashed) && hash_equals($stored, $hashed)) return true;
+    return strlen($stored) === 6 && ctype_digit($stored) && strlen($stored) === strlen($code) && hash_equals($stored, $code);
+}
+
+function verificationTokenMatches(string $stored, string $token): bool {
+    if ($stored === '' || $token === '') return false;
+    $hashed = hashVerificationToken($token);
+    return strlen($stored) === strlen($hashed) && hash_equals($stored, $hashed);
+}
+
+function verificationPageUrl(string $token, string $toEmail): string {
+    $rawHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+    $host = preg_replace('/:\d+$/', '', $rawHost);
+    $port = '';
+    if (in_array($host, ['localhost', '127.0.0.1'], true) && preg_match('/:(\d+)$/', $rawHost, $portMatch)) {
+        $port = ':' . $portMatch[1];
+        $base = 'http://' . $host . $port;
+    } elseif (in_array($host, ['adarsha.jp', 'www.adarsha.jp'], true)) {
+        $base = 'https://' . $host;
+    } else {
+        $base = 'https://adarsha.jp';
+    }
+    return $base . '/account/verify?token=' . rawurlencode($token) . '&email=' . rawurlencode($toEmail);
+}
+
 function sendAccountVerificationEmail(string $toEmail, string $toName, string $code, string $token): bool {
+    global $cfg;
+    if (!filter_var($toEmail, FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/', $toEmail . $code . $token)) {
+        error_log('Adarsha verification mail refused: invalid recipient');
+        return false;
+    }
+
     $senderEmail = '4ogcafe@gmail.com';
     $senderName = 'アダルサ (ADARSHA)';
-    $subject = '【アダルサ】メールアドレス確認コード（' . $code . '）のご案内';
-    
-    $verifyUrl = 'https://pnglike.com/account/verify?token=' . rawurlencode($token) . '&email=' . rawurlencode($toEmail);
+    $subject = '【アダルサ】確認コード ' . $code;
+    $verifyUrl = verificationPageUrl($token, $toEmail);
     $safeName = htmlspecialchars($toName ?: 'お客様', ENT_QUOTES, 'UTF-8');
 
     $htmlBody = <<<HTML
@@ -6822,19 +9727,37 @@ function sendAccountVerificationEmail(string $toEmail, string $toName, string $c
 </html>
 HTML;
 
+    $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    $smtpUser = trim((string)($cfg('smtp_user', '') ?: getenv('MAIL_USERNAME') ?: getenv('SMTP_USERNAME') ?: $senderEmail));
+    $smtpPass = trim((string)($cfg('smtp_pass', '') ?: $cfg('smtp_password', '') ?: getenv('MAIL_PASSWORD') ?: getenv('SMTP_PASSWORD') ?: getenv('GMAIL_APP_PASSWORD') ?: ''));
+    $smtpHost = trim((string)($cfg('smtp_host', '') ?: getenv('MAIL_HOST') ?: getenv('SMTP_HOST') ?: 'smtp.gmail.com')) ?: 'smtp.gmail.com';
+    $smtpPort = (int)($cfg('smtp_port', 0) ?: getenv('MAIL_PORT') ?: getenv('SMTP_PORT') ?: 465) ?: 465;
+    $fromEmail = trim((string)($cfg('smtp_from', '') ?: getenv('MAIL_FROM_ADDRESS') ?: $smtpUser ?: $senderEmail));
+    $fromName = trim((string)($cfg('smtp_from_name', '') ?: getenv('MAIL_FROM_NAME') ?: $senderName)) ?: $senderName;
+
+    if ($smtpPass !== '' && $smtpUser !== '' && $fromEmail !== '') {
+        try {
+            smtpSendMessage($smtpHost, $smtpPort, $smtpUser, $smtpPass, $fromEmail, $fromName, $toEmail, $encodedSubject, $htmlBody);
+            return true;
+        } catch (Throwable $e) {
+            error_log('Adarsha verification SMTP failed: ' . $e->getMessage());
+        }
+    } else {
+        error_log('Adarsha verification SMTP is not configured (set smtp_pass to a Gmail app password)');
+    }
+
+    // PHP mail() cannot authenticate as Gmail. Use an address on this site's domain so the host accepts it.
+    $fallbackFrom = trim((string)$cfg('mail_from', 'noreply@adarsha.jp'));
+    if (!filter_var($fallbackFrom, FILTER_VALIDATE_EMAIL)) $fallbackFrom = 'noreply@adarsha.jp';
     $headers = [
         'MIME-Version: 1.0',
         'Content-Type: text/html; charset=UTF-8',
-        'From: =?UTF-8?B?' . base64_encode($senderName) . '?= <' . $senderEmail . '>',
+        'From: =?UTF-8?B?' . base64_encode($senderName) . '?= <' . $fallbackFrom . '>',
         'Reply-To: ' . $senderEmail,
-        'Return-Path: ' . $senderEmail,
-        'X-Mailer: PHP/' . phpversion(),
     ];
-
-    $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
-    $mailSuccess = @mail($toEmail, $encodedSubject, $htmlBody, implode("\r\n", $headers), '-f ' . $senderEmail);
+    $mailSuccess = @mail($toEmail, $encodedSubject, $htmlBody, implode("\r\n", $headers), '-f ' . $fallbackFrom);
     if (!$mailSuccess) {
-        $mailSuccess = @mail($toEmail, $encodedSubject, $htmlBody, implode("\r\n", $headers));
+        error_log('Adarsha verification mail() failed for recipient domain ' . substr(strrchr($toEmail, '@') ?: '', 1));
     }
     return (bool)$mailSuccess;
 }
@@ -6892,11 +9815,23 @@ if ($method === 'POST' && ($subPath === '/customers/register' || $subPath === '/
         exit;
     }
 
-    if (strlen($password) < 6) {
+    if (strlen($password) < 8) {
         http_response_code(400);
-        echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => 'パスワードは6文字以上で入力してください。']]);
+        echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => 'パスワードは8文字以上で入力してください。']]);
         exit;
     }
+
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    $rlIp = checkRateLimit($pdo, 'register_cust_ip', $ip, 8, 3600, 3600);
+    $rlEmail = checkRateLimit($pdo, 'register_cust_email', $email, 3, 3600, 3600);
+    if (!$rlIp['allowed'] || !$rlEmail['allowed']) {
+        $retryAfter = max($rlIp['retryAfter'], $rlEmail['retryAfter']);
+        http_response_code(429);
+        echo json_encode(['error' => ['code' => 'TOO_MANY_ATTEMPTS', 'message' => '登録の試行が多すぎます。' . max(1, (int)ceil($retryAfter / 60)) . '分後に再度お試しください。']]);
+        exit;
+    }
+    recordRateLimitFailure($pdo, 'register_cust_ip', $ip, 8, 3600, 3600);
+    recordRateLimitFailure($pdo, 'register_cust_email', $email, 3, 3600, 3600);
 
     $chk = $pdo->prepare('SELECT id, isEmailVerified, name FROM Customer WHERE LOWER(email) = ? LIMIT 1');
     $chk->execute([$email]);
@@ -6910,6 +9845,8 @@ if ($method === 'POST' && ($subPath === '/customers/register' || $subPath === '/
 
     $code = sprintf('%06d', random_int(100000, 999999));
     $token = bin2hex(random_bytes(32));
+    $codeHash = hashVerificationCode($code);
+    $tokenHash = hashVerificationToken($token);
     $expiresAt = date('Y-m-d H:i:s', time() + 15 * 60); // 15 mins validity
     $now = date('Y-m-d H:i:s');
     $passwordHash = password_hash($password, PASSWORD_BCRYPT);
@@ -6928,23 +9865,25 @@ if ($method === 'POST' && ($subPath === '/customers/register' || $subPath === '/
 
     if ($existing) {
         $customerId = $existing['id'];
-        $upd = $pdo->prepare('UPDATE Customer SET name = ?, phone = ?, passwordHash = ?, verificationCode = ?, verificationToken = ?, verificationExpiresAt = ?, updatedAt = ? WHERE id = ?');
-        $upd->execute([$name, $phone ?: null, $passwordHash, $code, $token, $expiresAt, $now, $customerId]);
+        $upd = $pdo->prepare('UPDATE Customer SET name = ?, phone = ?, passwordHash = ?, verificationCode = ?, verificationToken = ?, verificationExpiresAt = ?, verificationAttempts = 0, updatedAt = ? WHERE id = ?');
+        $upd->execute([$name, $phone ?: null, $passwordHash, $codeHash, $tokenHash, $expiresAt, $now, $customerId]);
     } else {
         $customerId = 'cst_' . bin2hex(random_bytes(8));
         $memberCode = newMemberCode();
         $ins = $pdo->prepare('INSERT INTO Customer (id, email, passwordHash, name, phone, memberCode, points, isActive, isEmailVerified, verificationCode, verificationToken, verificationExpiresAt, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?)');
-        $ins->execute([$customerId, $email, $passwordHash, $name, $phone ?: null, $memberCode, $bonusPoints, $code, $token, $expiresAt, $now, $now]);
+        $ins->execute([$customerId, $email, $passwordHash, $name, $phone ?: null, $memberCode, $bonusPoints, $codeHash, $tokenHash, $expiresAt, $now, $now]);
     }
 
-    // Send verification email using 4ogcafe@gmail.com
-    sendAccountVerificationEmail($email, $name, $code, $token);
+    $sent = sendAccountVerificationEmail($email, $name, $code, $token);
 
     http_response_code(200);
     echo json_encode([
         'requiresVerification' => true,
+        'emailSent' => $sent,
         'email' => $email,
-        'message' => '確認コードを ' . $email . ' 宛に送信しました。メールに記載された6桁の確認コードを入力してください。',
+        'message' => $sent
+            ? '確認コードを ' . $email . ' 宛に送信しました。メールに記載された6桁の確認コードを入力してください。'
+            : 'アカウントは作成しましたが、確認メールを送信できませんでした。「コードを再送信」を押すか、時間をおいてお試しください。',
     ]);
     exit;
 }
@@ -6955,9 +9894,10 @@ if ($method === 'POST' && ($subPath === '/customers/register' || $subPath === '/
 if ($method === 'POST' && ($subPath === '/customers/verify-code' || $subPath === '/customers/verify-code/' || $subPath === '/customer/verify-code' || $subPath === '/customer/verify-code/')) {
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $email = strtolower(trim($input['email'] ?? ''));
-    $code = trim((string)($input['code'] ?? ''));
+    $code = preg_replace('/\D/', '', (string)($input['code'] ?? '')) ?? '';
+    $tokenInput = trim((string)($input['token'] ?? ''));
 
-    if (empty($email) || empty($code)) {
+    if ($email === '' || ($code === '' && $tokenInput === '')) {
         http_response_code(400);
         echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => 'メールアドレスと6桁の確認コードを入力してください。']]);
         exit;
@@ -6997,17 +9937,25 @@ if ($method === 'POST' && ($subPath === '/customers/verify-code' || $subPath ===
     }
 
     $storedCode = trim((string)($customer['verificationCode'] ?? ''));
+    $storedToken = trim((string)($customer['verificationToken'] ?? ''));
     $expiresAt = !empty($customer['verificationExpiresAt']) ? strtotime($customer['verificationExpiresAt']) : 0;
     $attempts = (int)($customer['verificationAttempts'] ?? 0);
+    $tokenOk = verificationTokenMatches($storedToken, $tokenInput);
 
-    if ($attempts >= 5) {
+    if (!$tokenOk && $tokenInput !== '' && $code === '') {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'INVALID_TOKEN', 'message' => '認証リンクの有効期限が切れているか無効です。確認コードを入力するか、再送信してください。']]);
+        exit;
+    }
+
+    if (!$tokenOk && $attempts >= 5) {
         $pdo->prepare('UPDATE Customer SET verificationCode = NULL, verificationToken = NULL WHERE id = ?')->execute([$customer['id']]);
         http_response_code(429);
         echo json_encode(['error' => ['code' => 'TOO_MANY_ATTEMPTS', 'message' => '確認コードの入力上限（5回）に達しました。セキュリティのため「コードを再送信」を押して新しいコードを取得してください。']]);
         exit;
     }
 
-    if ($storedCode === '' || !hash_equals($storedCode, $code)) {
+    if (!$tokenOk && !verificationCodeMatches($storedCode, $code)) {
         $newAttempts = $attempts + 1;
         $pdo->prepare('UPDATE Customer SET verificationAttempts = ? WHERE id = ?')->execute([$newAttempts, $customer['id']]);
         $remaining = max(0, 5 - $newAttempts);
@@ -7090,13 +10038,24 @@ if ($method === 'POST' && ($subPath === '/customers/resend-code' || $subPath ===
         exit;
     }
 
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    $rlIp = checkRateLimit($pdo, 'resend_cust_ip', $ip, 10, 3600, 3600);
+    $rlEmail = checkRateLimit($pdo, 'resend_cust_email', $email, 3, 3600, 3600);
+    if (!$rlIp['allowed'] || !$rlEmail['allowed']) {
+        $retryAfter = max($rlIp['retryAfter'], $rlEmail['retryAfter']);
+        http_response_code(429);
+        echo json_encode(['error' => ['code' => 'TOO_MANY_ATTEMPTS', 'message' => '再送信の上限に達しました。' . max(1, (int)ceil($retryAfter / 60)) . '分後に再度お試しください。']]);
+        exit;
+    }
+    recordRateLimitFailure($pdo, 'resend_cust_ip', $ip, 10, 3600, 3600);
+    recordRateLimitFailure($pdo, 'resend_cust_email', $email, 3, 3600, 3600);
+
     $stmt = $pdo->prepare('SELECT id, name, isEmailVerified FROM Customer WHERE LOWER(email) = ? LIMIT 1');
     $stmt->execute([$email]);
     $customer = $stmt->fetch();
 
     if (!$customer) {
-        http_response_code(404);
-        echo json_encode(['error' => ['code' => 'CUSTOMER_NOT_FOUND', 'message' => 'アカウントが見つかりません。']]);
+        echo json_encode(['success' => true, 'emailSent' => true, 'message' => 'アカウントがある場合は、確認コードを送信しました。']);
         exit;
     }
 
@@ -7110,12 +10069,22 @@ if ($method === 'POST' && ($subPath === '/customers/resend-code' || $subPath ===
     $expiresAt = date('Y-m-d H:i:s', time() + 15 * 60);
 
     $upd = $pdo->prepare('UPDATE Customer SET verificationCode = ?, verificationToken = ?, verificationExpiresAt = ?, verificationAttempts = 0, updatedAt = NOW() WHERE id = ?');
-    $upd->execute([$code, $token, $expiresAt, $customer['id']]);
+    $upd->execute([hashVerificationCode($code), hashVerificationToken($token), $expiresAt, $customer['id']]);
 
-    sendAccountVerificationEmail($email, $customer['name'], $code, $token);
+    $sent = sendAccountVerificationEmail($email, $customer['name'], $code, $token);
+    if (!$sent) {
+        http_response_code(503);
+        echo json_encode([
+            'success' => false,
+            'emailSent' => false,
+            'error' => ['code' => 'MAIL_FAILED', 'message' => '確認メールを送信できませんでした。時間をおいてもう一度お試しください。'],
+        ]);
+        exit;
+    }
 
     echo json_encode([
         'success' => true,
+        'emailSent' => true,
         'message' => '新しい確認コードをメール（' . $email . '）宛に再送信しました。',
     ]);
     exit;
@@ -7133,11 +10102,11 @@ if ($method === 'GET' && ($subPath === '/customers/verify-link' || $subPath === 
         exit;
     }
 
-    $stmt = $pdo->prepare('SELECT * FROM Customer WHERE LOWER(email) = ? AND verificationToken = ? LIMIT 1');
-    $stmt->execute([$email, $token]);
+    $stmt = $pdo->prepare('SELECT * FROM Customer WHERE LOWER(email) = ? LIMIT 1');
+    $stmt->execute([$email]);
     $customer = $stmt->fetch();
 
-    if (!$customer) {
+    if (!$customer || !verificationTokenMatches((string)($customer['verificationToken'] ?? ''), $token)) {
         header('Location: /account/login?error=invalid_or_expired_token');
         exit;
     }
@@ -7212,14 +10181,17 @@ if ($method === 'POST' && ($subPath === '/customers/login' || $subPath === '/cus
         $code = sprintf('%06d', random_int(100000, 999999));
         $token = bin2hex(random_bytes(32));
         $expiresAt = date('Y-m-d H:i:s', time() + 15 * 60);
-        $pdo->prepare('UPDATE Customer SET verificationCode = ?, verificationToken = ?, verificationExpiresAt = ?, updatedAt = NOW() WHERE id = ?')
-            ->execute([$code, $token, $expiresAt, $customer['id']]);
-        sendAccountVerificationEmail($email, $customer['name'], $code, $token);
+        $pdo->prepare('UPDATE Customer SET verificationCode = ?, verificationToken = ?, verificationExpiresAt = ?, verificationAttempts = 0, updatedAt = NOW() WHERE id = ?')
+            ->execute([hashVerificationCode($code), hashVerificationToken($token), $expiresAt, $customer['id']]);
+        $sent = sendAccountVerificationEmail($email, $customer['name'], $code, $token);
 
         http_response_code(403);
         echo json_encode([
-            'error' => ['code' => 'EMAIL_UNVERIFIED', 'message' => 'メールアドレスの確認が完了していません。' . $email . ' 宛に認証コードを送信しました。'],
+            'error' => ['code' => 'EMAIL_UNVERIFIED', 'message' => $sent
+                ? 'メールアドレスの確認が完了していません。' . $email . ' 宛に認証コードを送信しました。'
+                : 'メールアドレスの確認が完了していません。確認メールを送信できませんでした。「コードを再送信」を押してください。'],
             'requiresVerification' => true,
+            'emailSent' => $sent,
             'email' => $email,
         ]);
         exit;
@@ -7533,34 +10505,162 @@ if ($method === 'GET' && ($subPath === '/customers/me/offers' || $subPath === '/
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/customers/me/stamps' || $subPath === '/customers/me/stamps/' || $subPath === '/customer/me/stamps' || $subPath === '/customer/me/stamps/')) {
     $customer = requireCustomerUser($jwtSecret, $pdo);
-    $memberCode = $customer['memberCode'] ?? '';
-    if (empty($memberCode)) {
-        $memberCode = newMemberCode();
-        $upd = $pdo->prepare('UPDATE Customer SET memberCode = ? WHERE id = ?');
-        $upd->execute([$memberCode, $customer['id']]);
+    header('Cache-Control: private, no-store');
+    echo json_encode(stampCardPayload($pdo, $customer['id']), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// -------------------------------------------------------------
+// Staff stamp counter: /stamps/*
+// -------------------------------------------------------------
+if ($method === 'GET' && ($subPath === '/stamps/search' || $subPath === '/stamps/search/')) {
+    requireStaffUser($jwtSecret, $pdo);
+    $q = trim((string)($_GET['q'] ?? ''));
+    if ($q === '') {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'VALIDATION_ERROR', 'message' => 'q is required']]);
+        exit;
     }
+    $code = normalizeMemberCodePhp($q);
+    $digits = preg_replace('/\D/', '', $q) ?? '';
+    $like = '%' . $q . '%';
+    $stmt = $pdo->prepare('SELECT id, name, nameKana, email, phone, memberCode FROM Customer WHERE deletedAt IS NULL AND (isActive IS NULL OR isActive = 1) AND (name LIKE ? OR nameKana LIKE ? OR email LIKE ? OR memberCode = ?) ORDER BY name ASC LIMIT 10');
+    $stmt->execute([$like, $like, $like, preg_match('/^[2-9A-HJKMNP-Z]{8}$/', $code) ? $code : '']);
+    $rows = $stmt->fetchAll() ?: [];
+    if (strlen($digits) >= 4) {
+        $phoneStmt = $pdo->prepare('SELECT id, name, nameKana, email, phone, memberCode FROM Customer WHERE deletedAt IS NULL AND (isActive IS NULL OR isActive = 1) AND phone LIKE ? LIMIT 10');
+        $phoneStmt->execute(['%' . $digits . '%']);
+        $seen = [];
+        foreach ($rows as $r) $seen[$r['id']] = true;
+        foreach ($phoneStmt->fetchAll() ?: [] as $r) {
+            if (!isset($seen[$r['id']])) $rows[] = $r;
+            if (count($rows) >= 10) break;
+        }
+    }
+    $out = [];
+    foreach (array_slice($rows, 0, 10) as $r) {
+        $out[] = [
+            'name' => $r['name'],
+            'nameKana' => $r['nameKana'] ?? '',
+            'email' => $r['email'],
+            'phone' => $r['phone'] ?? '',
+            'memberCode' => ensureMemberCode($pdo, $r),
+        ];
+    }
+    header('Cache-Control: private, no-store');
+    echo json_encode($out, JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
-    $stamps = (int)($customer['stampCount'] ?? 0);
-    $perCard = 10;
-
+if ($method === 'GET' && preg_match('#^/stamps/member/([^/]+)/?$#', $subPath, $matches)) {
+    requireStaffUser($jwtSecret, $pdo);
+    $customer = findCustomerByMemberCode($pdo, urldecode($matches[1]));
+    if (!$customer) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => 'Member not found']]);
+        exit;
+    }
+    header('Cache-Control: private, no-store');
     echo json_encode([
-        'enabled' => true,
-        'memberCode' => $memberCode,
-        'perCard' => $perCard,
-        'stamps' => min($stamps, $perCard),
-        'totalStamps' => (int)($customer['stampTotal'] ?? $stamps),
-        'completedCards' => (int)($customer['stampCardsCompleted'] ?? 0),
-        'lastStampAt' => $customer['lastStampAt'] ?? null,
-        'nextStampAt' => null,
-        'rules' => ['minAmount' => 1000, 'cooldownHours' => 4, 'rewardValidDays' => 90],
-        'milestones' => [
-            ['at' => 5, 'titleJa' => '500円割引クーポン', 'kind' => 'AMOUNT_OFF', 'amount' => 500],
-            ['at' => 10, 'titleJa' => '1000円割引クーポン', 'kind' => 'AMOUNT_OFF', 'amount' => 1000],
-        ],
-        'rewards' => [],
-        'pastRewards' => [],
-        'history' => [],
+        'member' => ['id' => $customer['id'], 'name' => $customer['name'], 'nameKana' => $customer['nameKana'] ?? ''],
+        'card' => stampCardPayload($pdo, $customer['id']),
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'POST' && preg_match('#^/stamps/member/([^/]+)/reset-cooldown/?$#', $subPath, $matches)) {
+    $staff = requireStaffUser($jwtSecret, $pdo);
+    $customer = findCustomerByMemberCode($pdo, urldecode($matches[1]));
+    if (!$customer) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => 'Member not found']]);
+        exit;
+    }
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $config = loadStampConfig($pdo);
+    $newLast = null;
+    if (array_key_exists('nextAt', $input) && $input['nextAt'] !== null) {
+        $nextTs = strtotime((string)$input['nextAt']);
+        if ($nextTs !== false) {
+            $newLast = date('Y-m-d H:i:s', $nextTs - ($config['cooldownHours'] * 3600));
+        }
+    } elseif (array_key_exists('lastStampAt', $input)) {
+        if ($input['lastStampAt'] === null || $input['lastStampAt'] === '') {
+            $newLast = null;
+        } else {
+            $ts = strtotime((string)$input['lastStampAt']);
+            $newLast = $ts !== false ? date('Y-m-d H:i:s', $ts) : null;
+        }
+    }
+    $pdo->prepare('UPDATE Customer SET lastStampAt = ? WHERE id = ?')->execute([$newLast, $customer['id']]);
+    echo json_encode([
+        'success' => true,
+        'member' => ['id' => $customer['id'], 'name' => $customer['name'], 'nameKana' => $customer['nameKana'] ?? ''],
+        'card' => stampCardPayload($pdo, $customer['id']),
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'POST' && preg_match('#^/stamps/member/([^/]+)/?$#', $subPath, $matches)) {
+    $staff = requireStaffUser($jwtSecret, $pdo);
+    $customer = findCustomerByMemberCode($pdo, urldecode($matches[1]));
+    if (!$customer) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => 'Member not found']]);
+        exit;
+    }
+    $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $result = awardStampPhp($pdo, $customer['id'], [
+        'source' => 'STAFF',
+        'amount' => (int)($input['amount'] ?? 0),
+        'note' => isset($input['note']) ? (string)$input['note'] : null,
+        'userId' => $staff['id'] ?? null,
+        'bypassCooldown' => !empty($input['bypassCooldown']),
     ]);
+    if (($result['status'] ?? '') === 'DISABLED') {
+        http_response_code(409);
+        echo json_encode(['error' => ['code' => 'STAMPS_DISABLED', 'message' => 'The stamp card is switched off.']]);
+        exit;
+    }
+    if (($result['status'] ?? '') === 'TOO_SOON') {
+        http_response_code(409);
+        echo json_encode(['error' => ['code' => 'TOO_SOON', 'message' => 'This member already got a stamp recently.', 'nextAt' => $result['nextAt'] ?? null]]);
+        exit;
+    }
+    if (($result['status'] ?? '') === 'BELOW_MINIMUM') {
+        http_response_code(409);
+        echo json_encode(['error' => ['code' => 'BELOW_MINIMUM', 'message' => 'Amount below minimum', 'minAmount' => $result['minAmount'] ?? 0]]);
+        exit;
+    }
+    http_response_code(201);
+    echo json_encode([
+        'result' => $result,
+        'member' => ['id' => $customer['id'], 'name' => $customer['name'], 'nameKana' => $customer['nameKana'] ?? ''],
+        'card' => stampCardPayload($pdo, $customer['id']),
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($method === 'POST' && preg_match('#^/stamps/rewards/([a-zA-Z0-9_-]+)/use/?$#', $subPath, $matches)) {
+    $staff = requireStaffUser($jwtSecret, $pdo);
+    $rewardId = $matches[1];
+    $stmt = $pdo->prepare('SELECT * FROM StampReward WHERE id = ? LIMIT 1');
+    $stmt->execute([$rewardId]);
+    $reward = $stmt->fetch();
+    if (!$reward) {
+        http_response_code(404);
+        echo json_encode(['error' => ['code' => 'NOT_FOUND', 'message' => 'Reward not found']]);
+        exit;
+    }
+    $now = date('Y-m-d H:i:s');
+    $upd = $pdo->prepare('UPDATE StampReward SET status = "USED", usedAt = ?, usedBy = ? WHERE id = ? AND status = "AVAILABLE" AND (expiresAt IS NULL OR expiresAt > ?)');
+    $upd->execute([$now, $staff['id'] ?? null, $rewardId, $now]);
+    if ($upd->rowCount() === 0) {
+        http_response_code(409);
+        echo json_encode(['error' => ['code' => 'REWARD_UNAVAILABLE', 'message' => 'This reward was already used or has expired.']]);
+        exit;
+    }
+    echo json_encode(['success' => true]);
     exit;
 }
 
@@ -7584,20 +10684,28 @@ if ($method === 'POST' && ($subPath === '/customers/logout' || $subPath === '/cu
 // Endpoint: GET /customers (Admin list of customers)
 // -------------------------------------------------------------
 if ($method === 'GET' && ($subPath === '/customers' || $subPath === '/customers/' || $subPath === '/customer' || $subPath === '/customer/')) {
-    requireStaffUser($jwtSecret, $pdo);
+    requireAdminUser($jwtSecret, $pdo);
     $stmt = $pdo->query('SELECT * FROM Customer WHERE deletedAt IS NULL ORDER BY createdAt DESC LIMIT 500');
     $customers = $stmt ? $stmt->fetchAll() : [];
 
+    $stampCfg = loadStampConfig($pdo);
+    $perCard = $stampCfg['perCard'];
     $result = [];
     foreach ($customers as $c) {
         $profile = formatCustomerProfile($c);
         $profile['completedOrders'] = 0;
         $profile['totalSpent'] = 0;
-        $profile['stamps'] = min((int)($c['stampCount'] ?? 0), 10);
-        $profile['stampsPerCard'] = 10;
+        $profile['stamps'] = min((int)($c['stampCount'] ?? 0), $perCard);
+        $profile['stampsPerCard'] = $perCard;
         $profile['completedCards'] = (int)($c['stampCardsCompleted'] ?? 0);
         $profile['lastStampAt'] = $c['lastStampAt'] ?? null;
-        $profile['availableRewards'] = 0;
+        $rewCount = 0;
+        try {
+            $rc = $pdo->prepare('SELECT COUNT(*) FROM StampReward WHERE customerId = ? AND status = "AVAILABLE" AND (expiresAt IS NULL OR expiresAt > NOW())');
+            $rc->execute([$c['id']]);
+            $rewCount = (int)$rc->fetchColumn();
+        } catch (Throwable $e) {}
+        $profile['availableRewards'] = $rewCount;
         $result[] = $profile;
     }
     echo json_encode($result);
@@ -7651,9 +10759,9 @@ if ($method === 'POST' && preg_match('#^/customers?/([a-zA-Z0-9_-]+)/password/?$
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $password = (string)($input['password'] ?? '');
 
-    if (strlen($password) < 6) {
+    if (strlen($password) < 8) {
         http_response_code(400);
-        echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => 'パスワードは6文字以上で入力してください。']]);
+        echo json_encode(['error' => ['code' => 'VALIDATION_FAILED', 'message' => 'パスワードは8文字以上で入力してください。']]);
         exit;
     }
 
@@ -7835,102 +10943,306 @@ if ($method === 'DELETE' && preg_match('#^/users/([a-zA-Z0-9_-]+)/?$#', $subPath
 // Endpoint: Cash Register API (/cash-register)
 // -------------------------------------------------------------
 
-function loadCashRegisterStateHelper($pdo) {
+function cashRegisterEmptyBranch() {
+    return ['currentShift' => null, 'movements' => [], 'transactions' => [], 'closedShifts' => []];
+}
+
+function cashRegisterNormalizeStoreId($raw) {
+    if (!is_string($raw)) return null;
+    $id = trim($raw);
+    if ($id === '' || strtoupper($id) === 'ALL') return null;
+    return $id;
+}
+
+function cashRegisterMigrateFlatToMulti(array $parsed) {
+    $byStore = [];
+    $ensure = function ($id) use (&$byStore) {
+        if (!isset($byStore[$id])) $byStore[$id] = cashRegisterEmptyBranch();
+        return $id;
+    };
+    $flatShift = $parsed['currentShift'] ?? null;
+    $flatMovements = isset($parsed['movements']) && is_array($parsed['movements']) ? $parsed['movements'] : [];
+    $flatTx = isset($parsed['transactions']) && is_array($parsed['transactions']) ? $parsed['transactions'] : [];
+    $flatClosed = isset($parsed['closedShifts']) && is_array($parsed['closedShifts']) ? $parsed['closedShifts'] : [];
+
+    $fallback = cashRegisterNormalizeStoreId($flatShift['storeId'] ?? null);
+    if (!$fallback) {
+        foreach ($flatTx as $t) {
+            $fallback = cashRegisterNormalizeStoreId($t['storeId'] ?? null);
+            if ($fallback) break;
+        }
+    }
+    if (!$fallback) $fallback = 'musashisakai';
+
+    if (is_array($flatShift)) {
+        $sid = cashRegisterNormalizeStoreId($flatShift['storeId'] ?? null) ?: $fallback;
+        $ensure($sid);
+        $flatShift['storeId'] = $sid;
+        $byStore[$sid]['currentShift'] = $flatShift;
+    }
+    foreach ($flatTx as $t) {
+        $sid = cashRegisterNormalizeStoreId($t['storeId'] ?? null) ?: $fallback;
+        $ensure($sid);
+        $t['storeId'] = $sid;
+        $byStore[$sid]['transactions'][] = $t;
+    }
+    foreach ($flatMovements as $m) {
+        $sid = cashRegisterNormalizeStoreId($m['storeId'] ?? null) ?: $fallback;
+        $ensure($sid);
+        $m['storeId'] = $sid;
+        $byStore[$sid]['movements'][] = $m;
+    }
+    foreach ($flatClosed as $s) {
+        $sid = cashRegisterNormalizeStoreId($s['storeId'] ?? null) ?: $fallback;
+        $ensure($sid);
+        $s['storeId'] = $sid;
+        $byStore[$sid]['closedShifts'][] = $s;
+    }
+    if (empty($byStore)) $byStore['musashisakai'] = cashRegisterEmptyBranch();
+    return ['version' => 2, 'byStore' => $byStore];
+}
+
+function loadCashRegisterMultiHelper($pdo) {
     $secStmt = $pdo->prepare("SELECT publicKey FROM AppSecret WHERE id = 'CASH_REGISTER_STATE' LIMIT 1");
     $secStmt->execute();
     $raw = $secStmt->fetchColumn();
-    $state = $raw ? json_decode($raw, true) : null;
-    if (!is_array($state)) {
-        return ['currentShift' => null, 'movements' => [], 'transactions' => [], 'closedShifts' => []];
+    $parsed = $raw ? json_decode($raw, true) : null;
+    if (!is_array($parsed)) {
+        return ['version' => 2, 'byStore' => ['musashisakai' => cashRegisterEmptyBranch()]];
+    }
+    if (($parsed['version'] ?? null) === 2 && isset($parsed['byStore']) && is_array($parsed['byStore'])) {
+        $byStore = [];
+        foreach ($parsed['byStore'] as $id => $branch) {
+            $byStore[$id] = [
+                'currentShift' => $branch['currentShift'] ?? null,
+                'movements' => isset($branch['movements']) && is_array($branch['movements']) ? $branch['movements'] : [],
+                'transactions' => isset($branch['transactions']) && is_array($branch['transactions']) ? $branch['transactions'] : [],
+                'closedShifts' => isset($branch['closedShifts']) && is_array($branch['closedShifts']) ? $branch['closedShifts'] : [],
+            ];
+        }
+        if (empty($byStore)) $byStore['musashisakai'] = cashRegisterEmptyBranch();
+        return ['version' => 2, 'byStore' => $byStore];
+    }
+    return cashRegisterMigrateFlatToMulti($parsed);
+}
+
+/** Legacy-compatible flat view (all branches merged) for payment matching. */
+function loadCashRegisterStateHelper($pdo) {
+    $multi = loadCashRegisterMultiHelper($pdo);
+    $transactions = [];
+    $movements = [];
+    $closedShifts = [];
+    $currentShift = null;
+    foreach ($multi['byStore'] as $branch) {
+        foreach (($branch['transactions'] ?? []) as $t) $transactions[] = $t;
+        foreach (($branch['movements'] ?? []) as $m) $movements[] = $m;
+        foreach (($branch['closedShifts'] ?? []) as $s) $closedShifts[] = $s;
+        if (!$currentShift && !empty($branch['currentShift']['isOpen'])) {
+            $currentShift = $branch['currentShift'];
+        }
     }
     return [
-        'currentShift' => $state['currentShift'] ?? null,
-        'movements' => isset($state['movements']) && is_array($state['movements']) ? $state['movements'] : [],
-        'transactions' => isset($state['transactions']) && is_array($state['transactions']) ? $state['transactions'] : [],
-        'closedShifts' => isset($state['closedShifts']) && is_array($state['closedShifts']) ? $state['closedShifts'] : [],
+        'currentShift' => $currentShift,
+        'movements' => $movements,
+        'transactions' => $transactions,
+        'closedShifts' => $closedShifts,
+        'byStore' => $multi['byStore'],
+        'version' => 2,
     ];
 }
 
-function saveCashRegisterStateHelper($pdo, array $state) {
-    $cappedTransactions = array_slice($state['transactions'], -300);
-    $cappedMovements = array_slice($state['movements'], -100);
-    $cappedClosedShifts = array_slice($state['closedShifts'], -50);
-    $payload = [
-        'currentShift' => $state['currentShift'],
-        'movements' => $cappedMovements,
-        'transactions' => $cappedTransactions,
-        'closedShifts' => $cappedClosedShifts,
-    ];
+function getCashRegisterBranch(&$multi, $storeId) {
+    $sid = cashRegisterNormalizeStoreId($storeId) ?: 'musashisakai';
+    if (!isset($multi['byStore'][$sid])) {
+        $multi['byStore'][$sid] = cashRegisterEmptyBranch();
+    }
+    return $sid;
+}
+
+function saveCashRegisterMultiHelper($pdo, array $multi) {
+    $byStore = [];
+    foreach (($multi['byStore'] ?? []) as $id => $branch) {
+        $byStore[$id] = [
+            'currentShift' => $branch['currentShift'] ?? null,
+            'movements' => array_slice(isset($branch['movements']) && is_array($branch['movements']) ? $branch['movements'] : [], -100),
+            'transactions' => array_slice(isset($branch['transactions']) && is_array($branch['transactions']) ? $branch['transactions'] : [], -300),
+            'closedShifts' => array_slice(isset($branch['closedShifts']) && is_array($branch['closedShifts']) ? $branch['closedShifts'] : [], -50),
+        ];
+    }
+    $payload = ['version' => 2, 'byStore' => $byStore];
     $json = json_encode($payload, JSON_UNESCAPED_UNICODE);
     $upsert = $pdo->prepare("INSERT INTO AppSecret (id, publicKey, privateKey) VALUES ('CASH_REGISTER_STATE', ?, '') ON DUPLICATE KEY UPDATE publicKey = ?");
     $upsert->execute([$json, $json]);
 }
 
-// GET /cash-register
-if ($method === 'GET' && ($subPath === '/cash-register' || $subPath === '/cash-register/')) {
-    $user = requireStaffUser($jwtSecret, $pdo);
-    $state = loadCashRegisterStateHelper($pdo);
+/** @deprecated Prefer saveCashRegisterMultiHelper — kept for any legacy callers. */
+function saveCashRegisterStateHelper($pdo, array $state) {
+    if (($state['version'] ?? null) === 2 && isset($state['byStore'])) {
+        saveCashRegisterMultiHelper($pdo, $state);
+        return;
+    }
+    // If a legacy flat state was mutated, wrap under default/open shift store.
+    $storeId = cashRegisterNormalizeStoreId($state['currentShift']['storeId'] ?? null) ?: 'musashisakai';
+    $multi = ['version' => 2, 'byStore' => [
+        $storeId => [
+            'currentShift' => $state['currentShift'] ?? null,
+            'movements' => $state['movements'] ?? [],
+            'transactions' => $state['transactions'] ?? [],
+            'closedShifts' => $state['closedShifts'] ?? [],
+        ],
+    ]];
+    saveCashRegisterMultiHelper($pdo, $multi);
+}
 
+function cashRegisterComputeStats(array $branch) {
     $todayPrefix = (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d');
-    $todayTransactions = array_values(array_filter($state['transactions'], function($t) use ($todayPrefix) {
-        return empty($t['isVoided']) && isset($t['timestamp']) && str_starts_with($t['timestamp'], $todayPrefix);
+    $todayTransactions = array_values(array_filter($branch['transactions'] ?? [], function ($t) use ($todayPrefix) {
+        return empty($t['isVoided']) && !empty($t['timestamp']) && str_starts_with($t['timestamp'], $todayPrefix);
     }));
-
     $cashSales = 0;
     $nonCashSales = 0;
+    $byPaymentMethod = [];
     foreach ($todayTransactions as $t) {
         $tot = (int)($t['total'] ?? 0);
-        if (($t['paymentMethod'] ?? '') === 'CASH') {
-            $cashSales += $tot;
-        } else {
-            $nonCashSales += $tot;
-        }
+        $method = $t['paymentMethod'] ?? 'OTHER';
+        if (!isset($byPaymentMethod[$method])) $byPaymentMethod[$method] = ['count' => 0, 'total' => 0];
+        $byPaymentMethod[$method]['count'] += 1;
+        $byPaymentMethod[$method]['total'] += $tot;
+        if ($method === 'CASH') $cashSales += $tot;
+        else $nonCashSales += $tot;
     }
-
     $totalIn = 0;
     $totalOut = 0;
-    foreach ($state['movements'] as $m) {
+    foreach (($branch['movements'] ?? []) as $m) {
         if (!empty($m['timestamp']) && str_starts_with($m['timestamp'], $todayPrefix)) {
             $amt = (int)($m['amount'] ?? 0);
             if (($m['type'] ?? '') === 'IN') $totalIn += $amt;
             if (($m['type'] ?? '') === 'OUT') $totalOut += $amt;
         }
     }
+    $startingFloat = (int)($branch['currentShift']['startingFloat'] ?? 0);
+    return [
+        'todaySales' => $cashSales + $nonCashSales,
+        'cashSales' => $cashSales,
+        'nonCashSales' => $nonCashSales,
+        'transactionCount' => count($todayTransactions),
+        'cashIn' => $totalIn,
+        'cashOut' => $totalOut,
+        'startingFloat' => $startingFloat,
+        'expectedDrawerCash' => $startingFloat + $cashSales + $totalIn - $totalOut,
+        'byPaymentMethod' => $byPaymentMethod,
+    ];
+}
 
-    $startingFloat = (int)($state['currentShift']['startingFloat'] ?? 0);
-    $expectedDrawerCash = $startingFloat + $cashSales + $totalIn - $totalOut;
+function cashRegisterBranchPayload($storeId, array $branch) {
+    $todayPrefix = (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d');
+    $stats = cashRegisterComputeStats($branch);
+    $todayTransactions = array_values(array_filter($branch['transactions'] ?? [], function ($t) use ($todayPrefix) {
+        return empty($t['isVoided']) && !empty($t['timestamp']) && str_starts_with($t['timestamp'], $todayPrefix);
+    }));
+    return [
+        'storeId' => $storeId,
+        'shift' => $branch['currentShift'] ?? null,
+        'stats' => $stats,
+        'todayTransactions' => $todayTransactions,
+        'recentMovements' => array_reverse(array_slice($branch['movements'] ?? [], -30)),
+        'closedShifts' => array_reverse(array_slice($branch['closedShifts'] ?? [], -30)),
+    ];
+}
+
+// GET /cash-register?storeId=
+if ($method === 'GET' && ($subPath === '/cash-register' || $subPath === '/cash-register/')) {
+    $user = requireKitchenUser($jwtSecret, $pdo);
+    $multi = loadCashRegisterMultiHelper($pdo);
+    $storeId = cashRegisterNormalizeStoreId($_GET['storeId'] ?? null);
 
     header('Content-Type: application/json');
     header('Cache-Control: no-store');
+
+    if ($storeId) {
+        $sid = getCashRegisterBranch($multi, $storeId);
+        // Read-only for this branch — never move another store's open shift here on GET
+        $payload = cashRegisterBranchPayload($sid, $multi['byStore'][$sid]);
+        $openShiftStoreId = null;
+        if (!empty($multi['byStore'][$sid]['currentShift']['isOpen'])) {
+            $openShiftStoreId = $sid;
+        } else {
+            foreach ($multi['byStore'] as $oid => $obranch) {
+                if (!empty($obranch['currentShift']['isOpen'])) {
+                    $openShiftStoreId = cashRegisterNormalizeStoreId($obranch['currentShift']['storeId'] ?? null) ?: $oid;
+                    break;
+                }
+            }
+        }
+        $payload['openShiftStoreId'] = $openShiftStoreId;
+        echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $branches = [];
+    foreach ($multi['byStore'] as $sid => $branch) {
+        $branches[] = cashRegisterBranchPayload($sid, $branch);
+    }
+    $cashSales = 0;
+    $nonCashSales = 0;
+    $txCount = 0;
+    $cashIn = 0;
+    $cashOut = 0;
+    $byPaymentMethod = [];
+    $allTx = [];
+    foreach ($branches as $b) {
+        $cashSales += (int)$b['stats']['cashSales'];
+        $nonCashSales += (int)$b['stats']['nonCashSales'];
+        $txCount += (int)$b['stats']['transactionCount'];
+        $cashIn += (int)$b['stats']['cashIn'];
+        $cashOut += (int)$b['stats']['cashOut'];
+        foreach (($b['stats']['byPaymentMethod'] ?? []) as $method => $row) {
+            if (!isset($byPaymentMethod[$method])) $byPaymentMethod[$method] = ['count' => 0, 'total' => 0];
+            $byPaymentMethod[$method]['count'] += (int)$row['count'];
+            $byPaymentMethod[$method]['total'] += (int)$row['total'];
+        }
+        foreach ($b['todayTransactions'] as $t) $allTx[] = $t;
+    }
+
     echo json_encode([
-        'shift' => $state['currentShift'],
+        'storeId' => null,
+        'shift' => null,
+        'branches' => $branches,
         'stats' => [
             'todaySales' => $cashSales + $nonCashSales,
             'cashSales' => $cashSales,
             'nonCashSales' => $nonCashSales,
-            'transactionCount' => count($todayTransactions),
-            'cashIn' => $totalIn,
-            'cashOut' => $totalOut,
-            'startingFloat' => $startingFloat,
-            'expectedDrawerCash' => $expectedDrawerCash,
+            'transactionCount' => $txCount,
+            'cashIn' => $cashIn,
+            'cashOut' => $cashOut,
+            'startingFloat' => 0,
+            'expectedDrawerCash' => 0,
+            'byPaymentMethod' => $byPaymentMethod,
         ],
-        'todayTransactions' => $todayTransactions,
-        'recentMovements' => array_reverse(array_slice($state['movements'], -30)),
+        'todayTransactions' => $allTx,
+        'recentMovements' => [],
+        'closedShifts' => [],
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 // POST /cash-register/shift/open
 if ($method === 'POST' && ($subPath === '/cash-register/shift/open' || $subPath === '/cash-register/shift/open/')) {
-    $user = requireStaffUser($jwtSecret, $pdo);
+    $user = requireKitchenUser($jwtSecret, $pdo);
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $startingFloat = max(0, (int)($input['startingFloat'] ?? 30000));
-    $storeId = isset($input['storeId']) ? trim($input['storeId']) : null;
+    $storeId = cashRegisterNormalizeStoreId($input['storeId'] ?? null);
+    if (!$storeId) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'STORE_REQUIRED', 'message' => '店舗（storeId）を指定してください。']]);
+        exit;
+    }
 
-    $state = loadCashRegisterStateHelper($pdo);
-    if (!empty($state['currentShift']['isOpen'])) {
+    $multi = loadCashRegisterMultiHelper($pdo);
+    $sid = getCashRegisterBranch($multi, $storeId);
+    if (!empty($multi['byStore'][$sid]['currentShift']['isOpen'])) {
         http_response_code(409);
-        echo json_encode(['error' => ['code' => 'SHIFT_ALREADY_OPEN', 'message' => 'A register shift is already currently open.']]);
+        echo json_encode(['error' => ['code' => 'SHIFT_ALREADY_OPEN', 'message' => 'この店舗のレジは既に開設されています。']]);
         exit;
     }
 
@@ -7941,11 +11253,11 @@ if ($method === 'POST' && ($subPath === '/cash-register/shift/open' || $subPath 
         'openedBy' => $user['name'] ?? 'Staff',
         'openedById' => $user['id'] ?? null,
         'startingFloat' => $startingFloat,
-        'storeId' => $storeId,
+        'storeId' => $sid,
     ];
 
-    $state['currentShift'] = $newShift;
-    saveCashRegisterStateHelper($pdo, $state);
+    $multi['byStore'][$sid]['currentShift'] = $newShift;
+    saveCashRegisterMultiHelper($pdo, $multi);
 
     http_response_code(201);
     echo json_encode(['success' => true, 'shift' => $newShift]);
@@ -7954,33 +11266,38 @@ if ($method === 'POST' && ($subPath === '/cash-register/shift/open' || $subPath 
 
 // POST /cash-register/shift/close
 if ($method === 'POST' && ($subPath === '/cash-register/shift/close' || $subPath === '/cash-register/shift/close/')) {
-    $user = requireStaffUser($jwtSecret, $pdo);
+    $user = requireKitchenUser($jwtSecret, $pdo);
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $countedTotal = max(0, (int)($input['countedTotal'] ?? 0));
     $denominations = isset($input['denominations']) && is_array($input['denominations']) ? $input['denominations'] : [];
     $notes = isset($input['notes']) ? trim($input['notes']) : '';
-
-    $state = loadCashRegisterStateHelper($pdo);
-    if (empty($state['currentShift']['isOpen'])) {
-        http_response_code(409);
-        echo json_encode(['error' => ['code' => 'NO_OPEN_SHIFT', 'message' => 'No open register shift found to close.']]);
+    $storeId = cashRegisterNormalizeStoreId($input['storeId'] ?? null);
+    if (!$storeId) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'STORE_REQUIRED', 'message' => '店舗（storeId）を指定してください。']]);
         exit;
     }
 
-    $shiftStart = strtotime($state['currentShift']['openedAt'] ?? '1970-01-01');
-    $shiftCashSales = 0;
-    foreach ($state['transactions'] as $t) {
-        if (empty($t['isVoided']) && ($t['paymentMethod'] ?? '') === 'CASH') {
-            $txTime = strtotime($t['timestamp'] ?? '');
-            if ($txTime >= $shiftStart) {
-                $shiftCashSales += (int)($t['total'] ?? 0);
-            }
-        }
+    $multi = loadCashRegisterMultiHelper($pdo);
+    $sid = getCashRegisterBranch($multi, $storeId);
+    $branch = &$multi['byStore'][$sid];
+    if (empty($branch['currentShift']['isOpen'])) {
+        http_response_code(409);
+        echo json_encode(['error' => ['code' => 'NO_OPEN_SHIFT', 'message' => 'この店舗に開設中のレジがありません。']]);
+        exit;
     }
 
+    $shiftStart = strtotime($branch['currentShift']['openedAt'] ?? '1970-01-01');
+    $shiftCashSales = 0;
+    foreach (($branch['transactions'] ?? []) as $t) {
+        if (empty($t['isVoided']) && ($t['paymentMethod'] ?? '') === 'CASH') {
+            $txTime = strtotime($t['timestamp'] ?? '');
+            if ($txTime >= $shiftStart) $shiftCashSales += (int)($t['total'] ?? 0);
+        }
+    }
     $shiftIn = 0;
     $shiftOut = 0;
-    foreach ($state['movements'] as $m) {
+    foreach (($branch['movements'] ?? []) as $m) {
         $mTime = strtotime($m['timestamp'] ?? '');
         if ($mTime >= $shiftStart) {
             $amt = (int)($m['amount'] ?? 0);
@@ -7989,25 +11306,26 @@ if ($method === 'POST' && ($subPath === '/cash-register/shift/close' || $subPath
         }
     }
 
-    $startFloat = (int)($state['currentShift']['startingFloat'] ?? 0);
+    $startFloat = (int)($branch['currentShift']['startingFloat'] ?? 0);
     $expectedTotal = $startFloat + $shiftCashSales + $shiftIn - $shiftOut;
-    $variance = $countedTotal - $expectedTotal;
 
-    $closedShift = array_merge($state['currentShift'], [
+    $closedShift = array_merge($branch['currentShift'], [
         'isOpen' => false,
         'closedAt' => (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format(DateTime::ATOM),
         'closedBy' => $user['name'] ?? 'Staff',
         'closedById' => $user['id'] ?? null,
         'countedTotal' => $countedTotal,
         'expectedTotal' => $expectedTotal,
-        'variance' => $variance,
+        'variance' => $countedTotal - $expectedTotal,
         'denominations' => $denominations,
         'notes' => $notes,
+        'storeId' => $sid,
     ]);
 
-    $state['closedShifts'][] = $closedShift;
-    $state['currentShift'] = null;
-    saveCashRegisterStateHelper($pdo, $state);
+    $branch['closedShifts'][] = $closedShift;
+    $branch['currentShift'] = null;
+    unset($branch);
+    saveCashRegisterMultiHelper($pdo, $multi);
 
     echo json_encode(['success' => true, 'shift' => $closedShift]);
     exit;
@@ -8015,12 +11333,26 @@ if ($method === 'POST' && ($subPath === '/cash-register/shift/close' || $subPath
 
 // POST /cash-register/movement
 if ($method === 'POST' && ($subPath === '/cash-register/movement' || $subPath === '/cash-register/movement/')) {
-    $user = requireStaffUser($jwtSecret, $pdo);
+    $user = requireKitchenUser($jwtSecret, $pdo);
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
     $type = ($input['type'] ?? '') === 'OUT' ? 'OUT' : 'IN';
     $amount = max(1, (int)($input['amount'] ?? 0));
     $reason = trim($input['reason'] ?? 'Cash Movement');
     $memo = isset($input['memo']) ? trim($input['memo']) : '';
+    $storeId = cashRegisterNormalizeStoreId($input['storeId'] ?? null);
+    if (!$storeId) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'STORE_REQUIRED', 'message' => '店舗（storeId）を指定してください。']]);
+        exit;
+    }
+
+    $multi = loadCashRegisterMultiHelper($pdo);
+    $sid = getCashRegisterBranch($multi, $storeId);
+    if (empty($multi['byStore'][$sid]['currentShift']['isOpen'])) {
+        http_response_code(409);
+        echo json_encode(['error' => ['code' => 'NO_OPEN_SHIFT', 'message' => 'この店舗のレジを開設してから入出金を登録してください。']]);
+        exit;
+    }
 
     $movement = [
         'id' => bin2hex(random_bytes(16)),
@@ -8031,11 +11363,11 @@ if ($method === 'POST' && ($subPath === '/cash-register/movement' || $subPath ==
         'memo' => $memo,
         'staffName' => $user['name'] ?? 'Staff',
         'staffId' => $user['id'] ?? null,
+        'storeId' => $sid,
     ];
 
-    $state = loadCashRegisterStateHelper($pdo);
-    $state['movements'][] = $movement;
-    saveCashRegisterStateHelper($pdo, $state);
+    $multi['byStore'][$sid]['movements'][] = $movement;
+    saveCashRegisterMultiHelper($pdo, $multi);
 
     http_response_code(201);
     echo json_encode(['success' => true, 'movement' => $movement]);
@@ -8045,8 +11377,15 @@ if ($method === 'POST' && ($subPath === '/cash-register/movement' || $subPath ==
 // POST /cash-register/bill
 // Creates an unpaid bill ticket (walk-in, dining-in, takeout, delivery)
 if ($method === 'POST' && ($subPath === '/cash-register/bill' || $subPath === '/cash-register/bill/')) {
-    $user = requireStaffUser($jwtSecret, $pdo);
+    $user = requireKitchenUser($jwtSecret, $pdo);
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
+
+    $billStoreId = cashRegisterNormalizeStoreId($input['storeId'] ?? null);
+    if (!$billStoreId) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'STORE_REQUIRED', 'message' => '店舗（storeId）を指定してください。']]);
+        exit;
+    }
 
     $fulfillment = strtoupper(trim((string)($input['fulfillment'] ?? 'PICKUP')));
     if (!in_array($fulfillment, ['DINE_IN', 'PICKUP', 'DELIVERY'], true)) {
@@ -8083,16 +11422,40 @@ if ($method === 'POST' && ($subPath === '/cash-register/bill' || $subPath === '/
     $subtotal = 0;
     $processedItems = [];
 
+    $menuIds = [];
     foreach ($items as $it) {
-        $nameJa = trim((string)($it['nameJa'] ?? $it['nameEn'] ?? '商品'));
-        $nameEn = trim((string)($it['nameEn'] ?? $nameJa));
+        $mid = trim((string)($it['itemId'] ?? $it['id'] ?? ''));
+        if ($mid !== '') $menuIds[] = $mid;
+    }
+    $menuById = [];
+    if (!empty($menuIds)) {
+        $menuIds = array_values(array_unique($menuIds));
+        $ph = implode(',', array_fill(0, count($menuIds), '?'));
+        $mStmt = $pdo->prepare("SELECT id, nameJa, nameEn, price FROM MenuItem WHERE id IN ($ph)");
+        $mStmt->execute($menuIds);
+        while ($row = $mStmt->fetch()) {
+            $menuById[$row['id']] = $row;
+        }
+    }
+
+    foreach ($items as $it) {
+        $menuId = trim((string)($it['itemId'] ?? $it['id'] ?? ''));
+        $menu = ($menuId !== '' && isset($menuById[$menuId])) ? $menuById[$menuId] : null;
+        $nameJa = trim((string)($it['nameJa'] ?? ''))
+            ?: ($menu ? trim((string)($menu['nameJa'] ?? '')) : '')
+            ?: trim((string)($it['nameEn'] ?? ''))
+            ?: ($menu ? trim((string)($menu['nameEn'] ?? '')) : '')
+            ?: '商品';
+        $nameEn = trim((string)($it['nameEn'] ?? ''))
+            ?: ($menu ? trim((string)($menu['nameEn'] ?? '')) : '')
+            ?: $nameJa;
         $qty = max(1, (int)($it['quantity'] ?? 1));
-        $unitPrice = (int)($it['price'] ?? $it['unitPrice'] ?? 0);
+        $unitPrice = $menu ? (int)$menu['price'] : (int)($it['price'] ?? $it['unitPrice'] ?? 0);
         $lineTotal = $unitPrice * $qty;
         $subtotal += $lineTotal;
 
         $processedItems[] = [
-            'itemId' => (string)($it['itemId'] ?? $it['id'] ?? generateUuidV4()),
+            'itemId' => $menuId !== '' ? $menuId : generateUuidV4(),
             'nameJa' => $nameJa,
             'nameEn' => $nameEn,
             'unitPrice' => $unitPrice,
@@ -8111,14 +11474,12 @@ if ($method === 'POST' && ($subPath === '/cash-register/bill' || $subPath === '/
     $nowUtcDb = (new DateTime('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s.v');
     $token = bin2hex(random_bytes(16));
 
-    if (!empty($input['storeId']) || !empty($storeName)) {
-        $processedItems[0]['store'] = [
-            'id' => $input['storeId'] ?? null,
-            'name' => $storeName,
-            'address' => $input['storeAddress'] ?? '',
-            'phone' => $input['storePhone'] ?? '',
-        ];
-    }
+    $processedItems[0]['store'] = [
+        'id' => $billStoreId,
+        'name' => $storeName,
+        'address' => $input['storeAddress'] ?? '',
+        'phone' => $input['storePhone'] ?? '',
+    ];
     $itemsJson = json_encode($processedItems, JSON_UNESCAPED_UNICODE);
 
     $pdo->beginTransaction();
@@ -8180,14 +11541,59 @@ if ($method === 'POST' && ($subPath === '/cash-register/bill' || $subPath === '/
 
 // POST /cash-register/transaction
 if ($method === 'POST' && ($subPath === '/cash-register/transaction' || $subPath === '/cash-register/transaction/')) {
-    $user = requireStaffUser($jwtSecret, $pdo);
+    $user = requireKitchenUser($jwtSecret, $pdo);
     $input = json_decode(file_get_contents('php://input'), true) ?: [];
+    $storeId = cashRegisterNormalizeStoreId($input['storeId'] ?? null);
+    if (!$storeId) {
+        http_response_code(400);
+        echo json_encode(['error' => ['code' => 'STORE_REQUIRED', 'message' => '店舗（storeId）を指定してください。']]);
+        exit;
+    }
+
+    $multi = loadCashRegisterMultiHelper($pdo);
+    $sid = getCashRegisterBranch($multi, $storeId);
+    if (empty($multi['byStore'][$sid]['currentShift']['isOpen'])) {
+        http_response_code(409);
+        echo json_encode(['error' => ['code' => 'NO_OPEN_SHIFT', 'message' => 'この店舗のレジを開設してから会計してください。店舗を選んで「レジ開設」を押してください。']]);
+        exit;
+    }
+
+    $orderIdsToComplete = [];
+    if (!empty($input['orderId'])) $orderIdsToComplete[] = (string)$input['orderId'];
+    if (!empty($input['orderIds']) && is_array($input['orderIds'])) {
+        foreach ($input['orderIds'] as $oid) {
+            $oid = trim((string)$oid);
+            if ($oid !== '' && !in_array($oid, $orderIdsToComplete, true)) $orderIdsToComplete[] = $oid;
+        }
+    }
+
+    $completedOrderIds = [];
+    $markCompleted = !isset($input['markCompleted']) || (bool)$input['markCompleted'];
+    if ($markCompleted && !empty($orderIdsToComplete)) {
+        $inPlaceholders = implode(',', array_fill(0, count($orderIdsToComplete), '?'));
+        try {
+            $sel = $pdo->prepare("SELECT id, status FROM PickupOrder WHERE id IN ($inPlaceholders)");
+            $sel->execute($orderIdsToComplete);
+            $rows = $sel->fetchAll() ?: [];
+            foreach ($rows as $row) {
+                if (($row['status'] ?? '') === 'COMPLETED') {
+                    $completedOrderIds[] = $row['id'];
+                    continue;
+                }
+                $up = $pdo->prepare("UPDATE PickupOrder SET status = 'COMPLETED', completedAt = NOW(), updatedAt = NOW() WHERE id = ?");
+                $up->execute([$row['id']]);
+                $completedOrderIds[] = $row['id'];
+            }
+        } catch (\Throwable $e) {}
+    }
 
     $transaction = [
         'id' => bin2hex(random_bytes(16)),
         'timestamp' => (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format(DateTime::ATOM),
-        'orderId' => $input['orderId'] ?? null,
-        'orderIds' => isset($input['orderIds']) && is_array($input['orderIds']) ? $input['orderIds'] : (!empty($input['orderId']) ? [$input['orderId']] : []),
+        'orderId' => $input['orderId'] ?? ($orderIdsToComplete[0] ?? null),
+        'orderIds' => $orderIdsToComplete,
+        'completedOrderIds' => $completedOrderIds,
+        'squarePaymentId' => !empty($input['squarePaymentId']) ? trim((string)$input['squarePaymentId']) : null,
         'orderNumber' => isset($input['orderNumber']) ? (int)$input['orderNumber'] : null,
         'tableNumber' => $input['tableNumber'] ?? null,
         'type' => in_array($input['type'] ?? '', ['ORDER_SETTLEMENT', 'WALK_IN', 'REFUND'], true) ? $input['type'] : 'ORDER_SETTLEMENT',
@@ -8205,58 +11611,15 @@ if ($method === 'POST' && ($subPath === '/cash-register/transaction' || $subPath
         'paymentMethod' => $input['paymentMethod'] ?? 'CASH',
         'amountTendered' => (int)($input['amountTendered'] ?? 0),
         'changeAmount' => (int)($input['changeAmount'] ?? 0),
-        'storeId' => $input['storeId'] ?? null,
+        'storeId' => $sid,
         'storeName' => $input['storeName'] ?? null,
         'note' => $input['note'] ?? null,
         'staffName' => $user['name'] ?? 'Staff',
         'staffId' => $user['id'] ?? null,
     ];
 
-    $state = loadCashRegisterStateHelper($pdo);
-    $state['transactions'][] = $transaction;
-
-    // Mark order(s) completed
-    $markCompleted = !isset($input['markCompleted']) || (bool)$input['markCompleted'];
-    if ($markCompleted) {
-        $orderIdsToComplete = [];
-        if (!empty($input['orderId'])) {
-            $orderIdsToComplete[] = $input['orderId'];
-        }
-        if (!empty($input['orderIds']) && is_array($input['orderIds'])) {
-            foreach ($input['orderIds'] as $oid) {
-                if ($oid && !in_array($oid, $orderIdsToComplete, true)) {
-                    $orderIdsToComplete[] = $oid;
-                }
-            }
-        }
-
-        if (!empty($orderIdsToComplete)) {
-            $inPlaceholders = implode(',', array_fill(0, count($orderIdsToComplete), '?'));
-            try {
-                $up = $pdo->prepare("UPDATE PickupOrder SET status = 'COMPLETED', completedAt = NOW(), updatedAt = NOW() WHERE id IN ($inPlaceholders)");
-                $up->execute($orderIdsToComplete);
-            } catch (\Throwable $e) {}
-        }
-
-        // Also if tableNumber is passed, mark all remaining active orders for this table as COMPLETED to free the table!
-        if (!empty($input['tableNumber'])) {
-            try {
-                $tbl = trim((string)$input['tableNumber']);
-                $storeCond = !empty($input['storeId']) ? "AND (storeId = ? OR storeId IS NULL)" : "";
-                $sql = "UPDATE PickupOrder SET status = 'COMPLETED', completedAt = NOW(), updatedAt = NOW() 
-                        WHERE status IN ('NEW', 'CONFIRMED', 'READY', 'ACCEPTED', 'PREPARING') 
-                          AND (tableNumber = ? OR note LIKE ? OR note LIKE ?) $storeCond";
-                $params = [$tbl, "%[テーブル: {$tbl}]%", "%[テーブル:{$tbl}]%"];
-                if (!empty($input['storeId'])) {
-                    $params[] = $input['storeId'];
-                }
-                $upTbl = $pdo->prepare($sql);
-                $upTbl->execute($params);
-            } catch (\Throwable $e) {}
-        }
-    }
-
-    saveCashRegisterStateHelper($pdo, $state);
+    $multi['byStore'][$sid]['transactions'][] = $transaction;
+    saveCashRegisterMultiHelper($pdo, $multi);
 
     http_response_code(201);
     echo json_encode(['success' => true, 'transaction' => $transaction]);
@@ -8265,19 +11628,27 @@ if ($method === 'POST' && ($subPath === '/cash-register/transaction' || $subPath
 
 // POST /cash-register/transaction/:id/void
 if ($method === 'POST' && preg_match('#^/cash-register/transaction/([a-zA-Z0-9_-]+)/void/?$#', $subPath, $matches)) {
-    $user = requireStaffUser($jwtSecret, $pdo);
+    $user = requireKitchenUser($jwtSecret, $pdo);
     $targetId = $matches[1];
 
-    $state = loadCashRegisterStateHelper($pdo);
+    $multi = loadCashRegisterMultiHelper($pdo);
     $found = false;
-    foreach ($state['transactions'] as &$t) {
-        if (($t['id'] ?? '') === $targetId) {
-            $t['isVoided'] = true;
-            $found = true;
-            break;
+    $reopenIds = [];
+    foreach ($multi['byStore'] as $sid => &$branch) {
+        foreach ($branch['transactions'] as &$t) {
+            if (($t['id'] ?? '') === $targetId) {
+                $t['isVoided'] = true;
+                $found = true;
+                $reopenIds = array_values(array_unique(array_filter(array_merge(
+                    is_array($t['completedOrderIds'] ?? null) ? $t['completedOrderIds'] : [],
+                    is_array($t['orderIds'] ?? null) ? $t['orderIds'] : [],
+                    !empty($t['orderId']) ? [$t['orderId']] : []
+                ))));
+                break 2;
+            }
         }
     }
-    unset($t);
+    unset($t, $branch);
 
     if (!$found) {
         http_response_code(404);
@@ -8285,18 +11656,91 @@ if ($method === 'POST' && preg_match('#^/cash-register/transaction/([a-zA-Z0-9_-
         exit;
     }
 
-    saveCashRegisterStateHelper($pdo, $state);
+    if (!empty($reopenIds)) {
+        try {
+            $ph = implode(',', array_fill(0, count($reopenIds), '?'));
+            $pdo->prepare("UPDATE PickupOrder SET status = 'READY', completedAt = NULL, updatedAt = NOW() WHERE id IN ($ph) AND status = 'COMPLETED'")
+                ->execute($reopenIds);
+        } catch (\Throwable $e) {}
+    }
+
+    saveCashRegisterMultiHelper($pdo, $multi);
     echo json_encode(['success' => true, 'message' => 'Transaction voided']);
     exit;
 }
 
-// GET /cash-register/shifts
+// GET /cash-register/shifts?storeId=
 if ($method === 'GET' && ($subPath === '/cash-register/shifts' || $subPath === '/cash-register/shifts/')) {
-    $user = requireStaffUser($jwtSecret, $pdo);
-    $state = loadCashRegisterStateHelper($pdo);
+    $user = requireKitchenUser($jwtSecret, $pdo);
+    $multi = loadCashRegisterMultiHelper($pdo);
+    $storeId = cashRegisterNormalizeStoreId($_GET['storeId'] ?? null);
     header('Content-Type: application/json');
     header('Cache-Control: no-store');
-    echo json_encode(['shifts' => array_reverse(array_slice($state['closedShifts'], -30))], JSON_UNESCAPED_UNICODE);
+    if ($storeId) {
+        $sid = getCashRegisterBranch($multi, $storeId);
+        echo json_encode([
+            'storeId' => $sid,
+            'shifts' => array_reverse(array_slice($multi['byStore'][$sid]['closedShifts'] ?? [], -30)),
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $shifts = [];
+    foreach ($multi['byStore'] as $sid => $branch) {
+        foreach (($branch['closedShifts'] ?? []) as $s) {
+            $s['storeId'] = $s['storeId'] ?? $sid;
+            $shifts[] = $s;
+        }
+    }
+    usort($shifts, function ($a, $b) {
+        return strcmp((string)($b['closedAt'] ?? ''), (string)($a['closedAt'] ?? ''));
+    });
+    echo json_encode(['storeId' => null, 'shifts' => array_slice($shifts, 0, 60)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// GET /cash-register/sales?storeId=
+if ($method === 'GET' && ($subPath === '/cash-register/sales' || $subPath === '/cash-register/sales/')) {
+    $user = requireKitchenUser($jwtSecret, $pdo);
+    $multi = loadCashRegisterMultiHelper($pdo);
+    $storeId = cashRegisterNormalizeStoreId($_GET['storeId'] ?? null);
+    $todayPrefix = (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d');
+    header('Content-Type: application/json');
+    header('Cache-Control: no-store');
+
+    $build = function ($sid) use ($multi, $todayPrefix) {
+        $branch = $multi['byStore'][$sid] ?? cashRegisterEmptyBranch();
+        $stats = cashRegisterComputeStats($branch);
+        $txs = array_values(array_filter($branch['transactions'] ?? [], function ($t) use ($todayPrefix) {
+            return empty($t['isVoided']) && !empty($t['timestamp']) && str_starts_with($t['timestamp'], $todayPrefix);
+        }));
+        return [
+            'storeId' => $sid,
+            'date' => $todayPrefix,
+            'shiftOpen' => !empty($branch['currentShift']['isOpen']),
+            'shift' => $branch['currentShift'] ?? null,
+            'stats' => $stats,
+            'transactions' => $txs,
+        ];
+    };
+
+    if ($storeId) {
+        $sid = getCashRegisterBranch($multi, $storeId);
+        echo json_encode($build($sid), JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $stores = [];
+    foreach (array_keys($multi['byStore']) as $sid) $stores[] = $build($sid);
+    echo json_encode([
+        'date' => $todayPrefix,
+        'stores' => $stores,
+        'totals' => [
+            'todaySales' => array_sum(array_map(fn($s) => (int)$s['stats']['todaySales'], $stores)),
+            'cashSales' => array_sum(array_map(fn($s) => (int)$s['stats']['cashSales'], $stores)),
+            'nonCashSales' => array_sum(array_map(fn($s) => (int)$s['stats']['nonCashSales'], $stores)),
+            'transactionCount' => array_sum(array_map(fn($s) => (int)$s['stats']['transactionCount'], $stores)),
+        ],
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 

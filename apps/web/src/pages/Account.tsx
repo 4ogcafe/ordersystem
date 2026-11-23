@@ -210,7 +210,7 @@ export default function Account() {
 
       <aside className="acc-sidebar">
         <Link to="/" className="acc-brand">
-          <img src="/adarsha-log.webp" alt="" width={36} height={36} style={{ borderRadius: '50%', objectFit: 'contain' }} />
+          <img src="/uploads/adarsha-log.webp" alt="" width={36} height={36} style={{ borderRadius: '50%', objectFit: 'contain' }} />
           <span>アダルサ<small>MEMBERS</small></span>
         </Link>
         <nav className="acc-nav" aria-label="マイページ">{navButtons}</nav>
@@ -226,7 +226,7 @@ export default function Account() {
       <div className="acc-main">
         <header className="acc-topbar">
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-            <Link to="/" className="acc-mobile-brand" aria-label="アダルサ ホームへ"><img src="/adarsha-log.webp" alt="" width={32} height={32} style={{ borderRadius: '50%', objectFit: 'contain' }} /></Link>
+            <Link to="/" className="acc-mobile-brand" aria-label="アダルサ ホームへ"><img src="/uploads/adarsha-log.webp" alt="" width={32} height={32} style={{ borderRadius: '50%', objectFit: 'contain' }} /></Link>
             <div style={{ minWidth: 0 }}>
               <h1>{tab === 'home' ? `${greeting()}、${customer.name}さん` : current.title}</h1>
               <p>{tab === 'home' ? '今日は何をお召し上がりになりますか？' : `${customer.name}さんの${current.title}`}</p>

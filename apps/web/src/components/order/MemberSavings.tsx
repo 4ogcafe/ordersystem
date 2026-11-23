@@ -41,7 +41,7 @@ export default function MemberSavings({ savings, onChange, quote, next }: {
         setLoaded(true);
       });
     } else {
-      // Guest visitor: fetch public live offers
+      // Guest visitor: fetch public live offers (once-per-customer ones need login)
       fetch('/api/v1/offers')
         .then(res => (res.ok ? res.json() : []))
         .then((publicOffers: any[]) => {
@@ -56,7 +56,7 @@ export default function MemberSavings({ savings, onChange, quote, next }: {
             minSubtotal: o.minSubtotal ?? 0,
             endsAt: o.endsAt ?? null,
             startsAt: o.startsAt ?? null,
-            oncePerCustomer: false,
+            oncePerCustomer: Boolean(o.oncePerCustomer),
             used: false,
           }));
           setOffers(mapped);
@@ -80,10 +80,16 @@ export default function MemberSavings({ savings, onChange, quote, next }: {
       : [];
 
   const toggleOffer = (offerId: string) => {
+    const target = offers.find(o => o.id === offerId);
+    if (target?.oncePerCustomer && !customer) {
+      // Server also rejects this; send them to login instead of applying as a guest.
+      window.location.assign(`/account/login?next=${encodeURIComponent(next)}`);
+      return;
+    }
     const isSelected = selectedOfferIds.includes(offerId);
     const nextIds = isSelected
       ? selectedOfferIds.filter(id => id !== offerId)
-      : [...selectedOfferIds, offerId];
+      : [...selectedOfferIds, offerId].slice(0, 5);
     onChange({
       ...savings,
       offerIds: nextIds,
@@ -127,6 +133,7 @@ export default function MemberSavings({ savings, onChange, quote, next }: {
             const isSelected = selectedOfferIds.includes(offer.id);
             const isUnavailableSubtotal = offer.minSubtotal > 0 && subtotal < offer.minSubtotal;
             const isUsed = offer.used;
+            const needsLogin = Boolean(offer.oncePerCustomer && !customer);
             const isDisabled = isUsed || isUnavailableSubtotal;
 
             return (
@@ -171,10 +178,20 @@ export default function MemberSavings({ savings, onChange, quote, next }: {
                       <span style={{ fontWeight: 700, fontSize: '0.82rem', color: '#b45309', backgroundColor: '#fef3c7', padding: '1px 6px', borderRadius: '4px' }}>
                         {offerLabel(offer)}
                       </span>
+                      {offer.oncePerCustomer && (
+                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#4f46e5', backgroundColor: '#eef2ff', padding: '1px 6px', borderRadius: '4px' }}>
+                          お一人様1回
+                        </span>
+                      )}
                     </div>
                     {offer.minSubtotal > 0 && (
                       <div style={{ fontSize: '0.78rem', color: isUnavailableSubtotal ? '#dc2626' : '#6b7280', marginTop: '2px' }}>
                         {yen(offer.minSubtotal)}以上のご注文で適用{isUnavailableSubtotal && '（小計が条件に達していません）'}
+                      </div>
+                    )}
+                    {needsLogin && (
+                      <div style={{ fontSize: '0.78rem', color: '#b45309', marginTop: '2px' }}>
+                        ※会員ログイン後にご利用いただけます
                       </div>
                     )}
                     {isUsed && (

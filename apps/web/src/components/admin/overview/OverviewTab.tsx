@@ -5,12 +5,15 @@ import {
   ArrowUpRight,
   Banknote,
   Bike,
+  Building2,
   CalendarDays,
   CheckCircle2,
   ChefHat,
   Clock,
+  CreditCard,
   Download,
   Mail,
+  MapPin,
   PauseCircle,
   RefreshCw,
   ShoppingBag,
@@ -19,9 +22,17 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../../../lib/api';
 import { formatOrderNumber, yen } from '../../../lib/format';
+import { DEFAULT_STORE_LOCATIONS, fetchStores, type StoreLocation } from '../../../lib/stores';
 import { SERIES } from './chart-utils';
 import { ColumnChart, Heatmap, RampLegend, RankBars, SplitBar } from './charts';
+import { toast } from 'react-hot-toast';
+import OperationsModeCard from './OperationsModeCard';
+import DataBackupPanel from './DataBackupPanel';
+import { exportOrdersPdf } from './exportOrdersPdf';
 import './overview.css';
+
+const OVERVIEW_STORE_KEY = 'adarsha_overview_store';
+const CC_STORE_KEY = 'adarsha_cash_counter_store';
 
 const LIVE_POLL_MS = 30_000;
 const ANALYTICS_POLL_MS = 60_000;
@@ -78,17 +89,49 @@ interface Analytics {
   members: { total: number; new: number; previousNew: number; newsletter: number; buyers: number; returning: number };
   loyalty: { pointsEarned: number; pointsRedeemed: number; pointsOutstanding: number; stampsGiven: number; rewardsEarned: number; rewardsUsed: number };
   messages: Record<string, number>;
+  byStore?: { storeId: string; name: string; sales: number; orders: number; averageOrder: number | null }[];
+  storeId?: string | null;
 }
 
 interface Live {
   serverTime: string;
+  storeId?: string | null;
   open: { NEW: number; CONFIRMED: number; READY: number; late: number; nextDue: { number: number; customerName: string; pickupAt: string } | null };
   today: { placed: number; completed: number; cancelled: number; sales: number | null };
-  ordering: { pausedUntil: string | null; pickup: { enabled: boolean }; delivery: { enabled: boolean }; stampCard: boolean; liveOffers: number };
-  recentOrders: { id: string; number: number; status: string; fulfillment?: string; customerName: string; member: boolean; amount: number | null; createdAt: string; pickupAt: string }[];
+  ordering: {
+    pausedUntil: string | null;
+    pickup: { enabled: boolean };
+    delivery: { enabled: boolean };
+    dineIn?: { enabled: boolean };
+    stampCard: boolean;
+    liveOffers: number;
+    masterEnabled?: boolean;
+    switches?: {
+      orderingEnabled: boolean;
+      pickupEnabled: boolean;
+      deliveryEnabled: boolean;
+      dineInEnabled: boolean;
+    };
+    maintenanceMode?: boolean;
+    maintenanceMessageJa?: string;
+  };
+  register?: { isOpen: boolean; openedAt?: string; openedBy?: string; startingFloat?: number } | null;
+  devices?: { active: number; paired: number };
+  recentOrders: { id: string; number: number; status: string; fulfillment?: string; customerName: string; member: boolean; amount: number | null; createdAt: string; pickupAt: string; storeId?: string | null }[];
   messages: { unread: number; recent: { id: string; name: string; type: string; isRead: boolean; createdAt: string; date?: string | null; guests?: number | null }[] };
   reservations: { id: string; name: string; date: string; guests: number | null; isRead: boolean; message?: string }[];
   menu: { total: number; soldOut: string[] };
+}
+
+interface BranchSnapshot {
+  storeId: string;
+  name: string;
+  area?: string;
+  phone?: string;
+  open: { NEW: number; CONFIRMED: number; READY: number; late: number; total: number };
+  today: { placed: number; completed: number; cancelled: number; sales: number | null };
+  register: { isOpen: boolean; openedAt?: string; openedBy?: string };
+  devices: { active: number };
 }
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString('ja-JP', { timeZone: TZ, hour: '2-digit', minute: '2-digit' });
@@ -105,8 +148,17 @@ const todayKey = () => new Date().toLocaleDateString('sv-SE', { timeZone: TZ });
 export default function OverviewTab({ isAdmin, onNavigate }: { isAdmin: boolean; onNavigate: (tab: string) => void }) {
   const [live, setLive] = useState<Live | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [branches, setBranches] = useState<BranchSnapshot[]>([]);
+  const [stores, setStores] = useState<StoreLocation[]>(DEFAULT_STORE_LOCATIONS);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [storeFilter, setStoreFilter] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem(OVERVIEW_STORE_KEY) || 'ALL';
+    } catch {
+      return 'ALL';
+    }
+  });
   const [range, setRange] = useState<Range>(() => {
     try {
       return (sessionStorage.getItem('adarsha_overview_range') as Range) || '7d';
@@ -116,17 +168,57 @@ export default function OverviewTab({ isAdmin, onNavigate }: { isAdmin: boolean;
   });
   const [custom, setCustom] = useState(() => ({ from: todayKey(), to: todayKey() }));
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
-  const query = range === 'custom' ? `range=custom&from=${custom.from}&to=${custom.to}` : `range=${range}`;
+  const storeQ = storeFilter && storeFilter !== 'ALL' ? `&storeId=${encodeURIComponent(storeFilter)}` : '';
+  const query = (range === 'custom' ? `range=custom&from=${custom.from}&to=${custom.to}` : `range=${range}`) + storeQ;
+  const rangeLabel = RANGES.find(r => r.value === range)?.label ?? range;
+  const activeStore = useMemo(
+    () => (storeFilter === 'ALL' ? null : stores.find(s => s.id === storeFilter) || null),
+    [storeFilter, stores],
+  );
+
+  const selectStore = (id: string) => {
+    setStoreFilter(id);
+    try { sessionStorage.setItem(OVERVIEW_STORE_KEY, id); } catch { /* ignore */ }
+  };
+
+  const openCashCounterFor = (storeId: string) => {
+    try { localStorage.setItem(CC_STORE_KEY, storeId); } catch { /* ignore */ }
+    onNavigate('Cash Counter');
+  };
+
+  const handleExportOrdersPdf = async () => {
+    setExportingPdf(true);
+    try {
+      await exportOrdersPdf(query, rangeLabel + (activeStore ? ` · ${activeStore.name}` : ' · All branches'));
+      toast.success('印刷ダイアログで「PDFに保存」を選んでください', { duration: 5000 });
+    } catch (err: any) {
+      toast.error(err?.message || 'PDFの出力に失敗しました');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
 
   const loadLive = useCallback(() => {
-    apiFetch('/api/v1/dashboard/live')
+    const qs = storeFilter !== 'ALL' ? `?storeId=${encodeURIComponent(storeFilter)}` : '';
+    apiFetch(`/api/v1/dashboard/live${qs}`)
       .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((data: Live) => {
         setLive(data);
         setUpdatedAt(new Date());
+        setFailed(false);
       })
       .catch(() => setFailed(true));
+  }, [storeFilter]);
+
+  const loadBranches = useCallback(() => {
+    apiFetch('/api/v1/dashboard/branches')
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((data: { branches?: BranchSnapshot[] }) => {
+        setBranches(Array.isArray(data.branches) ? data.branches : []);
+      })
+      .catch(() => undefined);
   }, []);
 
   const loadAnalytics = useCallback(() => {
@@ -143,10 +235,20 @@ export default function OverviewTab({ isAdmin, onNavigate }: { isAdmin: boolean;
   }, [isAdmin, query]);
 
   useEffect(() => {
+    fetchStores().then(list => {
+      if (list?.length) setStores(list);
+    }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     loadLive();
-    const intervalId = setInterval(loadLive, LIVE_POLL_MS);
+    loadBranches();
+    const intervalId = setInterval(() => {
+      loadLive();
+      loadBranches();
+    }, LIVE_POLL_MS);
     return () => clearInterval(intervalId);
-  }, [loadLive]);
+  }, [loadLive, loadBranches]);
 
   useEffect(() => {
     try {
@@ -155,7 +257,6 @@ export default function OverviewTab({ isAdmin, onNavigate }: { isAdmin: boolean;
       // Not remembered in private mode.
     }
     loadAnalytics();
-    // Periods that include today keep updating while the page is open.
     const includesToday = range !== 'yesterday' && (range !== 'custom' || custom.to >= todayKey());
     if (!includesToday) return;
     const intervalId = setInterval(loadAnalytics, ANALYTICS_POLL_MS);
@@ -164,11 +265,31 @@ export default function OverviewTab({ isAdmin, onNavigate }: { isAdmin: boolean;
 
   const refresh = () => {
     loadLive();
+    loadBranches();
     loadAnalytics();
   };
 
   return (
     <div className="ov">
+      <div className="ov-filters" role="group" aria-label="Branch">
+        <div className="ov-segments ov-branch-segments">
+          <button type="button" aria-pressed={storeFilter === 'ALL'} onClick={() => selectStore('ALL')}>
+            <Building2 size={14} /> All branches
+          </button>
+          {stores.map(store => (
+            <button
+              key={store.id}
+              type="button"
+              aria-pressed={storeFilter === store.id}
+              onClick={() => selectStore(store.id)}
+              title={store.name}
+            >
+              {store.name.replace(/^アダルサ\s*/, '')}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {isAdmin && (
         <div className="ov-filters" role="group" aria-label="Period">
           <div className="ov-segments">
@@ -187,18 +308,45 @@ export default function OverviewTab({ isAdmin, onNavigate }: { isAdmin: boolean;
           <div className="ov-filter-actions">
             <span className="ov-muted">{updatedAt ? `Updated ${updatedAt.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}</span>
             <button type="button" className="ov-btn" onClick={refresh} aria-label="Refresh"><RefreshCw size={16} className={loading ? 'ov-spin' : undefined} /> Refresh</button>
-            <a className="ov-btn" href={`/api/v1/dashboard/analytics/orders.csv?${query}`} download><Download size={16} /> Export orders (CSV)</a>
+            <button type="button" className="ov-btn" onClick={handleExportOrdersPdf} disabled={exportingPdf}>
+              <Download size={16} /> {exportingPdf ? 'Preparing PDF…' : 'Export orders (PDF)'}
+            </button>
           </div>
         </div>
       )}
 
       {failed && <div className="ov-alert" role="alert"><AlertTriangle size={16} /> Some figures couldn't be loaded. They'll retry automatically, or press Refresh.</div>}
 
-      <LiveSection live={live} onNavigate={onNavigate} isAdmin={isAdmin} />
+      {storeFilter === 'ALL' && (
+        <BranchBoard
+          branches={branches}
+          isAdmin={isAdmin}
+          onSelect={selectStore}
+          onCashCounter={openCashCounterFor}
+          onNavigate={onNavigate}
+        />
+      )}
+
+      <LiveSection
+        live={live}
+        onNavigate={onNavigate}
+        isAdmin={isAdmin}
+        onRefresh={refresh}
+        store={activeStore}
+        onCashCounter={activeStore ? () => openCashCounterFor(activeStore.id) : undefined}
+      />
+
+      {isAdmin && (
+        <DataBackupPanel
+          ordersQuery={query}
+          analyticsJson={analytics}
+          rangeLabel={rangeLabel}
+        />
+      )}
 
       {isAdmin && analytics && (
         <div className={loading ? 'ov-refetching' : undefined}>
-          <AnalyticsSection data={analytics} onNavigate={onNavigate} />
+          <AnalyticsSection data={analytics} onNavigate={onNavigate} storeName={activeStore?.name || null} />
         </div>
       )}
       {isAdmin && !analytics && !failed && <div className="ov-card ov-muted" aria-busy="true">Loading analytics…</div>}
@@ -208,17 +356,153 @@ export default function OverviewTab({ isAdmin, onNavigate }: { isAdmin: boolean;
 
 // ---- Right now -------------------------------------------------------------
 
-function LiveSection({ live, isAdmin, onNavigate }: { live: Live | null; isAdmin: boolean; onNavigate: (tab: string) => void }) {
+function BranchBoard({
+  branches,
+  isAdmin,
+  onSelect,
+  onCashCounter,
+  onNavigate,
+}: {
+  branches: BranchSnapshot[];
+  isAdmin: boolean;
+  onSelect: (storeId: string) => void;
+  onCashCounter: (storeId: string) => void;
+  onNavigate: (tab: string) => void;
+}) {
+  if (branches.length === 0) {
+    return <div className="ov-card ov-muted" aria-busy="true">Loading branches…</div>;
+  }
+  return (
+    <section aria-labelledby="ov-branches">
+      <div className="ov-section-head">
+        <h2 id="ov-branches"><Building2 size={18} /> All branches</h2>
+        <span className="ov-muted">Separate live figures per store · click a card to focus</span>
+      </div>
+      <div className="ov-branch-grid">
+        {branches.map(b => {
+          const short = b.name.replace(/^アダルサ\s*/, '');
+          return (
+            <div key={b.storeId} className="ov-card ov-branch-card">
+              <div className="ov-card-head">
+                <h3><MapPin size={15} /> {short}</h3>
+                <span className={`ov-reg-pill ${b.register.isOpen ? 'is-open' : 'is-closed'}`}>
+                  {b.register.isOpen ? 'レジ開設中' : 'レジ未開設'}
+                </span>
+              </div>
+              {b.area && <div className="ov-muted" style={{ marginBottom: 8 }}>{b.area}</div>}
+              <div className="ov-open" style={{ marginBottom: 8 }}>
+                <OpenCount label="New" value={b.open.NEW} tone={b.open.NEW ? 'warning' : undefined} />
+                <OpenCount label="Cooking" value={b.open.CONFIRMED} />
+                <OpenCount label="Ready" value={b.open.READY} />
+              </div>
+              {b.open.late > 0 && (
+                <Status tone="critical" icon={<AlertTriangle size={14} />}>{b.open.late} past due</Status>
+              )}
+              <dl className="ov-mini" style={{ marginTop: 8 }}>
+                <div><dt>Today orders</dt><dd>{b.today.placed}</dd></div>
+                <div><dt>Completed</dt><dd>{b.today.completed}</dd></div>
+                {isAdmin && <div><dt>Sales</dt><dd>{yen(b.today.sales ?? 0)}</dd></div>}
+                <div><dt>Devices</dt><dd>{b.devices.active}</dd></div>
+              </dl>
+              <div className="ov-branch-actions">
+                <button type="button" className="ov-btn ov-btn-sm" onClick={() => onSelect(b.storeId)}>View branch</button>
+                <button type="button" className="ov-btn ov-btn-sm" onClick={() => onCashCounter(b.storeId)}>
+                  <Banknote size={13} /> Cash counter
+                </button>
+                <button type="button" className="ov-link" onClick={() => onNavigate('Payment Devices')}>
+                  <CreditCard size={13} /> Devices
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function LiveSection({
+  live,
+  isAdmin,
+  onNavigate,
+  onRefresh,
+  store,
+  onCashCounter,
+}: {
+  live: Live | null;
+  isAdmin: boolean;
+  onNavigate: (tab: string) => void;
+  onRefresh: () => void;
+  store?: StoreLocation | null;
+  onCashCounter?: () => void;
+}) {
   if (!live) return <div className="ov-card ov-muted" aria-busy="true">Loading…</div>;
   const openTotal = live.open.NEW + live.open.CONFIRMED + live.open.READY;
-  const orderingOff = !live.ordering.pickup.enabled && !live.ordering.delivery.enabled;
+  const switches = live.ordering.switches ?? {
+    orderingEnabled: live.ordering.masterEnabled !== false,
+    pickupEnabled: live.ordering.pickup.enabled,
+    deliveryEnabled: live.ordering.delivery.enabled,
+    dineInEnabled: Boolean(live.ordering.dineIn?.enabled),
+  };
+  const anyChannel =
+    live.ordering.pickup.enabled || live.ordering.delivery.enabled || Boolean(live.ordering.dineIn?.enabled);
+  const orderingOff = switches.orderingEnabled === false || !anyChannel || Boolean(live.ordering.maintenanceMode);
+  const scopeLabel = store ? store.name.replace(/^アダルサ\s*/, '') : 'All branches';
 
   return (
     <section aria-labelledby="ov-live">
       <div className="ov-section-head">
-        <h2 id="ov-live"><span className="ov-pulse" aria-hidden="true" /> Right now</h2>
+        <h2 id="ov-live"><span className="ov-pulse" aria-hidden="true" /> Right now · {scopeLabel}</h2>
         <span className="ov-muted">Updates every 30 seconds</span>
       </div>
+
+      {!store && (
+        <OperationsModeCard
+          isAdmin={isAdmin}
+          switches={switches}
+          pausedUntil={live.ordering.pausedUntil}
+          maintenanceMode={Boolean(live.ordering.maintenanceMode)}
+          maintenanceMessageJa={live.ordering.maintenanceMessageJa}
+          onChanged={onRefresh}
+        />
+      )}
+
+      {store && (
+        <div className="ov-card ov-branch-ops">
+          <div className="ov-card-head">
+            <h3><MapPin size={16} /> {store.name}</h3>
+            <span className="ov-muted">{store.phone}</span>
+          </div>
+          <div className="ov-branch-ops-grid">
+            <div>
+              <div className="ov-kpi-label">Cash register</div>
+              {live.register?.isOpen ? (
+                <Status tone="good" icon={<CheckCircle2 size={14} />}>
+                  Open{live.register.openedBy ? ` · ${live.register.openedBy}` : ''}
+                </Status>
+              ) : (
+                <Status tone="warning" icon={<AlertTriangle size={14} />}>Not opened</Status>
+              )}
+            </div>
+            <div>
+              <div className="ov-kpi-label">Payment devices</div>
+              <div style={{ fontWeight: 700 }}>{live.devices?.active ?? 0} active</div>
+            </div>
+            <div className="ov-branch-actions">
+              {onCashCounter && (
+                <button type="button" className="ov-btn ov-btn-sm" onClick={onCashCounter}>
+                  <Banknote size={13} /> Cash counter
+                </button>
+              )}
+              <a href="/kitchen" target="_blank" rel="noopener" className="ov-btn ov-btn-sm"><ChefHat size={13} /> Kitchen ↗</a>
+              <button type="button" className="ov-btn ov-btn-sm" onClick={() => onNavigate('Payment Devices')}>
+                <CreditCard size={13} /> Devices
+              </button>
+              <button type="button" className="ov-btn ov-btn-sm" onClick={() => onNavigate('Orders')}>Orders</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="ov-live-grid">
         <div className="ov-card">
@@ -242,7 +526,11 @@ function LiveSection({ live, isAdmin, onNavigate }: { live: Live | null; isAdmin
             <div className="ov-muted" style={{ marginTop: 6 }}>Next due: #{formatOrderNumber(live.open.nextDue.number)} {live.open.nextDue.customerName} at {time(live.open.nextDue.pickupAt)}</div>
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: 8 }}>
-            <a href="/cash-counter" target="_blank" rel="noopener" className="ov-link"><Banknote size={14} /> Open cash counter ↗</a>
+            {onCashCounter ? (
+              <button type="button" className="ov-link" onClick={onCashCounter}><Banknote size={14} /> Open cash counter (this branch)</button>
+            ) : (
+              <a href="/cash-counter" target="_blank" rel="noopener" className="ov-link"><Banknote size={14} /> Open cash counter ↗</a>
+            )}
             <a href="/kitchen" target="_blank" rel="noopener" className="ov-link"><ChefHat size={14} /> Open kitchen display ↗</a>
           </div>
         </div>
@@ -260,14 +548,19 @@ function LiveSection({ live, isAdmin, onNavigate }: { live: Live | null; isAdmin
         <div className="ov-card">
           <div className="ov-card-head">
             <h3><Bike size={16} /> Online ordering</h3>
-            <button type="button" className="ov-link" onClick={() => onNavigate('Orders')}>Settings →</button>
+            <button type="button" className="ov-link" onClick={() => onNavigate('Orders')}>Channel settings →</button>
           </div>
           <ul className="ov-checks">
+            {live.ordering.maintenanceMode && (
+              <li><Status tone="warning" icon={<PauseCircle size={14} />}>Maintenance mode on</Status></li>
+            )}
             {live.ordering.pausedUntil && (
               <li><Status tone="warning" icon={<PauseCircle size={14} />}>Paused by kitchen until {time(live.ordering.pausedUntil)}</Status></li>
             )}
+            <li><OnOff on={switches.orderingEnabled} label="Master" /></li>
             <li><OnOff on={live.ordering.pickup.enabled} label="Pickup" /></li>
             <li><OnOff on={live.ordering.delivery.enabled} label="Delivery" /></li>
+            <li><OnOff on={Boolean(live.ordering.dineIn?.enabled)} label="Dine-in" /></li>
             <li><OnOff on={live.ordering.stampCard} label="Stamp card" /></li>
             <li><span className="ov-muted">{live.ordering.liveOffers} live offer{live.ordering.liveOffers === 1 ? '' : 's'}</span></li>
           </ul>
@@ -395,13 +688,14 @@ function OnOff({ on, label }: { on: boolean; label: string }) {
 
 // ---- Analytics -------------------------------------------------------------
 
-function AnalyticsSection({ data, onNavigate }: { data: Analytics; onNavigate: (tab: string) => void }) {
+function AnalyticsSection({ data, onNavigate, storeName }: { data: Analytics; onNavigate: (tab: string) => void; storeName?: string | null }) {
   const { headline: now, previous } = data;
   const [tables, setTables] = useState<Record<string, boolean>>({});
   const toggle = (key: string) => setTables(prev => ({ ...prev, [key]: !prev[key] }));
   const periodName = RANGES.find(r => r.value === data.period.range)?.label ?? '';
   const rangeText = data.period.days.length === 1 ? longDay(data.period.days[0]) : `${longDay(data.period.days[0])} – ${longDay(data.period.days[data.period.days.length - 1])}`;
   const compareText = data.period.days.length === 1 ? 'vs the day before' : `vs previous ${data.period.days.length} days`;
+  const scopeNote = storeName ? ` · ${storeName.replace(/^アダルサ\s*/, '')}` : ' · All branches';
 
   const columns = useMemo(
     () =>
@@ -431,9 +725,30 @@ function AnalyticsSection({ data, onNavigate }: { data: Analytics; onNavigate: (
   return (
     <section aria-labelledby="ov-analytics">
       <div className="ov-section-head">
-        <h2 id="ov-analytics">{periodName === 'Custom' ? 'Selected period' : periodName}</h2>
+        <h2 id="ov-analytics">{periodName === 'Custom' ? 'Selected period' : periodName}{scopeNote}</h2>
         <span className="ov-muted">{rangeText} · Sales are completed orders, tax and delivery included</span>
       </div>
+
+      {!storeName && data.byStore && data.byStore.length > 0 && (
+        <div className="ov-card" style={{ marginBottom: 16 }}>
+          <div className="ov-card-head"><h3><Building2 size={16} /> Sales by branch</h3></div>
+          <div className="ov-table-wrap">
+            <table className="ov-table">
+              <thead><tr><th>Branch</th><th className="num">Orders</th><th className="num">Avg</th><th className="num">Sales</th></tr></thead>
+              <tbody>
+                {[...data.byStore].sort((a, b) => b.sales - a.sales).map(row => (
+                  <tr key={row.storeId}>
+                    <td>{row.name.replace(/^アダルサ\s*/, '')}</td>
+                    <td className="num">{row.orders}</td>
+                    <td className="num">{row.averageOrder == null ? '–' : yen(row.averageOrder)}</td>
+                    <td className="num">{yen(row.sales)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="ov-card">
         <div className="ov-hero">
@@ -525,7 +840,7 @@ function AnalyticsSection({ data, onNavigate }: { data: Analytics; onNavigate: (
         <div className="ov-card">
           <div className="ov-card-head">
             <h3>Offers & discounts</h3>
-            <button type="button" className="ov-link" onClick={() => onNavigate('Stamps, Offers & Points')}>Manage →</button>
+              <button type="button" className="ov-link" onClick={() => onNavigate('Stamps & Loyalty')}>Manage →</button>
           </div>
           <dl className="ov-mini">
             <div><dt>Discounts given</dt><dd>{yen(now.discounts)}</dd><dd className="ov-muted ov-dd-note">Offers, stamp rewards and points</dd></div>

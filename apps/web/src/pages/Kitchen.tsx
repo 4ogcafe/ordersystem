@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
-import { Bell, BellOff, ChefHat, ClipboardList, History, LogOut, Maximize, Minimize, PauseCircle, PlayCircle, Printer, Sliders, WifiOff, X } from 'lucide-react';
+import { Banknote, Bell, BellOff, ChefHat, ClipboardList, History, LogOut, Maximize, Minimize, PauseCircle, PlayCircle, Printer, Sliders, WifiOff, X } from 'lucide-react';
 import { apiFetch, errorMessage, getPublic } from '../lib/api';
 import { clearStaffSession, setStaffSession } from '../lib/auth-storage';
 import SessionSecurityGuard from '../components/admin/SessionSecurityGuard';
@@ -11,6 +11,7 @@ import { alertText } from '../components/admin/dietary';
 import KitchenTicket from '../components/kitchen/KitchenTicket';
 import KitchenPrinterModal from '../components/kitchen/KitchenPrinterModal';
 import { getStorePrinterConfig, saveStorePrinterConfig } from '../components/admin/PrinterSettings';
+import TableFloorAlerts from '../components/order/TableFloorAlerts';
 import {
   COLUMNS,
   TIMEZONE,
@@ -180,7 +181,9 @@ export default function Kitchen() {
         if (Array.isArray(res?.stores) && res.stores.length > 0) setStores(res.stores);
       })
       .catch(() => {});
-    getPublic<any>('/api/v1/settings')
+    // Authenticated settings so kitchen staff receive printerConfigs (public GET strips them).
+    apiFetch('/api/v1/settings')
+      .then(r => (r.ok ? r.json() : null))
       .then(res => {
         if (res?.printerConfigs && typeof res.printerConfigs === 'object') {
           for (const [sId, sCfg] of Object.entries(res.printerConfigs)) {
@@ -415,6 +418,39 @@ export default function Kitchen() {
     }
   };
 
+  /** Start cooking on every visible NEW ticket in one tap. */
+  const acceptAllNew = async () => {
+    const targets = waitingOrdersThisStore.filter(o => !busy.has(o.id));
+    if (targets.length === 0) return;
+    for (const order of targets) {
+      await sendStatus(order, 'CONFIRMED');
+    }
+    notify.success(`${targets.length}件を調理開始しました`);
+  };
+
+  /** Reopen a finished ticket back to Ready (mistake undo). */
+  const reopenDone = async (order: KitchenOrder) => {
+    if (order.status !== 'COMPLETED') return;
+    setBusyFor(order.id, true);
+    try {
+      const res = await apiFetch(`/api/v1/orders/${order.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'READY' }),
+      });
+      if (!res.ok) {
+        notify.error(await errorMessage(res, '伝票を戻せませんでした'));
+        return;
+      }
+      notify.success(`#${formatOrderNumber(order.number)} を完成列に戻しました`);
+      await load();
+    } catch {
+      notify.error('Network error.');
+    } finally {
+      setBusyFor(order.id, false);
+    }
+  };
+
   const logout = async () => {
     clearStaffSession();
     await apiFetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => undefined);
@@ -556,6 +592,24 @@ export default function Kitchen() {
         </div>
 
         <div className="kd-tools">
+          {waitingOrdersThisStore.length > 1 && (
+            <button
+              type="button"
+              className="kd-tool is-warn"
+              onClick={acceptAllNew}
+              title="表示中の新規注文をすべて調理開始"
+            >
+              <ChefHat size={20} /><span>一括受付 ({waitingOrdersThisStore.length})</span>
+            </button>
+          )}
+          <a
+            href="/cash-counter"
+            className="kd-tool"
+            title="レジ画面を開く"
+            style={{ textDecoration: 'none' }}
+          >
+            <Banknote size={20} /><span>レジ</span>
+          </a>
           <button type="button" className="kd-tool" aria-pressed={panel === 'allday'} onClick={() => setPanel(p => (p === 'allday' ? null : 'allday'))}><ClipboardList size={20} /><span>All day</span></button>
           <button type="button" className="kd-tool" aria-pressed={panel === 'done'} onClick={() => setPanel(p => (p === 'done' ? null : 'done'))}><History size={20} /><span>Done ({board.done.length})</span></button>
           <div className="kd-pause">
@@ -608,6 +662,8 @@ export default function Kitchen() {
           <button type="button" className="kd-tool" onClick={logout} aria-label={`Log out ${user.name}`} title={`Log out ${user.name}`}><LogOut size={20} /></button>
         </div>
       </header>
+
+      <TableFloorAlerts storeFilter={prefs.storeFilter || 'ALL'} sound={prefs.sound} />
 
       {waitingOrdersThisStore.length > 0 && (
         <div
@@ -805,7 +861,7 @@ export default function Kitchen() {
           <button type="button" className="kd-link" onClick={() => pause(0)}>Resume now</button>
         </div>
       )}
-      {!board.ordering.pickup.enabled && !board.ordering.delivery.enabled && !board.pausedUntil && (
+      {!board.ordering.pickup.enabled && !board.ordering.delivery.enabled && !board.ordering.dineIn?.enabled && !board.pausedUntil && (
         <div className="kd-banner" role="status">Online ordering is switched off in the admin (Orders → Online ordering).</div>
       )}
 
@@ -832,7 +888,7 @@ export default function Kitchen() {
                     <p className="kd-empty">{column.status === 'NEW' ? 'No new orders. They appear here with a sound.' : column.status === 'CONFIRMED' ? 'Nothing cooking.' : 'Nothing waiting for pickup.'}</p>
                   ) : (
                     orders.map(order => (
-                      <KitchenTicket key={order.id} order={order} now={serverNow} busy={busy.has(order.id)} onMove={move} onToggleLine={toggleLine} onPrint={print} />
+                      <KitchenTicket key={order.id} order={order} now={serverNow} busy={busy.has(order.id)} stores={stores} onMove={move} onToggleLine={toggleLine} onPrint={print} />
                     ))
                   )}
                 </div>
@@ -872,7 +928,21 @@ export default function Kitchen() {
                       <span className="kd-muted"> · {order.status === 'CANCELLED' ? 'Cancelled' : isDelivery(order) ? 'Delivered' : 'Picked up'} {clockTime(order.completedAt ?? order.cancelledAt ?? order.updatedAt)}</span>
                       <div className="kd-muted">{order.items.map(line => `${line.quantity}× ${line.nameEn}`).join(', ')}</div>
                     </div>
-                    <button type="button" className="kd-tool" onClick={() => print(order)} aria-label={`Print order ${order.number}`}><Printer size={18} /></button>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      {order.status === 'COMPLETED' && (
+                        <button
+                          type="button"
+                          className="kd-tool"
+                          disabled={busy.has(order.id)}
+                          onClick={() => reopenDone(order)}
+                          aria-label={`Reopen order ${order.number}`}
+                          title="完成列に戻す (誤操作の取消)"
+                        >
+                          <PlayCircle size={18} />
+                        </button>
+                      )}
+                      <button type="button" className="kd-tool" onClick={() => print(order)} aria-label={`Print order ${order.number}`}><Printer size={18} /></button>
+                    </div>
                   </li>
                 ))}
               </ul>

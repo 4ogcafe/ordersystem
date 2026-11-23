@@ -17,6 +17,8 @@ export interface StoreLocation {
   rating: number;
   reviewCount: number;
   mapEmbedUrl: string;
+  hotpepperUrl?: string;
+  tabelogUrl?: string;
   /** Coordinates for the nearest-store feature. Strings while editing; blank = geocode on save. */
   latitude?: number | string | null;
   longitude?: number | string | null;
@@ -36,6 +38,8 @@ const emptyStore: Omit<StoreLocation, 'id' | 'number'> = {
   rating: 4.4,
   reviewCount: 100,
   mapEmbedUrl: '',
+  hotpepperUrl: '',
+  tabelogUrl: '',
   latitude: '',
   longitude: '',
 };
@@ -96,12 +100,35 @@ export default function StoreLocationsManager() {
     if (e) e.preventDefault();
     setSavingGeo(true);
     try {
+      const payload = {
+        geolocationEnabled: Boolean(geoSettings.geolocationEnabled),
+        geolocationAutoSelect: Boolean(geoSettings.geolocationAutoSelect && geoSettings.geolocationEnabled),
+        geolocationMaxDistanceKm: Math.min(100, Math.max(1, Number(geoSettings.geolocationMaxDistanceKm) || 10)),
+        lunchOrderEnabled: Boolean(geoSettings.lunchOrderEnabled),
+        lunchOrderHours: String(geoSettings.lunchOrderHours || '').trim(),
+        dinnerOrderEnabled: Boolean(geoSettings.dinnerOrderEnabled),
+        dinnerOrderHours: String(geoSettings.dinnerOrderHours || '').trim(),
+        enforceOrderTimeWindow: Boolean(geoSettings.enforceOrderTimeWindow),
+      };
       const res = await apiFetch('/api/v1/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(geoSettings),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
+        const saved = await res.json().catch(() => null);
+        if (saved && typeof saved === 'object') {
+          setGeoSettings({
+            geolocationEnabled: saved.geolocationEnabled !== false,
+            geolocationAutoSelect: saved.geolocationAutoSelect !== false,
+            geolocationMaxDistanceKm: typeof saved.geolocationMaxDistanceKm === 'number' ? saved.geolocationMaxDistanceKm : payload.geolocationMaxDistanceKm,
+            lunchOrderEnabled: saved.lunchOrderEnabled !== false,
+            lunchOrderHours: saved.lunchOrderHours || payload.lunchOrderHours,
+            dinnerOrderEnabled: saved.dinnerOrderEnabled !== false,
+            dinnerOrderHours: saved.dinnerOrderHours || payload.dinnerOrderHours,
+            enforceOrderTimeWindow: saved.enforceOrderTimeWindow !== false,
+          });
+        }
         toast.success('位置情報と注文受付時間設定を保存しました');
       } else {
         toast.error(await errorMessage(res, '設定の保存に失敗しました'));
@@ -138,6 +165,8 @@ export default function StoreLocationsManager() {
       rating: store.rating,
       reviewCount: store.reviewCount,
       mapEmbedUrl: store.mapEmbedUrl,
+      hotpepperUrl: store.hotpepperUrl || '',
+      tabelogUrl: store.tabelogUrl || '',
       // Leave approximate fallback coordinates blank so saving geocodes the real address instead.
       latitude: store.coordsApproximate ? '' : (store.latitude ?? ''),
       longitude: store.coordsApproximate ? '' : (store.longitude ?? ''),
@@ -153,6 +182,16 @@ export default function StoreLocationsManager() {
     e.preventDefault();
     if (!formData.name.trim() || !formData.address.trim()) {
       toast.error('店舗名と住所は必須です');
+      return;
+    }
+    const hotpepper = (formData.hotpepperUrl || '').trim();
+    const tabelog = (formData.tabelogUrl || '').trim();
+    if (hotpepper && !/^https:\/\/([a-z0-9-]+\.)*hotpepper\.jp([/?#]|$)/i.test(hotpepper)) {
+      toast.error('ホットペッパー URL は https://www.hotpepper.jp/ から始めてください');
+      return;
+    }
+    if (tabelog && !/^https:\/\/([a-z0-9-]+\.)*tabelog\.com([/?#]|$)/i.test(tabelog)) {
+      toast.error('食べログ URL は https://tabelog.com/ から始めてください');
       return;
     }
     setSubmitting(true);
@@ -249,18 +288,65 @@ export default function StoreLocationsManager() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1.5rem' }}>
       {/* Geolocation & Nearest Store Auto-Selection Settings */}
-      <div style={{ background: '#fff', borderRadius: '12px', padding: '1.5rem 2rem', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', border: '1px solid #fed7aa' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '1.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'linear-gradient(135deg, #ea580c, #c2410c)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div
+        style={{
+          background: '#fff',
+          borderRadius: '16px',
+          overflow: 'hidden',
+          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.04)',
+          border: '1px solid #e8e4df',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            flexWrap: 'wrap',
+            gap: '14px',
+            padding: '1.25rem 1.5rem',
+            background: 'linear-gradient(180deg, #faf8f5 0%, #ffffff 100%)',
+            borderBottom: '1px solid #efeae4',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', minWidth: 0, flex: '1 1 260px' }}>
+            <span
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 12,
+                background: '#1f1612',
+                color: '#fff',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
               <LocateFixed size={20} />
             </span>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#111827' }}>
-                位置情報（Geolocation）＆ 最寄り店舗の自動選択設定
-              </h3>
-              <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: '#6b7280' }}>
-                お客様のGPS現在地または郵便番号・住所から最寄りの店舗を自動判定・提案する機能を設定します。
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#1f1612', letterSpacing: '-0.01em' }}>
+                  位置情報・最寄り店舗
+                </h3>
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    letterSpacing: '0.04em',
+                    padding: '3px 8px',
+                    borderRadius: 999,
+                    background: geoSettings.geolocationEnabled ? '#ecfdf5' : '#f3f4f6',
+                    color: geoSettings.geolocationEnabled ? '#047857' : '#6b7280',
+                    border: `1px solid ${geoSettings.geolocationEnabled ? '#a7f3d0' : '#e5e7eb'}`,
+                  }}
+                >
+                  {geoSettings.geolocationEnabled ? 'ON' : 'OFF'}
+                </span>
+              </div>
+              <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#6b635c', lineHeight: 1.5 }}>
+                GPS・郵便番号から最寄り店舗を判定する機能と、注文受付時間の共通設定です。
               </p>
             </div>
           </div>
@@ -269,156 +355,275 @@ export default function StoreLocationsManager() {
             onClick={() => handleSaveGeoSettings()}
             disabled={savingGeo}
             style={{
-              padding: '0.55rem 1.25rem',
-              backgroundColor: '#ea580c',
+              padding: '0.6rem 1.15rem',
+              backgroundColor: '#1f1612',
               color: '#fff',
               border: 'none',
-              borderRadius: '8px',
-              fontWeight: 600,
-              fontSize: '0.88rem',
+              borderRadius: 10,
+              fontWeight: 700,
+              fontSize: '0.85rem',
               cursor: savingGeo ? 'not-allowed' : 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 2px 6px rgba(234, 88, 12, 0.25)',
-              opacity: savingGeo ? 0.7 : 1,
+              gap: 6,
+              opacity: savingGeo ? 0.65 : 1,
+              flexShrink: 0,
             }}
           >
             {savingGeo ? '保存中…' : <><Save size={15} /> 設定を保存</>}
           </button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', background: '#fffaf5', padding: '16px 20px', borderRadius: '10px', border: '1px solid #ffedd5' }}>
-          {/* Toggle: Enable Geolocation Feature */}
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={geoSettings.geolocationEnabled}
-              onChange={e => setGeoSettings({ ...geoSettings, geolocationEnabled: e.target.checked })}
-              style={{ marginTop: '3px', width: '18px', height: '18px', accentColor: '#ea580c' }}
-            />
-            <div>
-              <strong style={{ fontSize: '0.92rem', color: '#1f2937' }}>最寄り店舗検索機能を有効にする</strong>
-              <p style={{ margin: '3px 0 0', fontSize: '0.78rem', color: '#4b5563', lineHeight: 1.4 }}>
-                注文ページ・カート内に「現在地から最寄り店舗を選ぶ」ボタンと郵便番号・住所検索を表示します。
-              </p>
-            </div>
-          </label>
-
-          {/* Toggle: Automatic Nearest Branch Selection on Page Load */}
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: geoSettings.geolocationEnabled ? 'pointer' : 'not-allowed', opacity: geoSettings.geolocationEnabled ? 1 : 0.6 }}>
-            <input
-              type="checkbox"
-              disabled={!geoSettings.geolocationEnabled}
-              checked={geoSettings.geolocationAutoSelect && geoSettings.geolocationEnabled}
-              onChange={e => setGeoSettings({ ...geoSettings, geolocationAutoSelect: e.target.checked })}
-              style={{ marginTop: '3px', width: '18px', height: '18px', accentColor: '#ea580c' }}
-            />
-            <div>
-              <strong style={{ fontSize: '0.92rem', color: '#1f2937' }}>ページ読み込み時の自動選択</strong>
-              <p style={{ margin: '3px 0 0', fontSize: '0.78rem', color: '#4b5563', lineHeight: 1.4 }}>
-                お客様が来店時、自動的にGPSから最寄り店舗を選択します（お客様が手動で選んだ履歴がある場合は上書きしません）。
-              </p>
-            </div>
-          </label>
-
-          {/* Max Distance Threshold */}
-          <div style={{ opacity: geoSettings.geolocationEnabled ? 1 : 0.6 }}>
-            <label style={{ display: 'block', fontSize: '0.92rem', fontWeight: 600, color: '#1f2937', marginBottom: '4px' }}>
-              自動選択を許可する最大距離（km）
+        <div style={{ padding: '1.15rem 1.5rem 1.4rem', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Geo toggles */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: 10,
+            }}
+          >
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '14px 15px',
+                borderRadius: 12,
+                border: `1px solid ${geoSettings.geolocationEnabled ? '#d6ebe0' : '#e8e4df'}`,
+                background: geoSettings.geolocationEnabled ? '#f3faf6' : '#faf9f7',
+                cursor: 'pointer',
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1f1612' }}>最寄り店舗検索</div>
+                <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: '#6b635c', lineHeight: 1.45 }}>
+                  注文・カートに「現在地から選ぶ」と住所検索を表示
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={geoSettings.geolocationEnabled}
+                onChange={e => setGeoSettings({ ...geoSettings, geolocationEnabled: e.target.checked })}
+                style={{ width: 18, height: 18, marginTop: 2, accentColor: '#0f766e', flexShrink: 0 }}
+              />
             </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: 12,
+                padding: '14px 15px',
+                borderRadius: 12,
+                border: '1px solid #e8e4df',
+                background: '#faf9f7',
+                cursor: geoSettings.geolocationEnabled ? 'pointer' : 'not-allowed',
+                opacity: geoSettings.geolocationEnabled ? 1 : 0.55,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1f1612' }}>読み込み時の自動選択</div>
+                <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: '#6b635c', lineHeight: 1.45 }}>
+                  GPSで最寄りを自動選択（手動選択の履歴は上書きしません）
+                </p>
+              </div>
               <input
-                type="number"
-                min="1"
-                max="100"
-                step="1"
+                type="checkbox"
                 disabled={!geoSettings.geolocationEnabled}
-                value={geoSettings.geolocationMaxDistanceKm}
-                onChange={e => setGeoSettings({ ...geoSettings, geolocationMaxDistanceKm: Math.max(1, parseInt(e.target.value, 10) || 10) })}
+                checked={geoSettings.geolocationAutoSelect && geoSettings.geolocationEnabled}
+                onChange={e => setGeoSettings({ ...geoSettings, geolocationAutoSelect: e.target.checked })}
+                style={{ width: 18, height: 18, marginTop: 2, accentColor: '#0f766e', flexShrink: 0 }}
+              />
+            </label>
+          </div>
+
+          {/* Max distance */}
+          <div
+            style={{
+              padding: '14px 15px',
+              borderRadius: 12,
+              border: '1px solid #e8e4df',
+              background: '#faf9f7',
+              opacity: geoSettings.geolocationEnabled ? 1 : 0.55,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ minWidth: 0, flex: '1 1 200px' }}>
+                <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1f1612' }}>自動選択の最大距離</div>
+                <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: '#6b635c', lineHeight: 1.45 }}>
+                  この距離を超える店舗は自動選択せず、一覧から選ぶ案内を出します
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="1"
+                  disabled={!geoSettings.geolocationEnabled}
+                  value={geoSettings.geolocationMaxDistanceKm}
+                  onChange={e => setGeoSettings({ ...geoSettings, geolocationMaxDistanceKm: Math.max(1, parseInt(e.target.value, 10) || 10) })}
+                  aria-label="自動選択を許可する最大距離（km）"
+                  style={{
+                    width: 72,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    border: '1px solid #d6d0c8',
+                    fontSize: '0.95rem',
+                    fontWeight: 800,
+                    backgroundColor: '#fff',
+                    color: '#1f1612',
+                    textAlign: 'center',
+                  }}
+                />
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#4b443c' }}>km 以内</span>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+              {[5, 10, 15, 30].map(km => {
+                const active = geoSettings.geolocationMaxDistanceKm === km;
+                return (
+                  <button
+                    key={km}
+                    type="button"
+                    disabled={!geoSettings.geolocationEnabled}
+                    onClick={() => setGeoSettings({ ...geoSettings, geolocationMaxDistanceKm: km })}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: 999,
+                      border: `1px solid ${active ? '#1f1612' : '#ddd6ce'}`,
+                      background: active ? '#1f1612' : '#fff',
+                      color: active ? '#fff' : '#4b443c',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      cursor: geoSettings.geolocationEnabled ? 'pointer' : 'not-allowed',
+                    }}
+                  >
+                    {km} km
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Lunch / Dinner windows */}
+          <div style={{ borderTop: '1px solid #efeae4', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
                 style={{
-                  width: '90px',
-                  padding: '6px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid #d1d5db',
-                  fontSize: '0.9rem',
-                  fontWeight: 600,
-                  backgroundColor: '#fff',
+                  width: 28,
+                  height: 28,
+                  borderRadius: 8,
+                  background: '#f3f0eb',
+                  color: '#1f1612',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
-              />
-              <span style={{ fontSize: '0.85rem', color: '#4b5563' }}>km 以内</span>
-            </div>
-            <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: '#6b7280' }}>
-              最寄りの店舗がこの距離を超える場合は自動選択せず、「お近くに店舗がありません」と案内します。
-            </p>
-          </div>
-        </div>
-
-        {/* Global Lunch & Dinner Takeout Order Windows */}
-        <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: '1px dashed #fed7aa', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Clock size={16} style={{ color: '#ea580c' }} />
-            <strong style={{ fontSize: '0.9rem', color: '#1f2937' }}>
-              オンライン注文・テイクアウト受付時間（ディナー・ランチ共通設定）
-            </strong>
-          </div>
-          <p style={{ margin: 0, fontSize: '0.78rem', color: '#6b7280' }}>
-            受付時間外にお客様が注文しようとした際、指定された受付時間（例:【16:30〜23:00】）が案内メッセージとして自動表示されます。
-          </p>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
-            {/* Lunch Order Hours */}
-            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '10px 14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.82rem', fontWeight: 700, color: '#92400e' }}>
-                  <Sun size={15} /> ランチ受付時間
-                </span>
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 600, color: '#92400e', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={geoSettings.lunchOrderEnabled}
-                    onChange={e => setGeoSettings({ ...geoSettings, lunchOrderEnabled: e.target.checked })}
-                  />
-                  有効
-                </label>
-              </div>
-              <input
-                type="text"
-                value={geoSettings.lunchOrderHours}
-                onChange={e => setGeoSettings({ ...geoSettings, lunchOrderHours: e.target.value })}
-                placeholder="11:00-16:30"
-                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fcd34d', fontSize: '0.85rem', fontWeight: 600, backgroundColor: '#fff' }}
-              />
-              <span style={{ fontSize: '0.72rem', color: '#b45309', display: 'block', marginTop: '4px' }}>
-                形式: 11:00-16:30（半角または全角）
+              >
+                <Clock size={14} />
               </span>
+              <div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1f1612' }}>オンライン注文・テイクアウト受付時間</div>
+                <p style={{ margin: '2px 0 0', fontSize: '0.74rem', color: '#6b635c', lineHeight: 1.4 }}>
+                  受付時間外の注文では、ここで設定した時間帯が案内メッセージに使われます
+                </p>
+              </div>
             </div>
 
-            {/* Dinner Order Hours */}
-            <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '8px', padding: '10px 14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.82rem', fontWeight: 700, color: '#5b21b6' }}>
-                  <Moon size={15} /> ディナー受付時間 (グランドメニュー)
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
+              <div
+                style={{
+                  background: '#fff',
+                  border: '1px solid #e8e4df',
+                  borderRadius: 12,
+                  padding: '12px 14px',
+                  borderLeft: `3px solid ${geoSettings.lunchOrderEnabled ? '#d97706' : '#d6d0c8'}`,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', fontWeight: 800, color: '#1f1612' }}>
+                    <Sun size={14} style={{ color: '#d97706' }} /> ランチ
+                  </span>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', fontWeight: 700, color: '#6b635c', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={geoSettings.lunchOrderEnabled}
+                      onChange={e => setGeoSettings({ ...geoSettings, lunchOrderEnabled: e.target.checked })}
+                      style={{ accentColor: '#d97706' }}
+                    />
+                    有効
+                  </label>
+                </div>
+                <input
+                  type="text"
+                  value={geoSettings.lunchOrderHours}
+                  onChange={e => setGeoSettings({ ...geoSettings, lunchOrderHours: e.target.value })}
+                  placeholder="11:00-16:30"
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    border: '1px solid #e0dad2',
+                    fontSize: '0.88rem',
+                    fontWeight: 700,
+                    backgroundColor: '#fff',
+                    color: '#1f1612',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <span style={{ fontSize: '0.7rem', color: '#8a8178', display: 'block', marginTop: 5 }}>
+                  形式: 11:00-16:30
                 </span>
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', fontWeight: 600, color: '#5b21b6', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={geoSettings.dinnerOrderEnabled}
-                    onChange={e => setGeoSettings({ ...geoSettings, dinnerOrderEnabled: e.target.checked })}
-                  />
-                  有効
-                </label>
               </div>
-              <input
-                type="text"
-                value={geoSettings.dinnerOrderHours}
-                onChange={e => setGeoSettings({ ...geoSettings, dinnerOrderHours: e.target.value })}
-                placeholder="16:30-23:00"
-                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid #c4b5fd', fontSize: '0.85rem', fontWeight: 600, backgroundColor: '#fff' }}
-              />
-              <span style={{ fontSize: '0.72rem', color: '#6d28d9', display: 'block', marginTop: '4px' }}>
-                形式: 16:30-23:00（時間外通知メッセージの基準になります）
-              </span>
+
+              <div
+                style={{
+                  background: '#fff',
+                  border: '1px solid #e8e4df',
+                  borderRadius: 12,
+                  padding: '12px 14px',
+                  borderLeft: `3px solid ${geoSettings.dinnerOrderEnabled ? '#4f46e5' : '#d6d0c8'}`,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', fontWeight: 800, color: '#1f1612' }}>
+                    <Moon size={14} style={{ color: '#4f46e5' }} /> ディナー
+                  </span>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', fontWeight: 700, color: '#6b635c', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={geoSettings.dinnerOrderEnabled}
+                      onChange={e => setGeoSettings({ ...geoSettings, dinnerOrderEnabled: e.target.checked })}
+                      style={{ accentColor: '#4f46e5' }}
+                    />
+                    有効
+                  </label>
+                </div>
+                <input
+                  type="text"
+                  value={geoSettings.dinnerOrderHours}
+                  onChange={e => setGeoSettings({ ...geoSettings, dinnerOrderHours: e.target.value })}
+                  placeholder="16:30-23:00"
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    border: '1px solid #e0dad2',
+                    fontSize: '0.88rem',
+                    fontWeight: 700,
+                    backgroundColor: '#fff',
+                    color: '#1f1612',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <span style={{ fontSize: '0.7rem', color: '#8a8178', display: 'block', marginTop: 5 }}>
+                  形式: 16:30-23:00（時間外案内の基準）
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -522,6 +727,8 @@ export default function StoreLocationsManager() {
                     <span>🕒 {store.hours} {store.holiday && <span>・ {store.holiday}</span>}</span>
                     {store.phone && <span style={{ color: '#374151' }}>📞 {store.phone}</span>}
                     <span style={{ color: '#d97706' }}>★ {store.rating} ({store.reviewCount}件)</span>
+                    {store.hotpepperUrl && <span style={{ color: '#c2410c' }}>🌶️ ホットペッパー</span>}
+                    {store.tabelogUrl && <span style={{ color: '#9b1c1c' }}>🍽️ 食べログ</span>}
                     {store.latitude != null && store.longitude != null && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#2563eb', backgroundColor: '#eff6ff', padding: '1px 6px', borderRadius: '4px', fontSize: '0.72rem' }}>
                         <MapPin size={11} /> 座標設定済 ({Number(store.latitude).toFixed(4)}, {Number(store.longitude).toFixed(4)})
@@ -778,6 +985,35 @@ export default function StoreLocationsManager() {
                   placeholder="https://maps.google.com/maps?q=...&output=embed"
                 />
               </label>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <label style={modalLbl}>
+                  ホットペッパー URL（店舗ごと・任意）
+                  <input
+                    style={modalInp}
+                    type="url"
+                    value={formData.hotpepperUrl || ''}
+                    onChange={e => setFormData({ ...formData, hotpepperUrl: e.target.value })}
+                    placeholder="https://www.hotpepper.jp/str..."
+                  />
+                  <span style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 400 }}>
+                    空欄の店舗ではサイト上にリンクを出しません
+                  </span>
+                </label>
+                <label style={modalLbl}>
+                  食べログ URL（店舗ごと・任意）
+                  <input
+                    style={modalInp}
+                    type="url"
+                    value={formData.tabelogUrl || ''}
+                    onChange={e => setFormData({ ...formData, tabelogUrl: e.target.value })}
+                    placeholder="https://tabelog.com/..."
+                  />
+                  <span style={{ fontSize: '0.75rem', color: '#6b7280', fontWeight: 400 }}>
+                    https://tabelog.com/ の店舗ページのみ
+                  </span>
+                </label>
+              </div>
 
               {/* Used by "現在地から最寄り店舗を選ぶ" on the order page. */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>

@@ -59,44 +59,108 @@ export interface OrderQuote {
   reward: AppliedReward | null;
 }
 
+type OptionChoice = { id: string; nameJa?: string; nameEn?: string; priceAdjust?: number };
+
+/** Resolve and validate selected options against the item's option groups; recompute priceAdjust. */
+function resolveLineOptions(
+  itemName: string,
+  groups: { id: string; nameJa: string; type: string; required: boolean; options: unknown }[],
+  selected: OrderLineOption[] | undefined
+): { options: OrderLineOption[]; optionAdjust: number } {
+  const picks = selected ?? [];
+  const byGroup = new Map<string, OrderLineOption[]>();
+  for (const pick of picks) {
+    const list = byGroup.get(pick.groupId) ?? [];
+    list.push(pick);
+    byGroup.set(pick.groupId, list);
+  }
+
+  const resolved: OrderLineOption[] = [];
+  let optionAdjust = 0;
+
+  for (const group of groups) {
+    const choices = Array.isArray(group.options) ? (group.options as OptionChoice[]) : [];
+    const chosen = byGroup.get(group.id) ?? [];
+
+    if (group.required && chosen.length === 0) {
+      throw new AppError(400, 'OPTIONS_REQUIRED', `「${itemName}」の「${group.nameJa}」を選んでください。`, {
+        groupId: group.id,
+      });
+    }
+
+    if (group.type === 'RADIO' && chosen.length > 1) {
+      throw new AppError(400, 'OPTIONS_INVALID', `「${group.nameJa}」は1つだけ選べます。`);
+    }
+
+    for (const pick of chosen) {
+      const opt = choices.find((c) => c.id === pick.optionId);
+      if (!opt) {
+        throw new AppError(400, 'OPTIONS_INVALID', `「${group.nameJa}」の選択が無効です。`);
+      }
+      const adjust = Number(opt.priceAdjust) || 0;
+      optionAdjust += adjust;
+      resolved.push({
+        groupId: group.id,
+        groupNameJa: group.nameJa,
+        optionId: opt.id,
+        nameJa: opt.nameJa || pick.nameJa || opt.id,
+        priceAdjust: adjust,
+      });
+    }
+  }
+
+  return { options: resolved, optionAdjust };
+}
+
 /** Prices and availability come from the database, never from the client. */
 export async function priceLines(
   requested: { itemId: string; quantity: number; optionAdjust?: number; options?: OrderLineOption[] }[]
 ): Promise<OrderLine[]> {
-  const quantities = new Map<string, number>();
-  const optionAdjusts = new Map<string, number>();
-  const optionsByItemId = new Map<string, OrderLineOption[]>();
-  for (const req of requested) {
-    quantities.set(req.itemId, (quantities.get(req.itemId) ?? 0) + req.quantity);
-    if (req.optionAdjust) optionAdjusts.set(req.itemId, req.optionAdjust);
-    if (req.options) optionsByItemId.set(req.itemId, req.options);
-  }
+  // Keep each cart line separate so two sets with different curry/spice stay distinct.
+  const ids = [...new Set(requested.map((r) => r.itemId))];
+  const items = await prisma.menuItem.findMany({
+    where: { id: { in: ids } },
+    include: {
+      optionGroups: {
+        select: { id: true, nameJa: true, type: true, required: true, options: true, sortOrder: true },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      },
+    },
+  });
 
-  const ids = [...quantities.keys()];
-  const items = await prisma.menuItem.findMany({ where: { id: { in: ids } } });
-
-  return [...quantities].map(([id, requestedQuantity]) => {
-    const item = items.find((candidate) => candidate.id === id);
-    // Every active item on any menu can be ordered for pickup unless staff marked it sold out.
+  return requested.map((req) => {
+    const item = items.find((candidate) => candidate.id === req.itemId);
     const orderable = item && item.isActive !== false && !item.isSoldOut;
     if (!item || !orderable) {
-      const name = (item as { nameJa?: string; nameEn?: string } | undefined)?.nameJa || (item as { nameJa?: string; nameEn?: string } | undefined)?.nameEn || id;
-      throw new AppError(409, 'ITEM_UNAVAILABLE', `「${name}」は現在ご注文いただけません。カートから削除してください。`, { itemId: id });
+      const name = item?.nameJa || item?.nameEn || req.itemId;
+      throw new AppError(409, 'ITEM_UNAVAILABLE', `「${name}」は現在ご注文いただけません。カートから削除してください。`, {
+        itemId: req.itemId,
+      });
     }
-    const quantity = Math.min(requestedQuantity, MAX_QUANTITY);
-    const optionAdjust = optionAdjusts.get(id) ?? 0;
+    const quantity = Math.min(req.quantity, MAX_QUANTITY);
+    const displayName = item.nameJa || item.nameEn;
+    const { options, optionAdjust } = resolveLineOptions(displayName, item.optionGroups, req.options);
     const unitPrice = (Number(item.price) || 0) + optionAdjust;
-    const options = optionsByItemId.get(id);
-    return { itemId: item.id, nameEn: item.nameEn, nameJa: item.nameJa ?? null, unitPrice, quantity, lineTotal: unitPrice * quantity, ...(options ? { options } : {}) };
+    return {
+      itemId: item.id,
+      nameEn: item.nameEn,
+      nameJa: item.nameJa ?? null,
+      unitPrice,
+      quantity,
+      lineTotal: unitPrice * quantity,
+      ...(options.length ? { options } : {}),
+    };
   });
 }
 
 /** Has this customer already used a once-per-customer offer on an order that wasn't cancelled? */
 export async function offerAlreadyUsed(offerId: string, customerId: string): Promise<boolean> {
+  // Stacked offers store a comma-joined id ("idA,idB"); FIND_IN_SET matches each part.
   const rows = await prisma.$queryRaw<[{ cnt: bigint }]>`
     SELECT COUNT(*) as cnt FROM PickupOrder
     WHERE customerId = ${customerId}
-      AND JSON_UNQUOTE(JSON_EXTRACT(offer, '$.id')) = ${offerId}
+      AND offer IS NOT NULL
+      AND FIND_IN_SET(${offerId}, JSON_UNQUOTE(JSON_EXTRACT(offer, '$.id'))) > 0
       AND status != 'CANCELLED'
     LIMIT 1
   `;
@@ -108,11 +172,17 @@ async function usableOffer(offerId: string, customerId?: string | null) {
   if (!offer || !isOfferLive(offer as unknown as OfferRule)) {
     throw new AppError(409, 'OFFER_UNAVAILABLE', 'この特典は現在ご利用いただけません。');
   }
+  // "Once per customer" only works for signed-in members; guests must log in first.
+  if (offer.oncePerCustomer && !customerId) {
+    throw new AppError(401, 'UNAUTHENTICATED', 'この特典は会員ログイン後にお一人様1回限りご利用いただけます。');
+  }
   if (offer.oncePerCustomer && customerId && (await offerAlreadyUsed(offer.id, customerId))) {
     throw new AppError(409, 'OFFER_USED', 'この特典はすでにご利用済みです。');
   }
   return offer;
 }
+
+const MAX_STACKED_OFFERS = 5;
 
 /** The full price of a cart for this customer (or guest), with the chosen offer(s) and points applied. */
 export async function quoteOrder(input: {
@@ -141,6 +211,9 @@ export async function quoteOrder(input: {
         ? [input.offerId]
         : [];
   const targetOfferIds = [...new Set(rawIds.filter(Boolean))];
+  if (targetOfferIds.length > MAX_STACKED_OFFERS) {
+    throw new AppError(400, 'VALIDATION_ERROR', `クーポンは一度に${MAX_STACKED_OFFERS}件まで併用できます。`);
+  }
 
   const appliedOffers: { id: string; titleJa: string; discount: number }[] = [];
   let currentSubtotalForDiscount = subtotal;

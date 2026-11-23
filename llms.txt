@@ -13,7 +13,7 @@
 - **定休日**: 火曜日
 - **駐車場**: 敷地内に専用無料駐車場 12台完備
 - **予算目安**: ランチ ¥950〜¥1,500 / ディナー ¥1,500〜¥2,500
-- **公式サイト**: https://pnglike.com/
+- **公式サイト**: https://adarsha.jp/
 
 ## おすすめメニュー (Popular Menu Items)
 - **バターチキンカレー** (¥1,200): トマトベースにバターと生クリームの濃厚なコクが広がる一番人気カレー。
@@ -30,10 +30,10 @@
 - **ベジタリアン・ハラール対応**: ベジタリアン向けカレーおよびハラール対応チキン・マトン料理あり。
 
 ## リンク (Pages)
-- [ホーム](https://pnglike.com/)
-- [ランチメニュー](https://pnglike.com/menu/lunch)
-- [テイクアウトメニュー](https://pnglike.com/menu/takeout)
-- [グランドメニュー](https://pnglike.com/menu/grand)
-- [私たちについて](https://pnglike.com/about)
-- [ブログ・スパイスコラム](https://pnglike.com/blog)
-- [お問い合わせ・アクセス](https://pnglike.com/contact)
+- [ホーム](https://adarsha.jp/)
+- [ランチメニュー](https://adarsha.jp/menu/lunch)
+- [テイクアウトメニュー](https://adarsha.jp/menu/takeout)
+- [グランドメニュー](https://adarsha.jp/menu/grand)
+- [私たちについて](https://adarsha.jp/about)
+- [ブログ・スパイスコラム](https://adarsha.jp/blog)
+- [お問い合わせ・アクセス](https://adarsha.jp/contact)

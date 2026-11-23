@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast';
 import { Phone, Mail, Globe, Clock, PartyPopper, Send, CheckCircle2, ArrowRight } from 'lucide-react';
 import { apiFetch, errorMessage, getPublic } from '../lib/api';
 import { DEFAULT_STORE_LOCATIONS, type StoreLocation } from '../lib/stores';
+import StoreReviewLinks from '../components/StoreReviewLinks';
 import { useCustomer } from '../lib/customer-context';
 import ReservationModal from '../components/ReservationModal';
 
@@ -139,14 +140,14 @@ export default function Contact() {
   const eventPhone = settings.eventPhone || '0422-36-2220';
   const eventEmail = settings.eventEmail || 'events@adarsha.jp';
   const receptionHours = settings.receptionHours || '平日 10:00〜18:00';
-  const websiteUrl = settings.websiteUrl || 'www.pnglike.com';
+  const websiteUrl = settings.websiteUrl || 'www.adarsha.jp';
 
   const socialLinks = [
-    { label: 'Facebook', icon: '📘', url: settings.facebookUrl || 'https://facebook.com' },
-    { label: 'Instagram', icon: '📸', url: settings.instagramUrl || 'https://instagram.com' },
-    { label: 'Twitter / X', icon: '🐦', url: settings.twitterUrl || 'https://twitter.com' },
-    { label: 'YouTube', icon: '▶️', url: settings.youtubeUrl || 'https://youtube.com' },
-  ];
+    settings.facebookUrl ? { label: 'Facebook', icon: '📘', url: settings.facebookUrl } : null,
+    settings.instagramUrl ? { label: 'Instagram', icon: '📸', url: settings.instagramUrl } : null,
+    settings.twitterUrl ? { label: 'Twitter / X', icon: '🐦', url: settings.twitterUrl } : null,
+    settings.youtubeUrl ? { label: 'YouTube', icon: '▶️', url: settings.youtubeUrl } : null,
+  ].filter((item): item is { label: string; icon: string; url: string } => item !== null);
 
   const faqItems = [
     {
@@ -187,16 +188,16 @@ export default function Contact() {
         name="description"
         content="アダルサへのお問い合わせ、お席のご予約・ケータリング・貸切のご相談はこちらから承ります。お電話（048-514-8386）またはWEBフォームより受付中。"
       />
-      <link rel="canonical" href="https://pnglike.com/contact" />
+      <link rel="canonical" href="https://adarsha.jp/contact" />
       <meta property="og:title" content="お問い合わせ・ご予約 | Adarsha (アダルサ) 熊谷" />
       <meta property="og:description" content="アダルサへのお問い合わせ、お席のご予約・ケータリング・貸切のご相談はこちらから承ります。お電話またはWEBフォームより受付中。" />
       <meta property="og:type" content="website" />
-      <meta property="og:url" content="https://pnglike.com/contact" />
-      <meta property="og:image" content="https://pnglike.com/bg-hero-img.webp" />
+      <meta property="og:url" content="https://adarsha.jp/contact" />
+      <meta property="og:image" content="https://adarsha.jp/uploads/site-logo-01.webp" />
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:title" content="お問い合わせ・ご予約 | Adarsha (アダルサ)" />
       <meta name="twitter:description" content="アダルサへのお問い合わせ、ご予約・ケータリング・貸切のご相談はこちらから承ります。" />
-      <meta name="twitter:image" content="https://pnglike.com/bg-hero-img.webp" />
+      <meta name="twitter:image" content="https://adarsha.jp/uploads/site-logo-01.webp" />
 
       {/* Structured Data */}
       <script
@@ -210,13 +211,13 @@ export default function Contact() {
                 '@type': 'ListItem',
                 'position': 1,
                 'name': 'ホーム',
-                'item': 'https://pnglike.com/'
+                'item': 'https://adarsha.jp/'
               },
               {
                 '@type': 'ListItem',
                 'position': 2,
                 'name': 'お問い合わせ',
-                'item': 'https://pnglike.com/contact'
+                'item': 'https://adarsha.jp/contact'
               }
             ]
           })
@@ -228,13 +229,13 @@ export default function Contact() {
           __html: JSON.stringify({
             '@context': 'https://schema.org',
             '@type': 'ContactPage',
-            '@id': 'https://pnglike.com/contact#webpage',
-            'url': 'https://pnglike.com/contact',
+            '@id': 'https://adarsha.jp/contact#webpage',
+            'url': 'https://adarsha.jp/contact',
             'name': 'お問い合わせ・ご予約 | Adarsha (アダルサ)',
             'description': 'アダルサへのお問い合わせ、ご予約・ケータリング・貸切のご相談ページ。',
             'mainEntity': {
               '@type': 'Restaurant',
-              '@id': 'https://pnglike.com/#restaurant',
+              '@id': 'https://adarsha.jp/#restaurant',
               'name': 'Adarsha (アダルサ)',
               'telephone': '048-514-8386'
             }
@@ -433,6 +434,9 @@ export default function Contact() {
                         >
                           {store.phone}
                         </a>
+                      </div>
+                      <div style={{ marginTop: '8px' }}>
+                        <StoreReviewLinks store={store} layout="compact" />
                       </div>
                     </div>
                   );
@@ -876,8 +880,8 @@ export default function Contact() {
               </div>
             </div>
 
-            {/* Group 3: 公式SNSアカウント */}
-            <div>
+            {/* Group 3: 公式SNSアカウント. Shown only when the restaurant saved a real profile URL. */}
+            {socialLinks.length > 0 && <div>
               <h2
                 style={{
                   fontSize: '1.25rem',
@@ -927,7 +931,7 @@ export default function Contact() {
                   </a>
                 ))}
               </div>
-            </div>
+            </div>}
           </div>
 
           {/* ================= 右カラム: メッセージ送信カード ================= */}

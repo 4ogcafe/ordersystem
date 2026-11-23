@@ -8,6 +8,8 @@ import Home from './pages/Home';
 import { CartProvider } from './lib/cart';
 import { CustomerProvider } from './lib/customer';
 import CartDrawer from './components/order/CartDrawer';
+import LineChatButton from './components/LineChatButton';
+import MaintenanceBanner from './components/MaintenanceBanner';
 import './index.css';
 
 // Home is the usual landing page, so it ships in the main bundle; everything else loads on demand.
@@ -57,6 +59,7 @@ function AppContent() {
 
   return (
     <div className={hideNavAndFooter ? 'antialiased app-screen' : 'antialiased'}>
+      {!hideNavAndFooter && <MaintenanceBanner />}
       {!hideNavAndFooter && <Navbar />}
       <Suspense fallback={<div style={{ minHeight: '60vh' }} aria-busy="true" />}>
         <Routes>
@@ -94,6 +97,7 @@ function AppContent() {
         </Routes>
       </Suspense>
       {!hideNavAndFooter && !isDineIn && <CartDrawer />}
+      {!hideNavAndFooter && <LineChatButton />}
       {!hideNavAndFooter && <Footer />}
     </div>
   );

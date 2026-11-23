@@ -16,7 +16,10 @@ export interface StampRewardRule {
 }
 
 export interface StampSettings {
+  /** Admin UI / API name. */
   stampCardEnabled?: boolean | null;
+  /** Prisma Settings column name (same flag). */
+  stampsEnabled?: boolean | null;
   stampsPerCard?: number | null;
   /** Minimum paid amount (tax included) for a stamp. */
   stampMinAmount?: number | null;
@@ -50,17 +53,25 @@ export const DEFAULT_STAMP_REWARDS: StampRewardRule[] = [
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-/** The card is on unless the admin switched it off; missing values fall back to 10 stamps, ¥1,000, 12 hours. */
+/** The card is on unless the admin switched it off; missing values fall back to 10 stamps, ¥1,000, 6 hours. */
 export function stampConfig(settings: StampSettings): StampConfig {
   const perCard = Math.min(MAX_STAMPS_PER_CARD, Math.max(MIN_STAMPS_PER_CARD, settings.stampsPerCard ?? DEFAULT_STAMPS_PER_CARD));
+  // Admin writes stampCardEnabled → DB stampsEnabled; accept either so disable works end-to-end.
+  const enabledFlag = settings.stampCardEnabled ?? settings.stampsEnabled;
   return {
-    enabled: settings.stampCardEnabled !== false,
+    enabled: enabledFlag !== false,
     perCard,
     minAmount: settings.stampMinAmount ?? DEFAULT_STAMP_MIN_AMOUNT,
     cooldownHours: settings.stampCooldownHours ?? DEFAULT_STAMP_COOLDOWN_HOURS,
     rewardValidDays: settings.stampRewardValidDays ?? 0,
     rewards: (settings.stampRewards ?? DEFAULT_STAMP_REWARDS).filter((reward) => reward.at >= 1 && reward.at <= perCard).sort((a, b) => a.at - b.at),
   };
+}
+
+/** Public settings payload: always expose stampCardEnabled from the DB column. */
+export function withStampCardAlias<T extends Record<string, unknown>>(body: T): T & { stampCardEnabled: boolean } {
+  const enabled = (body.stampCardEnabled ?? body.stampsEnabled) !== false;
+  return { ...body, stampCardEnabled: enabled };
 }
 
 /** The amount that counts toward a stamp: what was paid for food, tax included (delivery fee excluded). */

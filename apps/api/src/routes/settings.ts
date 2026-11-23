@@ -2,11 +2,10 @@ import express from 'express';
 import { z } from 'zod';
 import { AppError } from '../lib/errors.js';
 import { PICKUP_HOURS_PATTERN } from '../lib/pickup.js';
-import { MAX_STAMPS_PER_CARD, MIN_STAMPS_PER_CARD, STAMP_REWARD_KINDS } from '../lib/stamps.js';
-import { definedOnly, httpsUrl, imageUrl, optionalText } from '../lib/schemas.js';
+import { MAX_STAMPS_PER_CARD, MIN_STAMPS_PER_CARD, STAMP_REWARD_KINDS, withStampCardAlias } from '../lib/stamps.js';
+import { definedOnly, googleMapEmbedUrl, httpsUrl, imageUrl, optionalText } from '../lib/schemas.js';
 import { prisma } from '../lib/prisma.js';
-import { requireAdmin } from '../middleware/auth.js';
-import { publicCache } from '../middleware/cache.js';
+import { readSession, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -79,7 +78,19 @@ const settingsSchema = z.object({
   storeReviewScore: text(10),
   storeReviewText: text(),
   storeReviewLink: httpsUrl.nullable().optional(),
-  storeLocations: z.array(z.record(z.string(), z.unknown())).optional(),
+  storeLocations: z
+    .array(
+      z
+        .object({
+          id: z.string().trim().min(1).max(80),
+          name: z.string().trim().min(1).max(100),
+          address: z.string().trim().max(300).optional(),
+          mapEmbedUrl: googleMapEmbedUrl.optional(),
+        })
+        .passthrough(),
+    )
+    .max(50)
+    .optional(),
   heroTagJa: text(),
   heroSubJa: text(LONG_TEXT),
   menuExplorerLabelJa: text(),
@@ -203,6 +214,27 @@ const settingsSchema = z.object({
   dineInAllowPayAtRegister: z.boolean().optional(),
   dineInAllowOnlinePay: z.boolean().optional(),
   dineInNoteJa: text(1000),
+  /** Which POS tender types appear on the cash counter (admin-managed). */
+  cashierPaymentMethods: z
+    .object({
+      CASH: z.boolean().optional(),
+      CARD: z.boolean().optional(),
+      PAYPAY: z.boolean().optional(),
+      RAKUTEN_PAY: z.boolean().optional(),
+      D_PAY: z.boolean().optional(),
+      AU_PAY: z.boolean().optional(),
+      MERPAY: z.boolean().optional(),
+      WECHAT_PAY: z.boolean().optional(),
+      IC: z.boolean().optional(),
+      ID_QUICPAY: z.boolean().optional(),
+      INVOICE: z.boolean().optional(),
+      BANK_TRANSFER: z.boolean().optional(),
+    })
+    .optional(),
+  /** Public site maintenance banner; ordering stays independently controllable. */
+  maintenanceMode: z.boolean().optional(),
+  maintenanceMessageJa: text(500),
+  maintenanceMessageEn: text(500),
 });
 
 const EXT_KEYS = [
@@ -240,13 +272,24 @@ const EXT_KEYS = [
   'dineInAllowPayAtRegister',
   'dineInAllowOnlinePay',
   'dineInNoteJa',
+  'cashierPaymentMethods',
+  'maintenanceMode',
+  'maintenanceMessageJa',
+  'maintenanceMessageEn',
 ] as const;
 
-router.get('/', publicCache, async (_req, res) => {
+router.get('/', async (req, res) => {
   const settings = await prisma.settings.findFirst();
   const extRecord = await prisma.appSecret.findUnique({ where: { id: 'PAGE_SETTINGS_EXT' } }).catch(() => null);
   const ext = extRecord?.publicKey ? JSON.parse(extRecord.publicKey) : {};
-  res.json({ ...(settings ?? {}), ...ext });
+  const body: Record<string, unknown> = { ...(settings ?? {}), ...ext };
+  const user = await readSession(req);
+  const staff = user && (user.role === 'ADMIN' || user.role === 'STAFF' || user.role === 'KITCHEN');
+  // Printer addresses are for the kitchen, not the public website.
+  if (!staff) delete body.printerConfigs;
+  res.setHeader('Cache-Control', staff ? 'private, no-store' : 'public, no-cache');
+  res.setHeader('Vary', 'Cookie');
+  res.json(withStampCardAlias(body));
 });
 
 router.put('/', requireAdmin, async (req, res) => {
@@ -296,6 +339,23 @@ router.put('/', requireAdmin, async (req, res) => {
   if ('featuredReviews' in data) data.featuredReviews = data.featuredReviews ?? null;
 
   const existing = await prisma.settings.findFirst();
+
+  // The master switch is the website on/off. Turning it on while pickup, delivery, and
+  // table ordering are all off would still hide every order button, so open pickup.
+  const setsChannel = 'pickupEnabled' in data || 'deliveryEnabled' in data || 'dineInEnabled' in extData;
+  if (data.orderingEnabled === true && !setsChannel && existing) {
+    const extRecord = await prisma.appSecret.findUnique({ where: { id: 'PAGE_SETTINGS_EXT' } }).catch(() => null);
+    const storedExt = extRecord?.publicKey ? JSON.parse(extRecord.publicKey) : {};
+    const pickupOn = existing.pickupEnabled === true;
+    const deliveryOn = existing.deliveryEnabled === true;
+    const dineInOn = storedExt.dineInEnabled === true;
+    if (!pickupOn && !deliveryOn && !dineInOn) {
+      data.pickupEnabled = true;
+      const hours = typeof existing.pickupHours === 'string' ? existing.pickupHours.trim() : '';
+      if (!hours) data.pickupHours = '11:30-15:00, 17:00-22:00';
+    }
+  }
+
   if (existing) {
     await prisma.settings.update({ where: { id: existing.id }, data });
   } else {
@@ -314,7 +374,7 @@ router.put('/', requireAdmin, async (req, res) => {
   const updatedSettings = await prisma.settings.findFirst();
   const finalExt = await prisma.appSecret.findUnique({ where: { id: 'PAGE_SETTINGS_EXT' } }).catch(() => null);
   const ext = finalExt?.publicKey ? JSON.parse(finalExt.publicKey) : {};
-  res.json({ ...(updatedSettings ?? {}), ...ext });
+  res.json(withStampCardAlias({ ...(updatedSettings ?? {}), ...ext }));
 });
 
 export default router;

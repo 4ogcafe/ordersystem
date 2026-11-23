@@ -7,6 +7,8 @@ import OfferSticker from '../components/MemberOffers';
 import GoogleReviews from '../components/GoogleReviews';
 import EmphasisText from '../components/EmphasisText';
 import { DEFAULT_STORE_LOCATIONS, saveOrderStoreId, type StoreLocation } from '../lib/stores';
+import SafeImage from '../components/SafeImage';
+import StoreReviewLinks from '../components/StoreReviewLinks';
 
 const DEFAULT_HERO_IMAGES = [
   '/uploads/hero-slide-1-special-set-v2.webp',
@@ -128,7 +130,7 @@ export default function Home() {
       .catch(console.error);
   }, []);
 
-  const heroImages = carousels.length > 0 ? carousels.map(c => assetUrl(c.imageUrl)) : DEFAULT_HERO_IMAGES;
+  const heroImages = (carousels.length > 0 ? carousels.map(c => assetUrl(c.imageUrl)) : DEFAULT_HERO_IMAGES).filter(Boolean);
   const recommendedItems = menuItems.filter(item => item.isRecommended).slice(0, 4);
   const regularItems = menuItems.filter(item => !item.isRecommended);
 
@@ -152,16 +154,16 @@ export default function Home() {
     <main>
       <title>Adarsha (アダルサ) | 熊谷の本格インド料理</title>
       <meta name="description" content="埼玉・熊谷の本格インド料理店アダルサ。タンドール窯で焼き上げるナン、スパイス香るカレー、ランチ・テイクアウト・グランドメニューをご案内します。" />
-      <link rel="canonical" href="https://pnglike.com/" />
+      <link rel="canonical" href="https://adarsha.jp/" />
       <meta property="og:title" content="Adarsha (アダルサ) | 熊谷の本格インド料理" />
       <meta property="og:description" content="埼玉・熊谷の本格インド料理店アダルサ。タンドール窯で焼き上げるナン、スパイス香るカレー、ランチ・テイクアウト・グランドメニューをご案内します。" />
       <meta property="og:type" content="website" />
-      <meta property="og:url" content="https://pnglike.com/" />
-      <meta property="og:image" content="https://pnglike.com/bg-hero-img.webp" />
+      <meta property="og:url" content="https://adarsha.jp/" />
+      <meta property="og:image" content="https://adarsha.jp/uploads/site-logo-01.webp" />
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:title" content="Adarsha (アダルサ) | 熊谷の本格インド料理" />
       <meta name="twitter:description" content="埼玉・熊谷の本格インド料理店アダルサ。ランチ、テイクアウト、グランドメニューをご案内します。" />
-      <meta name="twitter:image" content="https://pnglike.com/bg-hero-img.webp" />
+      <meta name="twitter:image" content="https://adarsha.jp/uploads/site-logo-01.webp" />
       {/* Hero Slider */}
       <div 
         className="home-hero"
@@ -182,15 +184,15 @@ export default function Home() {
         }}
       >
         {heroImages.map((img, index) => (
-          <img 
+          <SafeImage
             key={index}
-            src={img} 
+            src={img}
             srcSet={responsiveSrcSet(img)}
             sizes="100vw"
             alt={carousels[index]?.altJa || carousels[index]?.titleJa || 'Adarsha インド料理'}
             fetchPriority={index === 0 ? 'high' : 'low'}
-            decoding="async" 
-            className="slide-bg-img" 
+            decoding="async"
+            className="slide-bg-img"
             onError={(e) => {
               const target = e.currentTarget;
               if (target.src.includes('hero-slide-2') || target.src.includes('1793707859') || target.src.includes('1791677360469')) {
@@ -201,16 +203,16 @@ export default function Home() {
                 target.src = '/uploads/hero-slide-1-special-set-v2.webp';
               }
             }}
-            style={{ 
-              opacity: currentSlide === index ? 1 : 0, 
+            style={{
+              opacity: currentSlide === index ? 1 : 0,
               transition: 'opacity 0.8s ease-in-out',
               position: 'absolute',
               top: 0,
               left: 0,
               width: '100%',
               height: '100%',
-              objectFit: 'cover'
-            }} 
+              objectFit: 'cover',
+            }}
           />
         ))}
 
@@ -385,19 +387,14 @@ export default function Home() {
               {regularItems.length > 0 ? [...regularItems, ...regularItems, ...regularItems].map((item, idx) => (
                 <div key={`${item.id}-${idx}`} style={{ minWidth: '280px', flex: '0 0 280px', backgroundColor: 'white', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column' }}>
                   <div style={{ height: '220px', width: '100%', backgroundColor: '#f9f6f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-                    <img
-                      src={assetUrl(item.imageUrl) || "/bg-hero-img.webp"}
+                    <SafeImage
+                      src={assetUrl(item.imageUrl)}
                       alt={item.nameJa || item.nameEn}
                       loading="lazy"
                       decoding="async"
                       width={240}
                       height={180}
-                      onError={(e) => {
-                        const target = e.currentTarget;
-                        if (!target.src.endsWith('/bg-hero-img.webp')) {
-                          target.src = '/bg-hero-img.webp';
-                        }
-                      }}
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }}
                     />
                   </div>
@@ -438,19 +435,14 @@ export default function Home() {
               {recommendedItems.map(item => (
                 <div key={item.id} style={{ backgroundColor: 'white', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column' }}>
                   <div style={{ height: '220px', width: '100%', backgroundColor: '#f9f6f0', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-                    <img
-                      src={assetUrl(item.imageUrl) || "/bg-hero-img.webp"}
+                    <SafeImage
+                      src={assetUrl(item.imageUrl)}
                       alt={item.nameJa || item.nameEn}
                       loading="lazy"
                       decoding="async"
                       width={240}
                       height={180}
-                      onError={(e) => {
-                        const target = e.currentTarget;
-                        if (!target.src.endsWith('/bg-hero-img.webp')) {
-                          target.src = '/bg-hero-img.webp';
-                        }
-                      }}
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }}
                     />
                   </div>
@@ -547,7 +539,7 @@ export default function Home() {
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',
-              minWidth: '320px',
+              minWidth: 'min(100%, 280px)',
             }}>
               {/* Large Watermark Number */}
               <div style={{
@@ -683,13 +675,17 @@ export default function Home() {
                   borderRadius: '6px',
                   padding: '8px 14px',
                   fontSize: '0.88rem',
-                  marginBottom: '20px',
+                  marginBottom: '12px',
                 }}>
                   <span style={{ color: '#d97706', letterSpacing: '1px', fontSize: '0.9rem' }}>★★★★★</span>
                   <span style={{ fontWeight: 800, color: '#261c14' }}>{selectedStore.rating.toFixed(1)}</span>
                   <span style={{ color: '#78716c', fontSize: '0.82rem' }}>
                     · Googleで{selectedStore.reviewCount}件のレビュー
                   </span>
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                  <StoreReviewLinks store={selectedStore} layout="compact" />
                 </div>
 
                 {/* Actions: Order, Book Table & Route */}
@@ -715,7 +711,7 @@ export default function Home() {
                   >
                     🛍️ この店舗（{selectedStore.name}）でテイクアウト・デリバリー注文
                   </Link>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 1fr', gap: '10px' }}>
+                  <div className="home-store-actions">
                     <button
                       type="button"
                       onClick={() => {
@@ -782,7 +778,7 @@ export default function Home() {
             }}>
               <iframe
                 key={selectedStore.id}
-                src={selectedStore.mapEmbedUrl}
+                src={/^https:\/\/((([a-z0-9-]+\.)*)?google\.(com|co\.jp|co\.uk)\/maps|maps\.google\.(com|co\.jp|co\.uk)\/)/i.test(selectedStore.mapEmbedUrl || '') ? selectedStore.mapEmbedUrl : `https://maps.google.com/maps?q=${encodeURIComponent(selectedStore.address || selectedStore.name || 'Adarsha')}&z=16&output=embed`}
                 title={`Google マップ: ${selectedStore.name}`}
                 width="100%"
                 height="100%"
@@ -801,7 +797,7 @@ export default function Home() {
       
       {/* Subscription Section */}
       <div className="section" style={{ position: 'relative', padding: '100px 20px', backgroundColor: 'var(--dark-bark)', color: 'white', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0.15, backgroundImage: `url(${settings.newsletterBgImage || 'https://images.unsplash.com/photo-1596797038530-2c107229654b?auto=format&fit=crop&w=1920&q=80'})`, backgroundSize: 'cover', backgroundPosition: 'center', zIndex: 0 }}></div>
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0.15, backgroundImage: assetUrl(settings.newsletterBgImage) ? `url(${assetUrl(settings.newsletterBgImage)})` : 'none', backgroundSize: 'cover', backgroundPosition: 'center', zIndex: 0 }}></div>
         <div style={{ position: 'relative', zIndex: 1, maxWidth: '800px', margin: '0 auto', textAlign: 'center' }}>
           <h2 style={{ fontSize: '2.5rem', fontFamily: 'var(--font-display)', marginBottom: '16px', letterSpacing: '2px' }}>{settings.newsletterTitleJa || 'ニュースレターに登録'}</h2>
           <p style={{ fontSize: '1.1rem', color: 'rgba(255,255,255,0.8)', marginBottom: '40px', lineHeight: '1.6', whiteSpace: 'pre-line' }}>{settings.newsletterSubJa || <>最新のメニュー、シークレットレシピ、そして限定のお得な情報を<br/>あなたのメールボックスへ直接お届けします。</>}</p>

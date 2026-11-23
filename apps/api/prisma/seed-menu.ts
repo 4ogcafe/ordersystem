@@ -136,13 +136,26 @@ async function main() {
   const drinkChoice = await prisma.optionGroup.create({
     data: {
       nameJa: 'ドリンク', nameEn: 'Drink',
-      type: 'RADIO', required: false, sortOrder: 5,
+      type: 'RADIO', required: true, sortOrder: 5,
       options: [
         { id: 'drink-water',   nameJa: 'お水',             nameEn: 'Water',          priceAdjust: 0   },
         { id: 'drink-lassi',   nameJa: 'ラッシー',         nameEn: 'Lassi',          priceAdjust: 0   },
         { id: 'drink-chai',    nameJa: 'チャイ',           nameEn: 'Masala Chai',    priceAdjust: 0   },
         { id: 'drink-mango',   nameJa: 'マンゴーラッシー', nameEn: 'Mango Lassi',    priceAdjust: 100 },
         { id: 'drink-cola',    nameJa: 'コーラ',           nameEn: 'Cola',           priceAdjust: 50  },
+      ],
+    },
+  });
+
+  const snacksChoice = await prisma.optionGroup.create({
+    data: {
+      nameJa: 'スナック', nameEn: 'Snacks',
+      type: 'RADIO', required: true, sortOrder: 8,
+      options: [
+        { id: 'snack-samosa', nameJa: 'サモサ', nameEn: 'Samosa', priceAdjust: 0 },
+        { id: 'snack-onion-bhaji', nameJa: 'オニオンバジ', nameEn: 'Onion Bhaji', priceAdjust: 0 },
+        { id: 'snack-papadum', nameJa: 'パパダム', nameEn: 'Papadum', priceAdjust: 0 },
+        { id: 'snack-none', nameJa: 'なし', nameEn: 'None', priceAdjust: 0 },
       ],
     },
   });
@@ -186,7 +199,7 @@ async function main() {
       descriptionJa: 'カレー1種 + ナン1枚 + ミニサラダ + ドリンク。毎日食べたくなるランチセット。',
       price: 980, menuTypes: ['LUNCH'], spiceLevel: 1,
       allergens: ['小麦', '乳'], isRecommended: true, isActive: true, sortOrder: 1,
-      optionGroups: { connect: [{ id: lunchCurryChoice.id }, { id: nanChoice.id }, { id: drinkChoice.id }, { id: spiceLevel.id }] },
+      optionGroups: { connect: [{ id: spiceLevel.id }, { id: drinkChoice.id }, { id: lunchCurryChoice.id }, { id: nanChoice.id }, { id: snacksChoice.id }] },
     },
   });
 
@@ -198,7 +211,7 @@ async function main() {
       descriptionJa: 'カレー2種 + ナン2枚 + サラダ + ラッシー。食べ応え抜群のセット。',
       price: 1380, menuTypes: ['LUNCH'], spiceLevel: 1,
       allergens: ['小麦', '乳'], isRecommended: false, isActive: true, sortOrder: 2,
-      optionGroups: { connect: [{ id: nanChoice.id }, { id: extras.id }, { id: spiceLevel.id }] },
+      optionGroups: { connect: [{ id: spiceLevel.id }, { id: drinkChoice.id }, { id: lunchCurryChoice.id }, { id: nanChoice.id }, { id: snacksChoice.id }] },
     },
   });
 
@@ -210,7 +223,7 @@ async function main() {
       descriptionJa: 'パラックパニール + ダルタドカ + ナン + サラダ + マンゴーラッシー。完全菜食メニュー。',
       price: 1080, menuTypes: ['LUNCH'], spiceLevel: 1,
       allergens: ['小麦', '乳'], isVegetarian: true, isActive: true, sortOrder: 3,
-      optionGroups: { connect: [{ id: nanChoice.id }, { id: spiceLevel.id }] },
+      optionGroups: { connect: [{ id: spiceLevel.id }, { id: drinkChoice.id }, { id: lunchCurryChoice.id }, { id: nanChoice.id }, { id: snacksChoice.id }] },
     },
   });
 

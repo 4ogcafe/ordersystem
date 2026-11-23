@@ -64,7 +64,19 @@ export default function OrderingSwitches({ onChange }: { onChange?: () => void }
         toast.error(await errorMessage(res, 'Could not update.'));
         return;
       }
-      setState({ ...state, ...patch, [key]: next });
+      const saved = await res.json().catch(() => null);
+      setState({
+        ...state,
+        ...patch,
+        [key]: next,
+        orderingEnabled: saved ? saved.orderingEnabled !== false : key === 'orderingEnabled' ? next : state.orderingEnabled,
+        pickupEnabled: saved ? Boolean(saved.pickupEnabled) : key === 'pickupEnabled' ? next : state.pickupEnabled,
+        deliveryEnabled: saved ? Boolean(saved.deliveryEnabled) : key === 'deliveryEnabled' ? next : state.deliveryEnabled,
+        dineInEnabled: saved ? Boolean(saved.dineInEnabled) : key === 'dineInEnabled' ? next : state.dineInEnabled,
+        pickupHours: saved?.pickupHours || (patch.pickupHours ?? state.pickupHours),
+        deliveryHours: saved?.deliveryHours || (patch.deliveryHours ?? state.deliveryHours),
+        dineInHours: saved?.dineInHours || (patch.dineInHours ?? state.dineInHours),
+      });
       const label = key === 'orderingEnabled'
         ? 'Master Online ordering system'
         : key === 'pickupEnabled'
@@ -93,7 +105,9 @@ export default function OrderingSwitches({ onChange }: { onChange?: () => void }
       <div>
         <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 600 }}>Online ordering</h3>
         <p style={{ margin: '0.25rem 0 0', color: '#6b7280', fontSize: '0.875rem' }}>
-          {state.pickupEnabled || state.deliveryEnabled ? 'Customers can order from the website.' : 'Online ordering is off. The website hides the order buttons.'}
+          {state.orderingEnabled && (state.pickupEnabled || state.deliveryEnabled || state.dineInEnabled)
+            ? 'Customers can order from the website.'
+            : 'Online ordering is off. The website hides the order buttons.'}
         </p>
       </div>
       <div className="ordering-switch-list">

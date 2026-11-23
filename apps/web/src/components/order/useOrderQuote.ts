@@ -33,8 +33,23 @@ export interface Savings {
 
 const QUOTE_DELAY_MS = 300;
 
+export interface QuoteLineOption {
+  groupId: string;
+  groupNameJa?: string;
+  optionId: string;
+  nameJa?: string;
+  priceAdjust?: number;
+}
+
+export interface QuoteLineInput {
+  itemId: string;
+  quantity: number;
+  optionAdjust?: number;
+  options?: QuoteLineOption[];
+}
+
 /** The server's price for these items: offers, points and tax worked out exactly as the order will be saved. */
-export function useOrderQuote(items: { itemId: string; quantity: number }[], savings: Savings, isMember: boolean, fulfillment: Fulfillment = 'PICKUP') {
+export function useOrderQuote(items: QuoteLineInput[], savings: Savings, isMember: boolean, fulfillment: Fulfillment = 'PICKUP') {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [problem, setProblem] = useState('');
   // Keyed on the serialized items: callers pass a new array on every render.
@@ -47,7 +62,7 @@ export function useOrderQuote(items: { itemId: string; quantity: number }[], sav
   const offerIdsKey = JSON.stringify(rawOfferIds);
 
   useEffect(() => {
-    const parsed: { itemId: string; quantity: number }[] = JSON.parse(itemsKey);
+    const parsed: QuoteLineInput[] = JSON.parse(itemsKey);
     if (parsed.length === 0) return;
     let cancelled = false;
     const timer = setTimeout(async () => {

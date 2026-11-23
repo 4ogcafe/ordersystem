@@ -1,9 +1,14 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { toast } from 'react-hot-toast';
-import { UtensilsCrossed, QrCode, Printer, CheckCircle2, Sliders, ExternalLink, Info, Store } from 'lucide-react';
+import { UtensilsCrossed, QrCode, Printer, CheckCircle2, Sliders, ExternalLink, Info, Store, CreditCard } from 'lucide-react';
 import { apiFetch, errorMessage } from '../../lib/api';
 import { DEFAULT_STORE_LOCATIONS, type StoreLocation } from '../../lib/stores';
 import { generateQrSvg, printHtml } from '../../lib/receipt';
+import {
+  ALL_CASHIER_PAYMENT_METHODS,
+  normalizeCashierPaymentMethods,
+  type CashierPaymentMethodFlags,
+} from '../../lib/payment-methods';
 
 interface TableOrderingForm {
   dineInHours: string;
@@ -16,6 +21,7 @@ interface TableOrderingForm {
   dineInAllowPayAtRegister: boolean;
   dineInAllowOnlinePay: boolean;
   dineInNoteJa: string;
+  cashierPaymentMethods: CashierPaymentMethodFlags;
 }
 
 interface TableQrItem {
@@ -29,6 +35,39 @@ interface TableQrItem {
 }
 
 const DEFAULT_TABLE_NAMES = '1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, カウンター1, カウンター2, カウンター3';
+const DEFAULT_PUBLIC_SITE = 'https://adarsha.jp';
+const PUBLIC_SITE_PREF_KEY = 'adarsha_table_qr_public_origin';
+
+/** Normalize a site hostname/URL to https origin (no trailing slash). */
+function normalizePublicOrigin(raw: string | null | undefined): string {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  const withProto = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  try {
+    const u = new URL(withProto);
+    if (!u.hostname || u.hostname === 'localhost' || u.hostname.endsWith('.local')) return '';
+    if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(u.hostname)) return '';
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return '';
+  }
+}
+
+function resolveDefaultPublicOrigin(settingsWebsiteUrl?: string): string {
+  try {
+    const saved = normalizePublicOrigin(localStorage.getItem(PUBLIC_SITE_PREF_KEY) || '');
+    if (saved) return saved;
+  } catch {
+    // ignore
+  }
+  const fromSettings = normalizePublicOrigin(settingsWebsiteUrl);
+  if (fromSettings) return fromSettings;
+  if (typeof window !== 'undefined') {
+    const fromWindow = normalizePublicOrigin(window.location.origin);
+    if (fromWindow) return fromWindow;
+  }
+  return DEFAULT_PUBLIC_SITE;
+}
 
 export default function TableOrderingSettings({ onSaved }: { onSaved?: () => void }) {
   const [form, setForm] = useState<TableOrderingForm | null>(null);
@@ -37,20 +76,28 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
   const [previewStoreId, setPreviewStoreId] = useState<string>('musashisakai');
   const [previewTable, setPreviewTable] = useState<string>('1');
   const [tableQrs, setTableQrs] = useState<TableQrItem[]>([]);
+  const [squareConfigured, setSquareConfigured] = useState<boolean | null>(null);
+  const [publicOrigin, setPublicOrigin] = useState<string>(DEFAULT_PUBLIC_SITE);
 
   useEffect(() => {
     Promise.all([
       apiFetch('/api/v1/settings').then(r => r.json()).catch(() => ({})),
       apiFetch('/api/v1/stores').then(r => r.json()).catch(() => DEFAULT_STORE_LOCATIONS),
-      apiFetch('/api/v1/admin/tables/qr').then(r => r.json()).catch(() => []),
-    ]).then(([settings, storeList, qrList]) => {
+      apiFetch('/api/v1/admin/tables/qr').then(r => r.ok ? r.json() : null).catch(() => null),
+      apiFetch('/api/v1/square/public-config').then(r => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([settings, storeList, qrPayload, square]) => {
       if (Array.isArray(storeList) && storeList.length > 0) {
         setStores(storeList);
         setPreviewStoreId(storeList[0].id);
       }
-      if (Array.isArray(qrList)) {
+      const qrList = Array.isArray(qrPayload)
+        ? qrPayload
+        : (Array.isArray(qrPayload?.tables) ? qrPayload.tables : []);
+      if (qrList.length > 0) {
         setTableQrs(qrList);
       }
+      setSquareConfigured(square ? Boolean(square.configured) : false);
+      setPublicOrigin(resolveDefaultPublicOrigin(settings.websiteUrl || settings.siteUrl || settings.publicSiteUrl));
       setForm({
         dineInHours: settings.dineInHours || settings.pickupHours || '11:00-15:00, 17:00-22:30',
         dineInLeadMinutes: settings.dineInLeadMinutes ?? 0,
@@ -62,6 +109,7 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
         dineInAllowPayAtRegister: settings.dineInAllowPayAtRegister !== false,
         dineInAllowOnlinePay: settings.dineInAllowOnlinePay !== false,
         dineInNoteJa: settings.dineInNoteJa || 'お席のQRコードまたはスマートフォンからそのままご注文いただけます。お会計は食後にレジにてお願いいたします。',
+        cashierPaymentMethods: normalizeCashierPaymentMethods(settings.cashierPaymentMethods),
       });
     });
   }, []);
@@ -77,13 +125,33 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
 
   const selectedStore = stores.find(s => s.id === previewStoreId) || stores[0];
 
-  const getTableOrderUrl = (tableNum: string, storeId = previewStoreId) => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://pnglike.com';
-    const found = tableQrs.find(q => q.storeId === storeId && String(q.tableNumber) === String(tableNum));
-    if (found?.qrCode) {
-      return `${origin}/order?qr=${encodeURIComponent(found.qrCode)}&store=${encodeURIComponent(storeId)}&table=${encodeURIComponent(tableNum)}`;
+  const siteOrigin = normalizePublicOrigin(publicOrigin) || DEFAULT_PUBLIC_SITE;
+  const publicOriginLooksLocal =
+    /localhost|127\.0\.0\.1|192\.168\.|10\./i.test(publicOrigin) ||
+    (!normalizePublicOrigin(publicOrigin) && /localhost|127\.|192\.168\./i.test(String(publicOrigin)));
+
+  const persistPublicOrigin = (value: string) => {
+    setPublicOrigin(value);
+    const normalized = normalizePublicOrigin(value);
+    if (!normalized) return;
+    try {
+      localStorage.setItem(PUBLIC_SITE_PREF_KEY, normalized);
+    } catch {
+      // ignore
     }
-    return `${origin}/order?fulfillment=DINE_IN&store=${encodeURIComponent(storeId)}&table=${encodeURIComponent(tableNum)}`;
+  };
+
+  const getTableOrderUrl = (tableNum: string, storeId = previewStoreId) => {
+    const origin = siteOrigin;
+    const found = tableQrs.find(q => q.storeId === storeId && String(q.tableNumber) === String(tableNum));
+    // Use /order?query — path /qr/:code 404s on the Laravel marketing site unless SPA routes are mounted.
+    const params = new URLSearchParams({
+      fulfillment: 'DINE_IN',
+      store: storeId,
+      table: String(tableNum),
+    });
+    if (found?.qrCode) params.set('qr', found.qrCode);
+    return `${origin}/order?${params.toString()}`;
   };
 
   const currentPreviewUrl = getTableOrderUrl(previewTable);
@@ -138,6 +206,7 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
     <div class="table-badge">${form.dineInTablePrefix}${tableNum} 番席</div>
     <div class="qr-box">${qrSvg}</div>
     <div class="instructions">カメラアプリでQRコードを読み取ってください。<br />メニューの閲覧とお席からのご注文が可能です。</div>
+    <div class="step" style="font-size:11px;word-break:break-all;color:#6b7280;margin-top:10px;">${url}</div>
     <div class="step">※ お会計は食後にレジカウンターにてお申し付けください</div>
   </div>
 </body>
@@ -311,8 +380,49 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
                   onChange={e => update({ dineInAllowOnlinePay: e.target.checked })}
                   style={checkboxStyle}
                 />
-                <span>スマートフォンからのオンライン事前決済（クレジット等）を許可する</span>
+                <span>お席でのカード／キャッシュレス会計リクエストを許可する</span>
               </label>
+              {squareConfigured === false && form.dineInAllowOnlinePay && (
+                <p style={{ ...helpTextStyle, margin: '0 0 0 28px', color: '#b45309' }}>
+                  Square はサーバー未設定です。ゲストには「スタッフが端末を持参」と表示され、お会計通知のみ行われます。
+                </p>
+              )}
+              {squareConfigured === true && (
+                <p style={{ ...helpTextStyle, margin: '0 0 0 28px', color: '#047857' }}>
+                  Square 接続済み（環境変数）。スタッフ端末・リンク決済が利用可能です。
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Cashier tender types */}
+          <div style={cardStyle}>
+            <h4 style={cardHeadingStyle}>
+              <CreditCard size={16} color="#ea580c" /> レジ精算で使える支払い方法
+            </h4>
+            <p style={{ ...helpTextStyle, marginTop: 0 }}>
+              現金カウンター／POS に表示する決済手段です。最低1つは有効にしてください。
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+              {ALL_CASHIER_PAYMENT_METHODS.map(method => (
+                <label key={method.id} style={checkboxLabelStyle}>
+                  <input
+                    type="checkbox"
+                    checked={form.cashierPaymentMethods[method.id] !== false}
+                    onChange={e => {
+                      const next = { ...form.cashierPaymentMethods, [method.id]: e.target.checked };
+                      const anyOn = Object.values(next).some(Boolean);
+                      if (!anyOn) {
+                        toast.error('少なくとも1つの支払い方法を有効にしてください');
+                        return;
+                      }
+                      update({ cashierPaymentMethods: next });
+                    }}
+                    style={checkboxStyle}
+                  />
+                  <span>{method.labelJa}</span>
+                </label>
+              ))}
             </div>
           </div>
 
@@ -345,6 +455,26 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
           <p style={{ margin: '0 0 12px', fontSize: '0.82rem', color: '#6b7280', lineHeight: 1.5 }}>
             テーブルごとに専用QRコードを自動発行します。お客様がスキャンすると、該当店舗とテーブル番号が自動セットされた注文画面が開きます。
           </p>
+
+          <div style={{ marginBottom: '14px' }}>
+            <label style={labelStyle}>公開サイトURL（スマホが開く先）</label>
+            <input
+              style={inputStyle}
+              value={publicOrigin}
+              onChange={e => persistPublicOrigin(e.target.value)}
+              onBlur={e => {
+                const normalized = normalizePublicOrigin(e.target.value) || DEFAULT_PUBLIC_SITE;
+                persistPublicOrigin(normalized);
+              }}
+              placeholder="https://adarsha.jp"
+              autoComplete="off"
+            />
+            <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: publicOriginLooksLocal ? '#b91c1c' : '#6b7280', lineHeight: 1.45 }}>
+              {publicOriginLooksLocal
+                ? 'localhost / 社内IP だとお客様のスマホで「サイトにアクセスできません」になります。公開ドメイン（例: https://adarsha.jp）を入れてから印刷してください。'
+                : `印刷されるQRは ${siteOrigin} を開きます。AdminのURLではなく、お客様向け公開サイトを指定してください。`}
+            </p>
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
             <div>
@@ -401,7 +531,13 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <button
               type="button"
-              onClick={() => handlePrintSingleTableQr(previewTable)}
+              onClick={() => {
+                if (publicOriginLooksLocal) {
+                  toast.error('公開サイトURLを https://adarsha.jp などに設定してから印刷してください');
+                  return;
+                }
+                handlePrintSingleTableQr(previewTable);
+              }}
               style={printSingleButtonStyle}
             >
               <Printer size={16} />
@@ -410,7 +546,13 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
 
             <button
               type="button"
-              onClick={handleBatchPrintAllTables}
+              onClick={() => {
+                if (publicOriginLooksLocal) {
+                  toast.error('公開サイトURLを https://adarsha.jp などに設定してから印刷してください');
+                  return;
+                }
+                handleBatchPrintAllTables();
+              }}
               style={printBatchButtonStyle}
             >
               <QrCode size={16} />
@@ -418,7 +560,20 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
             </button>
 
             <a
-              href={currentPreviewUrl}
+              href={(() => {
+                // Local admin preview should open this SPA origin so it never 404s on the marketing site.
+                if (typeof window === 'undefined') return currentPreviewUrl;
+                const local = window.location.origin;
+                if (/localhost|127\.0\.0\.1/.test(local)) {
+                  try {
+                    const u = new URL(currentPreviewUrl);
+                    return `${local}${u.pathname}${u.search}`;
+                  } catch {
+                    return `${local}/order`;
+                  }
+                }
+                return currentPreviewUrl;
+              })()}
               target="_blank"
               rel="noreferrer"
               style={previewLinkStyle}

@@ -62,17 +62,25 @@ function getStatus(offer: Offer): { label: string; bg: string; color: string; bo
 
 export default function OffersTab({
   intent,
-  defaultSection = 'offers'
+  defaultSection = 'offers',
+  isAdmin = true,
 }: {
   intent?: TabIntent | null;
   defaultSection?: SubSection;
+  /** Staff may manage coupons and stamp the counter; stamp/points/game settings stay admin-only. */
+  isAdmin?: boolean;
 }) {
-  const [section, setSection] = useState<SubSection>(defaultSection);
+  const canOpenSection = (s: SubSection) => isAdmin || s === 'offers' || s === 'counter';
+  const [section, setSection] = useState<SubSection>(() => (canOpenSection(defaultSection) ? defaultSection : 'offers'));
   const [offers, setOffers] = useState<Offer[] | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSection(canOpenSection(defaultSection) ? defaultSection : 'offers');
+  }, [defaultSection, isAdmin]);
 
   useEffect(() => {
     if (intent?.action === 'stamp') {
@@ -86,11 +94,18 @@ export default function OffersTab({
   const load = useCallback(() => {
     setRefreshing(true);
     apiFetch('/api/v1/offers/all')
-      .then(res => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then(async res => {
+        if (!res.ok) throw new Error(await errorMessage(res, `Could not load offers (${res.status})`));
+        return res.json();
+      })
       .then(data => {
         setOffers(Array.isArray(data) ? data : []);
       })
-      .catch(console.error)
+      .catch(err => {
+        console.error(err);
+        setOffers([]);
+        toast.error(err instanceof Error ? err.message : 'クーポン一覧を読み込めませんでした。');
+      })
       .finally(() => setRefreshing(false));
   }, []);
 
@@ -138,11 +153,31 @@ export default function OffersTab({
     if (!draft) return;
     setSaving(true);
     const { id, ...fields } = draft;
+    const discountValue = Number(fields.discountValue);
+    const minSubtotal = Math.max(0, Number(fields.minSubtotal) || 0);
+    if (!Number.isFinite(discountValue) || discountValue < 1) {
+      toast.error('割引額を正しく入力してください。');
+      setSaving(false);
+      return;
+    }
+    if (fields.discountType === 'PERCENT' && discountValue > 100) {
+      toast.error('割引率は100%以下で入力してください。');
+      setSaving(false);
+      return;
+    }
     try {
       const res = await apiFetch(id ? `/api/v1/offers/${id}` : '/api/v1/offers', {
         method: id ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...fields, startsAt: startOfDay(fields.startsAt), endsAt: endOfDay(fields.endsAt) }),
+        body: JSON.stringify({
+          ...fields,
+          discountValue,
+          minSubtotal,
+          imageUrl: fields.imageUrl.trim() || null,
+          descriptionJa: fields.descriptionJa.trim() || null,
+          startsAt: startOfDay(fields.startsAt),
+          endsAt: endOfDay(fields.endsAt),
+        }),
       });
       if (res.ok) {
         toast.success(id ? 'クーポンを更新しました。' : 'クーポンを作成しました。お会計時に利用可能です。');
@@ -207,42 +242,48 @@ export default function OffersTab({
         >
           <Tag size={16} /> 割引オファー・クーポン管理
         </button>
-        <button
-          type="button"
-          onClick={() => setSection('stamps')}
-          style={{
-            ...subTabBtn,
-            backgroundColor: section === 'stamps' ? '#b45309' : 'transparent',
-            color: section === 'stamps' ? '#ffffff' : '#4b5563',
-            fontWeight: section === 'stamps' ? 700 : 500,
-          }}
-        >
-          <Gift size={16} /> スタンプカード設定
-        </button>
-        <button
-          type="button"
-          onClick={() => setSection('loyalty')}
-          style={{
-            ...subTabBtn,
-            backgroundColor: section === 'loyalty' ? '#b45309' : 'transparent',
-            color: section === 'loyalty' ? '#ffffff' : '#4b5563',
-            fontWeight: section === 'loyalty' ? 700 : 500,
-          }}
-        >
-          <Award size={16} /> ポイント制度設定
-        </button>
-        <button
-          type="button"
-          onClick={() => setSection('game')}
-          style={{
-            ...subTabBtn,
-            backgroundColor: section === 'game' ? '#b45309' : 'transparent',
-            color: section === 'game' ? '#ffffff' : '#4b5563',
-            fontWeight: section === 'game' ? 700 : 500,
-          }}
-        >
-          <Gamepad2 size={16} /> ガチャ・ゲーム設定
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setSection('stamps')}
+            style={{
+              ...subTabBtn,
+              backgroundColor: section === 'stamps' ? '#b45309' : 'transparent',
+              color: section === 'stamps' ? '#ffffff' : '#4b5563',
+              fontWeight: section === 'stamps' ? 700 : 500,
+            }}
+          >
+            <Gift size={16} /> スタンプカード設定
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setSection('loyalty')}
+            style={{
+              ...subTabBtn,
+              backgroundColor: section === 'loyalty' ? '#b45309' : 'transparent',
+              color: section === 'loyalty' ? '#ffffff' : '#4b5563',
+              fontWeight: section === 'loyalty' ? 700 : 500,
+            }}
+          >
+            <Award size={16} /> ポイント制度設定
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setSection('game')}
+            style={{
+              ...subTabBtn,
+              backgroundColor: section === 'game' ? '#b45309' : 'transparent',
+              color: section === 'game' ? '#ffffff' : '#4b5563',
+              fontWeight: section === 'game' ? 700 : 500,
+            }}
+          >
+            <Gamepad2 size={16} /> ガチャ・ゲーム設定
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setSection('counter')}
@@ -462,13 +503,13 @@ export default function OffersTab({
       )}
 
       {/* ── SECTION: STAMP CARD SETTINGS ── */}
-      {section === 'stamps' && <StampCardSettings />}
+      {isAdmin && section === 'stamps' && <StampCardSettings />}
 
       {/* ── SECTION: LOYALTY SETTINGS ── */}
-      {section === 'loyalty' && <LoyaltySettings />}
+      {isAdmin && section === 'loyalty' && <LoyaltySettings />}
 
       {/* ── SECTION: GAME SETTINGS ── */}
-      {section === 'game' && <GameSettings />}
+      {isAdmin && section === 'game' && <GameSettings />}
 
       {/* ── SECTION: STAMP SCANNER COUNTER ── */}
       {section === 'counter' && (

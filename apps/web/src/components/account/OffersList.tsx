@@ -4,6 +4,7 @@ import { assetUrl } from '../../lib/api';
 import { formatDate, offerLabel, yen } from '../../lib/format';
 import { cardStyle, mutedStyle } from './styles';
 import type { MemberOffer } from './types';
+import SafeImage from '../../components/SafeImage';
 
 const NEW_FOR_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -18,7 +19,7 @@ export default function OffersList({ offers, limit }: { offers: MemberOffer[]; l
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))', gap: '16px' }}>
       {shown.map(offer => (
         <article key={offer.id} className="acc-card" style={{ padding: 0, overflow: 'hidden', opacity: offer.used ? 0.6 : 1, display: 'flex', flexDirection: 'column' }}>
-          {offer.imageUrl && <img src={assetUrl(offer.imageUrl)} alt="" loading="lazy" style={{ width: '100%', height: '140px', objectFit: 'cover' }} />}
+          <SafeImage src={assetUrl(offer.imageUrl)} alt="" loading="lazy" style={{ width: '100%', height: '140px', objectFit: 'cover' }} />
           <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
             <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
               <span style={{ padding: '4px 12px', borderRadius: '9999px', backgroundColor: 'var(--gold)', color: 'var(--dark-bark)', fontWeight: 'bold', fontSize: '0.85rem' }}>

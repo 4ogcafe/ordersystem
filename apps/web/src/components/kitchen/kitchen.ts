@@ -53,7 +53,11 @@ export interface KitchenOrder {
 export interface KitchenBoard {
   serverTime: string;
   pausedUntil: string | null;
-  ordering: { pickup: { enabled: boolean }; delivery: { enabled: boolean } };
+  ordering: {
+    pickup: { enabled: boolean };
+    delivery: { enabled: boolean };
+    dineIn?: { enabled?: boolean };
+  };
   active: KitchenOrder[];
   done: KitchenOrder[];
   stats: { ordersToday: number; completedToday: number; cancelledToday: number; itemsToday: number; avgPrepMinutes: number | null };
@@ -123,7 +127,8 @@ export function nextAction(order: KitchenOrder): { status: KitchenStatus; label:
   }
   if (order.status === 'READY') {
     if (order.fulfillment === 'DELIVERY') return { status: 'COMPLETED', label: 'Delivered' };
-    if (order.fulfillment === 'DINE_IN') return { status: 'COMPLETED', label: 'Paid / Done' };
+    // Dine-in payment is usually at the cash counter; kitchen clears the ticket when food is served/settled.
+    if (order.fulfillment === 'DINE_IN') return { status: 'COMPLETED', label: 'Clear ticket' };
     return { status: 'COMPLETED', label: 'Picked up' };
   }
   return null;

@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { toast } from 'react-hot-toast';
 import { AlertTriangle, Bell, Check, ChevronDown, ChevronUp, Clock, ExternalLink, MapPin, Moon, Phone, Plus, Search, ShoppingBag, Sparkles, Store, Sun, Trash2 } from 'lucide-react';
 import { apiFetch, assetUrl, errorMessage, getPublic } from '../lib/api';
-import { MAX_QUANTITY, useCart, type CartLine } from '../lib/cart-context';
+import { MAX_QUANTITY, useCart, type CartLine, type CartLineOption } from '../lib/cart-context';
 import { useCustomer } from '../lib/customer-context';
 import { toHalfWidth, yen } from '../lib/format';
 import { evaluateOrderTiming } from '../lib/order-timing';
@@ -30,11 +30,13 @@ import MemberSavings from '../components/order/MemberSavings';
 import OrderReview from '../components/order/OrderReview';
 import PriceSummary from '../components/order/PriceSummary';
 import QuantitySelector from '../components/order/QuantitySelector';
-import type { BuyNowState } from '../components/order/OrderButtons';
+import { CustomizeModal, type BuyNowState, type OptionGroup, type OrderableItem } from '../components/order/OrderButtons';
 import { useOrderQuote, type Savings } from '../components/order/useOrderQuote';
 import DineInOrderExperience from '../components/order/DineInOrderExperience';
 import QrFulfillmentChoiceModal from '../components/order/QrFulfillmentChoiceModal';
-import { clearQrSession, getStoredQrSession, validateQrCodeApi, type QrSession } from '../lib/qr-session';
+import { checkServerQrSession, clearQrSession, getStoredQrSession, validateQrCodeApi, type QrSession } from '../lib/qr-session';
+import SafeImage from '../components/SafeImage';
+import StoreReviewLinks from '../components/StoreReviewLinks';
 
 interface Slot {
   date: string;
@@ -80,6 +82,7 @@ interface QuickMenuItem {
   isSoldOut?: boolean;
   isOrderable?: boolean;
   menuTypes?: string[];
+  optionGroups?: OptionGroup[];
 }
 
 interface QuickCategory {
@@ -157,7 +160,18 @@ export default function Order() {
   const [buyNow, setBuyNow] = useState<CartLine | null>(() => (location.state as BuyNowState | null)?.buyNow ?? readStoredBuyNow());
   useEffect(() => storeBuyNow(buyNow), [buyNow]);
   const lines = buyNow ? [buyNow] : cart.lines;
-  const items = lines.map(line => ({ itemId: line.id, quantity: line.quantity }));
+  const items = lines.map(line => ({
+    itemId: line.id,
+    quantity: line.quantity,
+    optionAdjust: (line.options || []).reduce((sum, o) => sum + (o.priceAdjust || 0), 0),
+    options: (line.options || []).map(o => ({
+      groupId: o.groupId,
+      groupNameJa: o.groupName,
+      optionId: o.optionId,
+      nameJa: o.optionName,
+      priceAdjust: o.priceAdjust,
+    })),
+  }));
 
   // Multi-branch dynamic store state
   const [stores, setStores] = useState<StoreLocation[]>(DEFAULT_STORE_LOCATIONS);
@@ -175,6 +189,7 @@ export default function Order() {
   const [activeCategoryId, setActiveCategoryId] = useState<string>('all');
   const [menuSearch, setMenuSearch] = useState<string>('');
   const [showQuickMenu, setShowQuickMenu] = useState<boolean>(false);
+  const [quickCustomize, setQuickCustomize] = useState<OrderableItem | null>(null);
 
   const [slotsData, setSlotsData] = useState<SlotsResponse | null>(null);
   const [settings, setSettings] = useState<any>({});
@@ -281,8 +296,16 @@ export default function Order() {
   useEffect(() => {
     if (queryQr || queryTable) {
       setIsValidatingQr(true);
+      const decodedQr = (() => {
+        if (!queryQr) return undefined;
+        try {
+          return decodeURIComponent(queryQr);
+        } catch {
+          return queryQr;
+        }
+      })();
       validateQrCodeApi({
-        qrCode: queryQr || undefined,
+        qrCode: decodedQr,
         storeId: queryStore || undefined,
         tableNumber: queryTable || undefined,
       }).then(session => {
@@ -293,7 +316,27 @@ export default function Order() {
             setSelectedStoreId(session.storeId);
             saveOrderStoreId(session.storeId);
           }
-          setFulfillment('DINE_IN');
+
+          let existingChoice = '';
+          try {
+            existingChoice = sessionStorage.getItem('adarsha_qr_choice') || '';
+          } catch {}
+
+          const urlWantsDineIn = queryFulfillment.toUpperCase() === 'DINE_IN' || !queryFulfillment;
+          if (existingChoice === 'PICKUP') {
+            setFulfillment('PICKUP');
+            setShowQrChoice(false);
+          } else if (existingChoice === 'DINE_IN' || urlWantsDineIn) {
+            setFulfillment('DINE_IN');
+            setShowQrChoice(false);
+            try {
+              sessionStorage.setItem('adarsha_qr_choice', 'DINE_IN');
+            } catch {}
+          } else {
+            setFulfillment('DINE_IN');
+            setShowQrChoice(true);
+          }
+
           toast.success(`🍽️ 【${session.restaurantName || 'Adarsha'}】テーブル ${session.tableNumber} へようこそ！`, {
             id: 'qr-welcome',
             duration: 3500,
@@ -320,6 +363,10 @@ export default function Order() {
         setQrSession(null);
         setTableNumber('');
         setFulfillment('PICKUP');
+        toast.error('お席QRの確認に失敗しました。通信環境をご確認のうえ、もう一度スキャンしてください。', {
+          id: 'qr-network',
+          duration: 5000,
+        });
       }).finally(() => {
         setIsValidatingQr(false);
       });
@@ -332,6 +379,11 @@ export default function Order() {
         if (stored.storeId) {
           setSelectedStoreId(stored.storeId);
         }
+        try {
+          if (!sessionStorage.getItem('adarsha_qr_choice')) {
+            setShowQrChoice(true);
+          }
+        } catch {}
       } else {
         setQrSession(null);
         setTableNumber('');
@@ -341,6 +393,41 @@ export default function Order() {
       }
     }
   }, [queryQr, queryTable, queryStore]);
+
+  // Keep QR session alive / detect expiry while dining (delay first beat so validate can settle)
+  useEffect(() => {
+    if (!isQrActive) return;
+    let cancelled = false;
+    const beat = () => {
+      checkServerQrSession().then(session => {
+        if (cancelled) return;
+        if (session && session.valid) {
+          setQrSession(session);
+          setTableNumber(session.tableNumber);
+        } else if (session === null && !getStoredQrSession()) {
+          setQrSession(null);
+          setTableNumber('');
+          setFulfillment('PICKUP');
+          toast.error('お席のセッションの有効期限が切れました。もう一度QRコードをスキャンしてください。', {
+            id: 'qr-expired',
+            duration: 6000,
+          });
+        }
+      });
+    };
+    const startId = window.setTimeout(beat, 8_000);
+    const id = window.setInterval(beat, 90_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') beat();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(startId);
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isQrActive]);
 
   // Fetch dynamic store locations & menu items
   useEffect(() => {
@@ -664,6 +751,16 @@ export default function Order() {
     else cart.setQuantity(id, quantity);
   };
 
+  const toOrderable = (item: QuickMenuItem): OrderableItem => ({
+    id: item.id,
+    name: item.nameJa || item.nameEn,
+    priceValue: item.price,
+    img: assetUrl(item.imageUrl || item.image),
+    soldOut: Boolean(item.isSoldOut),
+    categoryId: item.categoryId,
+    optionGroups: item.optionGroups,
+  });
+
   const handleQuickAddItem = (item: QuickMenuItem) => {
     const displayName = item.nameJa || item.nameEn;
     // Check if this item is strictly a Lunch-only item and we are outside Lunch order hours with enforcement on
@@ -683,6 +780,10 @@ export default function Order() {
       );
       return;
     }
+    if ((item.optionGroups?.length ?? 0) > 0) {
+      setQuickCustomize(toOrderable(item));
+      return;
+    }
     if (buyNow) {
       // Move buyNow into cart so user can combine multiple items seamlessly
       cart.add({
@@ -690,8 +791,9 @@ export default function Order() {
         name: buyNow.name,
         price: buyNow.price,
         img: buyNow.img,
+        options: buyNow.options,
       });
-      cart.setQuantity(buyNow.id, buyNow.quantity);
+      cart.setQuantity(buyNow.cartKey, buyNow.quantity);
       setBuyNow(null);
     }
     const existing = cart.lines.find(l => l.id === item.id && !l.options?.length);
@@ -703,10 +805,38 @@ export default function Order() {
         id: item.id,
         name: displayName,
         price: item.price,
-        img: assetUrl(item.imageUrl || item.image) || '/bg-hero-img.webp',
+        img: assetUrl(item.imageUrl || item.image),
       });
     }
     toast.success(`「${displayName}」をカートに追加しました`, { duration: 1800 });
+  };
+
+  const onQuickCustomized = (options: CartLineOption[], qty: number, mode: 'cart' | 'order') => {
+    if (!quickCustomize) return;
+    const name = quickCustomize.name;
+    const priceAdj = options.reduce((s, o) => s + o.priceAdjust, 0);
+    const line = {
+      id: quickCustomize.id,
+      name,
+      price: quickCustomize.priceValue + priceAdj,
+      img: quickCustomize.img,
+      options,
+    };
+    const cartKey = quickCustomize.id + (options.length
+      ? '|' + [...options].sort((a, b) => a.groupId.localeCompare(b.groupId)).map(o => `${o.groupId}:${o.optionId}`).join(',')
+      : '');
+    setQuickCustomize(null);
+    if (mode === 'order') {
+      setBuyNow({ ...line, cartKey, quantity: qty });
+      return;
+    }
+    if (buyNow) {
+      cart.add({ id: buyNow.id, name: buyNow.name, price: buyNow.price, img: buyNow.img, options: buyNow.options });
+      cart.setQuantity(buyNow.cartKey, buyNow.quantity);
+      setBuyNow(null);
+    }
+    cart.add(line, qty);
+    toast.success(`「${name}」をカートに追加しました`, { duration: 1800 });
   };
 
   /** Step 1: check the form, re-check the pickup time against the latest slots, then show the review screen. */
@@ -830,9 +960,12 @@ export default function Order() {
 
   if (isValidatingQr) {
     return (
-      <main style={{ minHeight: '80vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-        <div style={{ width: 44, height: 44, border: '4px solid #fed7aa', borderTopColor: '#ea580c', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-        <p style={{ fontWeight: 700, color: '#431407', fontSize: '1rem', margin: 0 }}>お席のQRコードを確認しています...</p>
+      <main style={{ minHeight: '80vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, background: 'linear-gradient(180deg,#fff7ed 0%,#fff 55%)' }}>
+        <div style={{ width: 48, height: 48, border: '4px solid #fed7aa', borderTopColor: '#ea580c', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <p style={{ fontWeight: 800, color: '#9a3412', fontSize: '1.05rem', margin: 0 }}>お席のQRコードを確認しています…</p>
+        <p style={{ fontWeight: 500, color: '#9a3412', fontSize: '0.85rem', margin: 0, opacity: 0.85 }}>
+          {queryTable ? `テーブル ${queryTable}` : '店内注文の準備中'}
+        </p>
       </main>
     );
   }
@@ -1127,6 +1260,10 @@ export default function Order() {
                       <div style={{ fontSize: '0.78rem', color: '#6b7280', marginTop: '2px' }}><strong>定休日:</strong> {selectedStore.holiday}</div>
                     </div>
                   </div>
+                </div>
+
+                <div style={{ marginTop: '10px' }}>
+                  <StoreReviewLinks store={selectedStore} layout="compact" />
                 </div>
 
                 {/* ── LUNCH / DINNER / TAKEOUT ORDER TIMING STATUS & NOTIFICATION BANNER ── */}
@@ -1497,17 +1634,12 @@ export default function Order() {
                             backgroundColor: inCartLine ? '#fffaf5' : '#fff',
                           }}
                         >
-                          <img
-                            src={assetUrl(item.imageUrl || item.image) || '/bg-hero-img.webp'}
+                          <SafeImage
+                            src={assetUrl(item.imageUrl || item.image)}
                             alt={displayName}
                             width={54}
                             height={54}
-                            onError={(e) => {
-                              const target = e.currentTarget;
-                              if (!target.src.endsWith('/bg-hero-img.webp')) {
-                                target.src = '/bg-hero-img.webp';
-                              }
-                            }}
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
                             style={{ borderRadius: '8px', objectFit: 'cover', flexShrink: 0 }}
                           />
                           <div style={{ flex: 1, minWidth: 0 }}>
@@ -1585,17 +1717,12 @@ export default function Order() {
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                       {lines.map(line => (
                         <li key={line.cartKey} style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #eee' }}>
-                          <img
-                            src={line.img || '/bg-hero-img.webp'}
+                          <SafeImage
+                            src={line.img}
                             alt=""
                             width={56}
                             height={56}
-                            onError={(e) => {
-                              const target = e.currentTarget;
-                              if (!target.src.endsWith('/bg-hero-img.webp')) {
-                                target.src = '/bg-hero-img.webp';
-                              }
-                            }}
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
                             style={{ borderRadius: '8px', objectFit: 'cover', flexShrink: 0 }}
                           />
                           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1814,6 +1941,13 @@ export default function Order() {
         onSelectTakeout={handleSelectTakeout}
         onClose={() => setShowQrChoice(false)}
       />
+      {quickCustomize && (
+        <CustomizeModal
+          item={quickCustomize}
+          onConfirm={onQuickCustomized}
+          onClose={() => setQuickCustomize(null)}
+        />
+      )}
     </main>
   );
 }

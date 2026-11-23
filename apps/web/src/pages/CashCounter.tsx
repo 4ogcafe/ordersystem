@@ -34,26 +34,57 @@ import {
 import { apiFetch, errorMessage, getPublic } from '../lib/api';
 import { setStaffSession } from '../lib/auth-storage';
 import SessionSecurityGuard from '../components/admin/SessionSecurityGuard';
+import JapanDevicePay from '../components/admin/JapanDevicePay';
+import StampCounter from '../components/admin/StampCounter';
+import TableFloorAlerts from '../components/order/TableFloorAlerts';
 import { yen, formatOrderNumber } from '../lib/format';
 import { DEFAULT_STORE_LOCATIONS, resolveOrderStore, type StoreLocation } from '../lib/stores';
+import {
+  enabledCashierPaymentMethods,
+  type CashierPaymentMethod,
+} from '../lib/payment-methods';
 import { printCustomerReceipt, printBillInvoice, printHtml, DEFAULT_STORE_SETTINGS, type ReceiptOrder } from '../lib/receipt';
+import { getScannerConfig, initScannerListener, type ScanEventDetail } from '../lib/scanner';
 import './cash-counter.css';
 
 const TIMEZONE = 'Asia/Tokyo';
 const POLL_MS = 5_000;
 const SETTINGS_KEY = 'adarsha_cash_counter_prefs';
+const STORE_PREF_KEY = 'adarsha_cash_counter_store';
 
-export type PaymentMethod = 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'PAYPAY' | 'IC' | 'ID_QUICPAY' | 'INVOICE';
+function initialCashCounterStore(): string {
+  try {
+    const saved = localStorage.getItem(STORE_PREF_KEY);
+    if (saved && saved !== 'ALL') return saved;
+  } catch { /* ignore */ }
+  return DEFAULT_STORE_LOCATIONS[0]?.id || 'musashisakai';
+}
 
-const PAYMENT_METHODS: Array<{ id: PaymentMethod; label: string; icon: any; color: string; bg: string }> = [
-  { id: 'CASH', label: '現金 (Cash)', icon: Banknote, color: '#22c55e', bg: 'rgba(34, 197, 94, 0.15)' },
-  { id: 'CARD', label: 'クレジットカード', icon: CreditCard, color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' },
-  { id: 'BANK_TRANSFER', label: '銀行振込 (振込)', icon: Landmark, color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' },
-  { id: 'PAYPAY', label: 'PayPay / QRコード', icon: QrCode, color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' },
-  { id: 'IC', label: '交通系IC (Suica等)', icon: Smartphone, color: '#06b6d4', bg: 'rgba(6, 182, 212, 0.15)' },
-  { id: 'ID_QUICPAY', label: 'iD / QUICPay', icon: Smartphone, color: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)' },
-  { id: 'INVOICE', label: '売掛・請求書払い', icon: Receipt, color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.15)' },
-];
+export type PaymentMethod = CashierPaymentMethod;
+
+const METHOD_ICONS: Record<PaymentMethod, any> = {
+  CASH: Banknote,
+  CARD: CreditCard,
+  PAYPAY: QrCode,
+  RAKUTEN_PAY: QrCode,
+  D_PAY: QrCode,
+  AU_PAY: QrCode,
+  MERPAY: QrCode,
+  WECHAT_PAY: QrCode,
+  IC: Smartphone,
+  ID_QUICPAY: Smartphone,
+  INVOICE: FileText,
+  BANK_TRANSFER: Landmark,
+};
+
+const PAYMENT_METHODS: Array<{ id: PaymentMethod; label: string; icon: any; color: string; bg: string }> =
+  enabledCashierPaymentMethods(undefined).map(m => ({
+    id: m.id,
+    label: m.labelJa,
+    icon: METHOD_ICONS[m.id] ?? CreditCard,
+    color: m.color,
+    bg: m.bg,
+  }));
 
 export type DiscountType = 'NONE' | 'PERCENT' | 'FIXED' | 'ROUND_10' | 'ROUND_100';
 
@@ -144,8 +175,9 @@ export default function CashCounter() {
 
   const [filter, setFilter] = useState<'ALL' | 'DINE_IN' | 'PICKUP' | 'DELIVERY'>('ALL');
   const [paymentFilter, setPaymentFilter] = useState<'ALL' | 'UNPAID' | 'PAID'>('ALL');
-  const [storeFilter, setStoreFilter] = useState('ALL');
+  const [storeFilter, setStoreFilter] = useState(initialCashCounterStore);
   const [now, setNow] = useState(() => Date.now());
+  const [byPaymentMethod, setByPaymentMethod] = useState<Record<string, { count: number; total: number }>>({});
 
   // Register state
   const [shift, setShift] = useState<any>(null);
@@ -215,8 +247,18 @@ export default function CashCounter() {
   });
   const [closeNotes, setCloseNotes] = useState('');
 
+  const [openShiftModal, setOpenShiftModal] = useState(false);
+  const [startingFloatInput, setStartingFloatInput] = useState('30000');
+  const [openingShift, setOpeningShift] = useState(false);
+
   const [historyModal, setHistoryModal] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
+
+  const [stampModal, setStampModal] = useState(false);
+  const [stampFocus, setStampFocus] = useState(0);
+  const [stampInitialCode, setStampInitialCode] = useState<string | undefined>(undefined);
+
+  const [menuQuickItems, setMenuQuickItems] = useState<Array<{ id: string; nameJa: string; nameEn?: string; price: number }>>(PRESET_QUICK_ITEMS);
 
   const audioRef = useRef<AudioContext | null>(null);
 
@@ -366,8 +408,10 @@ export default function CashCounter() {
 
   const loadData = useCallback(async () => {
     try {
+      const storeId = storeFilter && storeFilter !== 'ALL' ? storeFilter : '';
+      const storeQ = storeId ? `?storeId=${encodeURIComponent(storeId)}` : '';
       const [regRes, ordRes] = await Promise.all([
-        apiFetch('/api/v1/cash-register'),
+        apiFetch(`/api/v1/cash-register${storeQ}`),
         apiFetch('/api/v1/orders?scope=cashier'),
       ]);
 
@@ -378,8 +422,12 @@ export default function CashCounter() {
 
       if (regRes.ok) {
         const regData = await regRes.json();
-        setShift(regData.shift);
-        if (regData.stats) setStats(regData.stats);
+        // Never auto-switch the user's selected branch — only load this store's ledger.
+        setShift(regData.shift || null);
+        if (regData.stats) {
+          setStats(regData.stats);
+          setByPaymentMethod(regData.stats.byPaymentMethod || {});
+        }
         if (Array.isArray(regData.todayTransactions)) setTransactions(regData.todayTransactions);
         if (Array.isArray(regData.recentMovements)) setMovements(regData.recentMovements);
       }
@@ -393,7 +441,7 @@ export default function CashCounter() {
     } catch {
       setOffline(true);
     }
-  }, [navigate]);
+  }, [navigate, storeFilter]);
 
   useEffect(() => {
     apiFetch('/api/v1/auth/me')
@@ -408,11 +456,61 @@ export default function CashCounter() {
 
     getPublic<any>('/api/v1/stores')
       .then(d => {
-        if (Array.isArray(d?.stores) && d.stores.length > 0) setStores(d.stores);
-        else if (Array.isArray(d) && d.length > 0) setStores(d);
+        const list: StoreLocation[] = Array.isArray(d)
+          ? d
+          : (Array.isArray(d?.stores) ? d.stores : Array.isArray(d?.data) ? d.data : []);
+        const resolved = list.length > 0 ? list : DEFAULT_STORE_LOCATIONS;
+        setStores(resolved);
+        setStoreFilter(prev => {
+          if (resolved.some(s => s.id === prev)) return prev;
+          const next = resolved[0]?.id || 'musashisakai';
+          try { localStorage.setItem(STORE_PREF_KEY, next); } catch { /* ignore */ }
+          return next;
+        });
+      })
+      .catch(() => {
+        setStores(DEFAULT_STORE_LOCATIONS);
+      });
+
+    // Prefer live menu for bill creation; fall back to presets if unavailable.
+    apiFetch('/api/v1/menu/items')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        const items = Array.isArray(d) ? d : (d?.items || []);
+        const quick = items
+          .filter((i: any) => i && i.isActive !== false && !i.isSoldOut && typeof i.price === 'number')
+          .slice(0, 48)
+          .map((i: any) => ({
+            id: i.id,
+            nameJa: i.nameJa || i.nameEn || '商品',
+            nameEn: i.nameEn || i.nameJa || 'Item',
+            price: Number(i.price) || 0,
+          }));
+        if (quick.length > 0) setMenuQuickItems(quick);
       })
       .catch(() => {});
   }, [navigate]);
+
+  // USB / hardware member QR → open stamp award panel on this register screen
+  useEffect(() => {
+    const cleanupScanner = initScannerListener();
+    const handleScannedMember = (e: CustomEvent<ScanEventDetail>) => {
+      const cfg = getScannerConfig();
+      const memberCode = e.detail?.memberCode;
+      if (!memberCode) return;
+      if (cfg.autoOpenStampCounter === false) return;
+      setStampInitialCode(memberCode);
+      setStampFocus(n => n + 1);
+      setStampModal(true);
+    };
+    window.addEventListener('adarsha:member-scanned' as any, handleScannedMember as EventListener);
+    window.addEventListener('kalpana:member-scanned' as any, handleScannedMember as EventListener);
+    return () => {
+      cleanupScanner();
+      window.removeEventListener('adarsha:member-scanned' as any, handleScannedMember as EventListener);
+      window.removeEventListener('kalpana:member-scanned' as any, handleScannedMember as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -495,14 +593,121 @@ export default function CashCounter() {
 
   // ── Settle Order ──────────────────────────────────────────────────────────
 
-  const handleSettleActiveOrder = async () => {
+  const handleOpenShift = async () => {
+    const floatVal = parseInt(startingFloatInput, 10);
+    if (isNaN(floatVal) || floatVal < 0) {
+      toast.error('有効な釣銭準備金を入力してください');
+      return;
+    }
+    const branchId = storeFilter !== 'ALL' ? storeFilter : (stores[0]?.id);
+    if (!branchId) {
+      toast.error('店舗を選択してください');
+      return;
+    }
+    setOpeningShift(true);
+    try {
+      const res = await apiFetch('/api/v1/cash-register/shift/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startingFloat: floatVal,
+          storeId: branchId,
+        }),
+      });
+      if (res.status === 409) {
+        // Already open — treat as success after reload
+        setOpenShiftModal(false);
+        await loadData();
+        toast.success('この店舗のレジは既に開設されています');
+        return;
+      }
+      if (!res.ok) throw new Error(await errorMessage(res, 'レジ開設に失敗しました'));
+      const data = await res.json();
+      setShift(data.shift);
+      setOpenShiftModal(false);
+      toast.success(`レジを開設しました（釣銭準備金: ${yen(floatVal)}）`);
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || 'エラーが発生しました');
+    } finally {
+      setOpeningShift(false);
+    }
+  };
+
+  /** If no open shift on the *selected* store, open one for that store only. */
+  const ensureShiftOpen = async (): Promise<any | null> => {
+    if (shift?.isOpen && (!shift.storeId || shift.storeId === storeFilter)) return shift;
+    const storeId = storeFilter !== 'ALL' ? storeFilter : stores[0]?.id;
+    if (!storeId) {
+      toast.error('店舗を選択してください');
+      return null;
+    }
+    try {
+      const check = await apiFetch(`/api/v1/cash-register?storeId=${encodeURIComponent(storeId)}`);
+      if (check.ok) {
+        const data = await check.json();
+        if (data.shift?.isOpen) {
+          setShift(data.shift);
+          return data.shift;
+        }
+      }
+
+      const floatVal = parseInt(startingFloatInput, 10);
+      const startingFloat = !isNaN(floatVal) && floatVal >= 0 ? floatVal : 30000;
+      const res = await apiFetch('/api/v1/cash-register/shift/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ startingFloat, storeId }),
+      });
+      if (res.status === 409) {
+        const retry = await apiFetch(`/api/v1/cash-register?storeId=${encodeURIComponent(storeId)}`);
+        if (retry.ok) {
+          const d = await retry.json();
+          setShift(d.shift || null);
+          if (d.shift?.isOpen) return d.shift;
+        }
+      }
+      if (!res.ok) throw new Error(await errorMessage(res, 'レジ開設に失敗しました'));
+      const opened = await res.json();
+      setShift(opened.shift);
+      toast.success(`レジを自動開設しました（準備金 ${yen(startingFloat)}）`);
+      await loadData();
+      return opened.shift;
+    } catch (err: any) {
+      toast.error(err.message || '先にレジを開設してください');
+      setOpenShiftModal(true);
+      return null;
+    }
+  };
+
+  const selectBranch = (next: string) => {
+    if (!next || next === storeFilter) return;
+    setStoreFilter(next);
+    try { localStorage.setItem(STORE_PREF_KEY, next); } catch { /* ignore */ }
+    setShift(null); // clear until loadData for the new store finishes
+  };
+
+  const handleSettleActiveOrder = async (opts?: {
+    paymentMethod?: PaymentMethod;
+    squarePaymentId?: string | null;
+    noteExtra?: string;
+    skipNonCashConfirm?: boolean;
+  }) => {
     if (!activeCheckoutOrder) return;
+    const openShift = shift?.isOpen ? shift : await ensureShiftOpen();
+    if (!openShift?.isOpen) return;
+    const registerStoreId = openShift.storeId || (storeFilter !== 'ALL' ? storeFilter : stores[0]?.id);
+    if (!registerStoreId) {
+      toast.error('店舗を選択してください');
+      return;
+    }
+    const method = opts?.paymentMethod || settlementMethod;
     const baseTot = baseTotal;
     const discountAmt = computedDiscountAmount;
     const finalTot = finalPayableTotal;
     const tendered = parseInt(amountTenderedStr, 10);
 
-    if (settlementMethod === 'CASH') {
+    if (method === 'CASH') {
       if (!amountTenderedStr.trim() || isNaN(tendered)) {
         toast.error('お預かり金額を入力してください');
         return;
@@ -511,17 +716,18 @@ export default function CashCounter() {
         toast.error(`お預かり金額が不足しています（不足: ${yen(finalTot - tendered)}）`);
         return;
       }
-    } else {
-      if (!nonCashConfirmed) {
-        toast.error('決済端末での受領確認を行ってください');
-        return;
-      }
+    } else if (!opts?.skipNonCashConfirm && !nonCashConfirmed) {
+      toast.error('決済端末での受領確認を行ってください');
+      return;
     }
 
-    const finalTendered = settlementMethod === 'CASH' ? tendered : finalTot;
-    const change = settlementMethod === 'CASH' ? Math.max(0, finalTendered - finalTot) : 0;
+    const finalTendered = method === 'CASH' ? tendered : finalTot;
+    const change = method === 'CASH' ? Math.max(0, finalTendered - finalTot) : 0;
     const tableNum = extractTableNumber(activeCheckoutOrder.note);
     const orderBranch = resolveOrderStore(activeCheckoutOrder, stores);
+    const noteParts = [opts?.noteExtra, opts?.squarePaymentId ? `Square:${opts.squarePaymentId}` : '']
+      .map(s => (s || '').trim())
+      .filter(Boolean);
 
     setSettling(true);
     try {
@@ -553,21 +759,27 @@ export default function CashCounter() {
           discount: discountAmt,
           discountReason: discountAmt > 0 ? (discountReason || 'レジ即時割引') : undefined,
           total: finalTot,
-          paymentMethod: settlementMethod,
+          paymentMethod: method,
           amountTendered: finalTendered,
           changeAmount: change,
-          storeId: orderBranch?.id || (storeFilter !== 'ALL' ? storeFilter : undefined),
-          storeName: orderBranch?.name,
+          storeId: registerStoreId,
+          storeName: stores.find(s => s.id === registerStoreId)?.name || orderBranch?.name,
           markCompleted: true,
+          note: noteParts.length ? noteParts.join(' · ') : undefined,
+          squarePaymentId: opts?.squarePaymentId || undefined,
         }),
       });
 
       if (!res.ok) throw new Error(await errorMessage(res, '会計処理に失敗しました'));
 
       playChime();
-      toast.success(`🎉 会計完了！ お釣り: ${yen(change)}`);
+      toast.success(
+        method === 'CASH'
+          ? `🎉 会計完了！ お釣り: ${yen(change)}`
+          : `🎉 ${PAYMENT_METHODS.find(m => m.id === method)?.label || method} でのお会計完了！`,
+      );
 
-      const methodLabel = PAYMENT_METHODS.find(m => m.id === settlementMethod)?.label || settlementMethod;
+      const methodLabel = PAYMENT_METHODS.find(m => m.id === method)?.label || method;
       const receiptOrder = createReceiptOrderFromOrder(
         activeCheckoutOrder,
         change,
@@ -682,6 +894,11 @@ export default function CashCounter() {
   const cashVariance = actualCountedCash - stats.expectedDrawerCash;
 
   const handleCloseShift = async () => {
+    const branchId = shift?.storeId || (storeFilter !== 'ALL' ? storeFilter : stores[0]?.id);
+    if (!branchId) {
+      toast.error('店舗を選択してください');
+      return;
+    }
     try {
       const res = await apiFetch('/api/v1/cash-register/shift/close', {
         method: 'POST',
@@ -690,6 +907,7 @@ export default function CashCounter() {
           countedTotal: actualCountedCash,
           denominations: denominationsCount,
           notes: closeNotes,
+          storeId: branchId,
         }),
       });
       if (!res.ok) throw new Error(await errorMessage(res, 'レジ締めに失敗しました'));
@@ -698,7 +916,7 @@ export default function CashCounter() {
       setBalancingModal(false);
 
       // Print Z-Report
-      const branch = stores.find(s => s.id === storeFilter) || stores[0];
+      const branch = stores.find(s => s.id === branchId) || stores[0];
       const storeName = branch?.name || DEFAULT_STORE_SETTINGS.storeNameJa;
       const reportHtml = `
 <!DOCTYPE html>
@@ -759,8 +977,9 @@ export default function CashCounter() {
   }, [storeFilter, stores]);
 
   const activeStats = useMemo(() => {
-    if (storeFilter === 'ALL') return stats;
-    const branchTxs = transactions.filter(t => !t.isVoided && (t.storeId === storeFilter || t.storeName === currentBranch?.name));
+    // Server already scopes stats when storeFilter is set.
+    if (storeFilter !== 'ALL') return { ...stats, byPaymentMethod };
+    const branchTxs = transactions.filter(t => !t.isVoided);
     const cash = branchTxs.filter(t => t.paymentMethod === 'CASH').reduce((sum, t) => sum + (t.total || 0), 0);
     const nonCash = branchTxs.filter(t => t.paymentMethod !== 'CASH').reduce((sum, t) => sum + (t.total || 0), 0);
     const total = cash + nonCash;
@@ -774,7 +993,7 @@ export default function CashCounter() {
       startingFloat: stats.startingFloat,
       expectedDrawerCash: stats.startingFloat + cash,
     };
-  }, [stats, storeFilter, transactions, currentBranch]);
+  }, [stats, storeFilter, transactions, byPaymentMethod]);
 
   // ── Table Reset / Free Table Handler ──────────────────────────────────────
   const handleResetTable = async (tableNum: string, storeId?: string) => {
@@ -1050,8 +1269,10 @@ export default function CashCounter() {
           <div>
             <strong>Adarsha Cash Counter</strong>
             <span className="cc-clock">
+              {currentBranch?.name ? `${currentBranch.name.replace(/^本格インド料理\s*/, '')} · ` : ''}
               {new Date(now).toLocaleString('ja-JP', { timeZone: TIMEZONE, month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-              {shift?.openedBy ? ` · レジ担当: ${shift.openedBy}` : ''}
+              {shift?.isOpen ? ` · 稼働中` : ' · 未開設'}
+              {shift?.openedBy ? ` · ${shift.openedBy}` : ''}
             </span>
           </div>
         </div>
@@ -1112,7 +1333,7 @@ export default function CashCounter() {
           </button>
         </div>
 
-        {/* Fulfillment & Branch Filter */}
+        {/* Fulfillment Filter */}
         <div className="cc-filter" role="group" aria-label="Filter orders">
           {(['ALL', 'DINE_IN', 'PICKUP', 'DELIVERY'] as const).map(f => (
             <button
@@ -1130,31 +1351,76 @@ export default function CashCounter() {
               </strong>
             </button>
           ))}
-
-          {stores.length > 1 && (
-            <select
-              value={storeFilter}
-              onChange={e => setStoreFilter(e.target.value)}
-              style={{
-                backgroundColor: '#1f2937',
-                color: '#f9fafb',
-                border: '1px solid #374151',
-                borderRadius: '8px',
-                padding: '4px 8px',
-                fontSize: '0.8rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                marginLeft: '4px'
-              }}
-            >
-              <option value="ALL">🏪 全店舗 ({stores.length})</option>
-              {stores.map(st => <option key={st.id} value={st.id}>🏪 {st.name}</option>)}
-            </select>
-          )}
         </div>
+
+        {/* Branch selector — dedicated control (not nested in filter buttons) */}
+        <label
+          className="cc-branch-select"
+          title="店舗を切り替えると、その店舗のレジ・売上・伝票だけが表示されます"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: '#0f172a',
+            border: '2px solid #f59e0b',
+            borderRadius: '10px',
+            padding: '6px 10px',
+            minHeight: '42px',
+            flexShrink: 0,
+          }}
+        >
+          <Building2 size={16} color="#fbbf24" />
+          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#fbbf24', whiteSpace: 'nowrap' }}>店舗</span>
+          <select
+            value={stores.some(s => s.id === storeFilter) ? storeFilter : (stores[0]?.id || '')}
+            onChange={e => selectBranch(e.target.value)}
+            aria-label="店舗を選択"
+            style={{
+              backgroundColor: '#1e293b',
+              color: '#f8fafc',
+              border: '1px solid #475569',
+              borderRadius: '6px',
+              padding: '6px 10px',
+              fontSize: '0.88rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              minWidth: '200px',
+              maxWidth: '280px',
+              outline: 'none',
+            }}
+          >
+            {stores.length === 0 && <option value="">店舗を読み込み中…</option>}
+            {stores.map(st => (
+              <option key={st.id} value={st.id}>
+                {st.name}
+              </option>
+            ))}
+          </select>
+        </label>
 
         {/* Action Tools Bar */}
         <div className="cc-tools">
+          {!shift?.isOpen ? (
+            <button
+              type="button"
+              className="cc-tool is-highlight"
+              onClick={() => setOpenShiftModal(true)}
+              title="本日のレジを開設する"
+              style={{ background: 'rgba(34, 197, 94, 0.25)', borderColor: '#22c55e' }}
+            >
+              <Banknote size={18} /><span>レジ開設 (Open Shift)</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="cc-tool"
+              disabled
+              title="レジ稼働中"
+              style={{ opacity: 0.85, cursor: 'default' }}
+            >
+              <CheckCircle2 size={16} color="#22c55e" /><span>稼働中 · 準備金 {yen(shift.startingFloat || stats.startingFloat)}</span>
+            </button>
+          )}
           <button
             type="button"
             className="cc-tool is-highlight"
@@ -1170,14 +1436,43 @@ export default function CashCounter() {
           >
             <Plus size={18} /><span>伝票発行・注文 (New Bill)</span>
           </button>
-          <button type="button" className="cc-tool" onClick={() => setMovementModal(true)}>
+          <button
+            type="button"
+            className="cc-tool"
+            onClick={async () => {
+              const open = shift?.isOpen ? shift : await ensureShiftOpen();
+              if (!open?.isOpen) return;
+              setMovementModal(true);
+            }}
+          >
             <ArrowUpDown size={16} /><span>入出金{movements.length > 0 ? ` (${movements.length})` : ''}</span>
           </button>
-          <button type="button" className="cc-tool is-warn" onClick={() => setBalancingModal(true)}>
+          <button
+            type="button"
+            className="cc-tool is-warn"
+            onClick={async () => {
+              const open = shift?.isOpen ? shift : await ensureShiftOpen();
+              if (!open?.isOpen) return;
+              setBalancingModal(true);
+            }}
+          >
             <Coins size={16} /><span>レジ締め・精算</span>
           </button>
           <button type="button" className="cc-tool" onClick={() => setHistoryModal(true)}>
             <History size={16} /><span>ジャーナル ({transactions.length})</span>
+          </button>
+          <button
+            type="button"
+            className="cc-tool is-highlight"
+            onClick={() => {
+              setStampInitialCode(undefined);
+              setStampFocus(n => n + 1);
+              setStampModal(true);
+            }}
+            title="会員QRをスキャンしてスタンプを付与"
+            style={{ background: 'rgba(180, 83, 9, 0.25)', borderColor: '#d97706' }}
+          >
+            <QrCode size={16} /><span>QRスタンプ付与</span>
           </button>
 
           <button
@@ -1210,6 +1505,8 @@ export default function CashCounter() {
           </a>
         </div>
       </header>
+
+      <TableFloorAlerts sound />
 
       {/* Main Board: Orders Tickets */}
       <main className="cc-board">
@@ -2064,6 +2361,35 @@ export default function CashCounter() {
                     </div>
                   )}
 
+                  {settlementMethod !== 'CASH' && (
+                    <div style={{ marginBottom: '18px' }}>
+                      <JapanDevicePay
+                        method={settlementMethod}
+                        amount={tot}
+                        storeId={
+                          resolveOrderStore(activeCheckoutOrder, stores)?.id
+                          || (storeFilter !== 'ALL' ? storeFilter : null)
+                        }
+                        orderIds={activeCheckoutOrder.orderIds || [activeCheckoutOrder.id]}
+                        label={`Order #${activeCheckoutOrder.number}`}
+                        disabled={settling}
+                        onPaid={async ({ paymentMethod, squarePaymentId, noteExtra }) => {
+                          setNonCashConfirmed(true);
+                          setAmountTenderedStr(String(tot));
+                          await handleSettleActiveOrder({
+                            paymentMethod,
+                            squarePaymentId: squarePaymentId ?? undefined,
+                            noteExtra: noteExtra || paymentMethod,
+                            skipNonCashConfirm: true,
+                          });
+                        }}
+                      />
+                      <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 8, lineHeight: 1.4 }}>
+                        端末決済が使えない場合は、下の手動確認で精算できます。
+                      </div>
+                    </div>
+                  )}
+
                   {/* Non-Cash Payment Manual Verification Box */}
                   {settlementMethod !== 'CASH' && (
                     <div style={{ backgroundColor: '#1e293b', border: `1.5px solid ${nonCashConfirmed ? '#22c55e' : (PAYMENT_METHODS.find(m => m.id === settlementMethod)?.color || '#3b82f6')}`, borderRadius: '12px', padding: '16px', marginBottom: '18px' }}>
@@ -2076,7 +2402,9 @@ export default function CashCounter() {
                         </span>
                       </div>
                       <div style={{ fontSize: '0.82rem', color: '#cbd5e1', marginBottom: '12px', lineHeight: 1.5 }}>
-                        CAT端末でのカード決済、QRコード決済完了、または銀行振込着金をお確かめのうえ、下のボタンを押して受領を確認してください。
+                        {settlementMethod === 'CARD'
+                          ? 'Square 端末で完了しない場合は、別のCAT端末等での受領を確認してから下のボタンを押してください。'
+                          : 'CAT端末でのカード決済、QRコード決済完了、または銀行振込着金をお確かめのうえ、下のボタンを押して受領を確認してください。'}
                       </div>
                       <button
                         type="button"
@@ -2616,11 +2944,11 @@ export default function CashCounter() {
                 <div>
                   <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--cc-muted)', marginBottom: '4px', fontWeight: 700 }}>対象店舗 (Branch)</label>
                   <select
-                    value={storeFilter !== 'ALL' ? storeFilter : (stores[0]?.id || '')}
-                    onChange={e => setStoreFilter(e.target.value)}
+                    value={stores.some(s => s.id === storeFilter) ? storeFilter : (stores[0]?.id || '')}
+                    onChange={e => selectBranch(e.target.value)}
                     style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--cc-line)', background: '#1e293b', color: '#fff', fontSize: '0.85rem', boxSizing: 'border-box' }}
                   >
-                    {stores.map(st => <option key={st.id} value={st.id}>🏪 {st.name}</option>)}
+                    {stores.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
                   </select>
                 </div>
               </div>
@@ -2630,7 +2958,7 @@ export default function CashCounter() {
               <div>
                 <h4 style={{ margin: '0 0 8px', fontSize: '0.88rem', color: 'var(--cc-muted)' }}>クイックメニュー選択</h4>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px', maxHeight: '240px', overflowY: 'auto', marginBottom: '12px' }}>
-                  {PRESET_QUICK_ITEMS.map(item => (
+                  {menuQuickItems.map(item => (
                     <button
                       key={item.id}
                       type="button"
@@ -2639,7 +2967,7 @@ export default function CashCounter() {
                           const idx = prev.findIndex(p => p.item.id === item.id);
                           if (idx >= 0) {
                             const n = [...prev];
-                            n[idx].quantity += 1;
+                            n[idx] = { ...n[idx], quantity: n[idx].quantity + 1 };
                             return n;
                           }
                           return [...prev, { item, quantity: 1 }];
@@ -2800,6 +3128,99 @@ export default function CashCounter() {
       )}
 
       {/* ================================================================= */}
+      {/* MODAL: OPEN SHIFT                                                 */}
+      {/* ================================================================= */}
+      {openShiftModal && (
+        <div className="cc-modal-backdrop" onClick={() => setOpenShiftModal(false)}>
+          <div className="cc-modal-content" style={{ maxWidth: '440px' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 8px', fontSize: '1.2rem', fontWeight: 800 }}>レジ開設 (Open Register Shift)</h3>
+            <p style={{ margin: '0 0 14px', color: 'var(--cc-muted)', fontSize: '0.88rem', lineHeight: 1.45 }}>
+              選択中の店舗のドロワー準備金を登録します。開設後にその店舗だけの精算・入出金が可能になります。
+            </p>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--cc-muted)', marginBottom: '6px', fontWeight: 700 }}>
+              対象店舗
+            </label>
+            <select
+              value={stores.some(s => s.id === storeFilter) ? storeFilter : (stores[0]?.id || '')}
+              onChange={e => selectBranch(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: '1px solid #f59e0b',
+                background: '#0f172a',
+                color: '#fff',
+                fontSize: '0.95rem',
+                fontWeight: 700,
+                boxSizing: 'border-box',
+                marginBottom: '12px',
+              }}
+            >
+              {stores.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
+            </select>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--cc-muted)', marginBottom: '6px', fontWeight: 700 }}>
+              釣銭準備金 (Starting Float)
+            </label>
+            <input
+              type="number"
+              min={0}
+              step={1000}
+              value={startingFloatInput}
+              onChange={e => setStartingFloatInput(e.target.value)}
+              autoFocus
+              style={{
+                width: '100%',
+                padding: '12px 14px',
+                borderRadius: '8px',
+                border: '1px solid var(--cc-line)',
+                background: '#0f172a',
+                color: '#fff',
+                fontSize: '1.1rem',
+                fontWeight: 800,
+                boxSizing: 'border-box',
+                marginBottom: '16px',
+              }}
+            />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => setOpenShiftModal(false)}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--cc-line)',
+                  background: 'var(--cc-card)',
+                  color: '#fff',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                disabled={openingShift}
+                onClick={handleOpenShift}
+                style={{
+                  flex: 2,
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: '#16a34a',
+                  color: '#fff',
+                  fontWeight: 900,
+                  cursor: openingShift ? 'wait' : 'pointer',
+                }}
+              >
+                {openingShift ? '開設中…' : 'レジを開設する'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================= */}
       {/* MODAL 2: CASH IN / OUT                                            */}
       {/* ================================================================= */}
       {movementModal && (
@@ -2866,11 +3287,17 @@ export default function CashCounter() {
               onClick={async () => {
                 const amt = parseInt(movementAmount, 10);
                 if (isNaN(amt) || amt <= 0) return toast.error('金額を入力してください');
-                await apiFetch('/api/v1/cash-register/movement', {
+                const branchId = shift?.storeId || (storeFilter !== 'ALL' ? storeFilter : stores[0]?.id);
+                if (!branchId) return toast.error('店舗を選択してください');
+                const res = await apiFetch('/api/v1/cash-register/movement', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ type: movementType, amount: amt, reason: movementReason }),
+                  body: JSON.stringify({ type: movementType, amount: amt, reason: movementReason, storeId: branchId }),
                 });
+                if (!res.ok) {
+                  toast.error(await errorMessage(res, '入出金の登録に失敗しました'));
+                  return;
+                }
                 toast.success('登録しました');
                 setMovementModal(false);
                 loadData();
@@ -2967,6 +3394,34 @@ export default function CashCounter() {
             >
               本日のレジ締めを実行＆Z-Report印刷
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* MODAL: QR STAMP AWARD (QRスタンプ付与)                             */}
+      {/* ================================================================= */}
+      {stampModal && (
+        <div className="cc-modal-backdrop" onClick={() => setStampModal(false)}>
+          <div
+            className="cc-modal-content"
+            style={{ maxWidth: '920px', background: '#f8fafc', color: '#111827' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '12px' }}>
+              <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: '#111827', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <QrCode size={20} color="#b45309" /> QRスタンプ付与
+              </h2>
+              <button
+                type="button"
+                onClick={() => setStampModal(false)}
+                style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer' }}
+                aria-label="閉じる"
+              >
+                <X size={22} />
+              </button>
+            </div>
+            <StampCounter focus={stampFocus} initialCode={stampInitialCode} />
           </div>
         </div>
       )}

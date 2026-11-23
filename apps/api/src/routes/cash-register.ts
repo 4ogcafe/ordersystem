@@ -3,199 +3,124 @@ import express from 'express';
 import { z } from 'zod';
 import { AppError } from '../lib/errors.js';
 import { prisma } from '../lib/prisma.js';
+import {
+  adoptOpenShiftIfNeeded,
+  allTransactions,
+  branchPayload,
+  computeBranchStats,
+  findOpenShift,
+  findTransaction,
+  getBranchState,
+  loadMultiRegisterState,
+  normalizeStoreId,
+  saveMultiRegisterState,
+  tokyoTodayPrefix,
+  type CashMovement,
+  type CashRegisterShift,
+  type CashRegisterTransaction,
+} from '../lib/cash-register-state.js';
 import { requireKitchen } from '../middleware/auth.js';
+import { settleMemberPoints, settleMemberStamp } from './orders.js';
 
 const router = express.Router();
 
-const STATE_SECRET_ID = 'CASH_REGISTER_STATE';
-
-export interface CashRegisterShift {
-  id: string;
-  isOpen: boolean;
-  openedAt: string;
-  openedBy: string;
-  openedById?: string;
-  startingFloat: number;
-  closedAt?: string;
-  closedBy?: string;
-  closedById?: string;
-  countedTotal?: number;
-  expectedTotal?: number;
-  variance?: number;
-  denominations?: Record<string, number>;
-  notes?: string;
-  storeId?: string;
+function requireStoreId(raw: unknown): string {
+  const id = normalizeStoreId(raw);
+  if (!id) throw new AppError(400, 'STORE_REQUIRED', '店舗（storeId）を指定してください。');
+  return id;
 }
 
-export interface CashMovement {
-  id: string;
-  timestamp: string;
-  type: 'IN' | 'OUT';
-  amount: number;
-  reason: string;
-  staffName?: string;
-  staffId?: string;
-  memo?: string;
+function storeIdFromQuery(req: express.Request): string | null {
+  return normalizeStoreId(req.query.storeId);
 }
 
-export interface CashRegisterTransaction {
-  id: string;
-  timestamp: string;
-  orderId?: string | null;
-  orderNumber?: number | null;
-  tableNumber?: string | null;
-  type: 'ORDER_SETTLEMENT' | 'WALK_IN' | 'REFUND';
-  fulfillment?: 'DINE_IN' | 'PICKUP' | 'DELIVERY';
-  customerName?: string;
-  itemsSummary: string;
-  items?: Array<{ nameJa?: string | null; nameEn: string; quantity: number; unitPrice: number; lineTotal: number }>;
-  subtotal: number;
-  tax: number;
-  taxRate: number;
-  originalTotal?: number | null;
-  discount?: number;
-  discountReason?: string | null;
-  total: number;
-  paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'PAYPAY' | 'IC' | 'ID_QUICPAY' | 'INVOICE';
-  amountTendered: number;
-  changeAmount: number;
-  staffName?: string;
-  staffId?: string;
-  storeId?: string;
-  note?: string;
-  isVoided?: boolean;
-}
-
-interface StoredRegisterState {
-  currentShift: CashRegisterShift | null;
-  movements: CashMovement[];
-  transactions: CashRegisterTransaction[];
-  closedShifts: CashRegisterShift[];
-}
-
-const DEFAULT_STATE: StoredRegisterState = {
-  currentShift: null,
-  movements: [],
-  transactions: [],
-  closedShifts: [],
-};
-
-async function loadRegisterState(): Promise<StoredRegisterState> {
-  try {
-    const record = await prisma.appSecret.findUnique({ where: { id: STATE_SECRET_ID } }).catch(() => null);
-    if (!record?.publicKey) return { ...DEFAULT_STATE };
-    const parsed = JSON.parse(record.publicKey);
-    return {
-      currentShift: parsed.currentShift ?? null,
-      movements: Array.isArray(parsed.movements) ? parsed.movements : [],
-      transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
-      closedShifts: Array.isArray(parsed.closedShifts) ? parsed.closedShifts : [],
-    };
-  } catch {
-    return { ...DEFAULT_STATE };
-  }
-}
-
-async function saveRegisterState(state: StoredRegisterState): Promise<void> {
-  // Cap history to keep JSON payload performant
-  const cappedTransactions = state.transactions.slice(-300);
-  const cappedMovements = state.movements.slice(-100);
-  const cappedClosedShifts = state.closedShifts.slice(-50);
-
-  const payload: StoredRegisterState = {
-    currentShift: state.currentShift,
-    movements: cappedMovements,
-    transactions: cappedTransactions,
-    closedShifts: cappedClosedShifts,
-  };
-
-  const serialized = JSON.stringify(payload);
-  await prisma.appSecret.upsert({
-    where: { id: STATE_SECRET_ID },
-    create: { id: STATE_SECRET_ID, publicKey: serialized, privateKey: '' },
-    update: { publicKey: serialized },
-  });
-}
-
-// ── GET /api/v1/cash-register ────────────────────────────────────────────────
-router.get('/', requireKitchen, async (_req, res) => {
-  const state = await loadRegisterState();
-
-  // Calculate live stats
-  const todayPrefix = new Date().toISOString().split('T')[0];
-  const todayTransactions = state.transactions.filter(
-    (t) => !t.isVoided && t.timestamp.startsWith(todayPrefix)
-  );
-
-  const cashSales = todayTransactions
-    .filter((t) => t.paymentMethod === 'CASH')
-    .reduce((sum, t) => sum + (t.total || 0), 0);
-
-  const nonCashSales = todayTransactions
-    .filter((t) => t.paymentMethod !== 'CASH')
-    .reduce((sum, t) => sum + (t.total || 0), 0);
-
-  const totalSales = cashSales + nonCashSales;
-
-  const totalIn = state.movements
-    .filter((m) => m.type === 'IN' && m.timestamp.startsWith(todayPrefix))
-    .reduce((sum, m) => sum + m.amount, 0);
-
-  const totalOut = state.movements
-    .filter((m) => m.type === 'OUT' && m.timestamp.startsWith(todayPrefix))
-    .reduce((sum, m) => sum + m.amount, 0);
-
-  const startingFloat = state.currentShift?.startingFloat || 0;
-  const expectedDrawerCash = startingFloat + cashSales + totalIn - totalOut;
-
+// ── GET /api/v1/cash-register?storeId= ───────────────────────────────────────
+// With storeId → that branch ledger. Without → all branches + org summary.
+router.get('/', requireKitchen, async (req, res) => {
+  const state = await loadMultiRegisterState();
+  const storeId = storeIdFromQuery(req);
   res.setHeader('Cache-Control', 'no-store');
+
+  if (storeId) {
+    // Read-only for this branch — do not move shifts between stores on GET
+    const branch = getBranchState(state, storeId);
+    const payload = branchPayload(storeId, branch);
+    const otherOpen = findOpenShift(state);
+    res.json({
+      ...payload,
+      openShiftStoreId: branch.currentShift?.isOpen
+        ? storeId
+        : (otherOpen?.storeId ?? null),
+    });
+    return;
+  }
+
+  const branches = Object.keys(state.byStore).map((id) => branchPayload(id, getBranchState(state, id)));
+  const todayPrefix = tokyoTodayPrefix();
+  const allTx = allTransactions(state).filter(
+    (t) => !t.isVoided && t.timestamp && (t.timestamp.startsWith(todayPrefix) || t.timestamp.slice(0, 10) === todayPrefix),
+  );
+  const byPaymentMethod: Record<string, { count: number; total: number }> = {};
+  let cashSales = 0;
+  let nonCashSales = 0;
+  for (const t of allTx) {
+    const method = t.paymentMethod || 'OTHER';
+    if (!byPaymentMethod[method]) byPaymentMethod[method] = { count: 0, total: 0 };
+    byPaymentMethod[method].count += 1;
+    byPaymentMethod[method].total += t.total || 0;
+    if (method === 'CASH') cashSales += t.total || 0;
+    else nonCashSales += t.total || 0;
+  }
+
   res.json({
-    shift: state.currentShift,
+    storeId: null,
+    shift: null,
+    branches,
     stats: {
-      todaySales: totalSales,
+      todaySales: cashSales + nonCashSales,
       cashSales,
       nonCashSales,
-      transactionCount: todayTransactions.length,
-      cashIn: totalIn,
-      cashOut: totalOut,
-      startingFloat,
-      expectedDrawerCash,
+      transactionCount: allTx.length,
+      cashIn: branches.reduce((s, b) => s + (b.stats.cashIn || 0), 0),
+      cashOut: branches.reduce((s, b) => s + (b.stats.cashOut || 0), 0),
+      startingFloat: 0,
+      expectedDrawerCash: 0,
+      byPaymentMethod,
     },
-    todayTransactions,
-    recentMovements: state.movements.slice(-30).reverse(),
+    todayTransactions: allTx,
+    recentMovements: [],
+    closedShifts: [],
   });
 });
 
 // ── POST /api/v1/cash-register/shift/open ────────────────────────────────────
 const openShiftSchema = z.object({
   startingFloat: z.number().int().min(0).max(10_000_000).default(30_000),
-  storeId: z.string().optional(),
+  storeId: z.string().min(1),
 });
 
 router.post('/shift/open', requireKitchen, async (req, res) => {
-  const { startingFloat, storeId } = openShiftSchema.parse(req.body);
-  const state = await loadRegisterState();
+  const { startingFloat, storeId: rawStoreId } = openShiftSchema.parse(req.body);
+  const storeId = requireStoreId(rawStoreId);
+  const state = await loadMultiRegisterState();
+  const branch = getBranchState(state, storeId);
 
-  if (state.currentShift?.isOpen) {
-    throw new AppError(409, 'SHIFT_ALREADY_OPEN', 'A register shift is already currently open.');
+  if (branch.currentShift?.isOpen) {
+    throw new AppError(409, 'SHIFT_ALREADY_OPEN', 'この店舗のレジは既に開設されています。');
   }
-
-  const staffName = req.user?.name || 'Staff';
-  const staffId = req.user?.id;
 
   const newShift: CashRegisterShift = {
     id: crypto.randomUUID(),
     isOpen: true,
     openedAt: new Date().toISOString(),
-    openedBy: staffName,
-    openedById: staffId,
+    openedBy: req.user?.name || 'Staff',
+    openedById: req.user?.id,
     startingFloat,
     storeId,
   };
 
-  state.currentShift = newShift;
-  await saveRegisterState(state);
-
+  branch.currentShift = newShift;
+  await saveMultiRegisterState(state);
   res.status(201).json({ success: true, shift: newShift });
 });
 
@@ -204,53 +129,48 @@ const closeShiftSchema = z.object({
   countedTotal: z.number().int().min(0).max(50_000_000),
   denominations: z.record(z.string(), z.number()).optional(),
   notes: z.string().optional(),
+  storeId: z.string().min(1),
 });
 
 router.post('/shift/close', requireKitchen, async (req, res) => {
-  const { countedTotal, denominations, notes } = closeShiftSchema.parse(req.body);
-  const state = await loadRegisterState();
+  const { countedTotal, denominations, notes, storeId: rawStoreId } = closeShiftSchema.parse(req.body);
+  const storeId = requireStoreId(rawStoreId);
+  const state = await loadMultiRegisterState();
+  const branch = getBranchState(state, storeId);
 
-  if (!state.currentShift || !state.currentShift.isOpen) {
-    throw new AppError(409, 'NO_OPEN_SHIFT', 'No open register shift found to close.');
+  if (!branch.currentShift?.isOpen) {
+    throw new AppError(409, 'NO_OPEN_SHIFT', 'この店舗に開設中のレジがありません。');
   }
 
-  const staffName = req.user?.name || 'Staff';
-  const staffId = req.user?.id;
-
-  // Calculate theoretical expected cash during this shift
-  const shiftStart = new Date(state.currentShift.openedAt).getTime();
-  const shiftCashSales = state.transactions
+  const shiftStart = new Date(branch.currentShift.openedAt).getTime();
+  const shiftCashSales = branch.transactions
     .filter((t) => !t.isVoided && t.paymentMethod === 'CASH' && new Date(t.timestamp).getTime() >= shiftStart)
     .reduce((sum, t) => sum + (t.total || 0), 0);
-
-  const shiftIn = state.movements
+  const shiftIn = branch.movements
     .filter((m) => m.type === 'IN' && new Date(m.timestamp).getTime() >= shiftStart)
     .reduce((sum, m) => sum + m.amount, 0);
-
-  const shiftOut = state.movements
+  const shiftOut = branch.movements
     .filter((m) => m.type === 'OUT' && new Date(m.timestamp).getTime() >= shiftStart)
     .reduce((sum, m) => sum + m.amount, 0);
 
-  const expectedTotal = state.currentShift.startingFloat + shiftCashSales + shiftIn - shiftOut;
-  const variance = countedTotal - expectedTotal;
-
+  const expectedTotal = branch.currentShift.startingFloat + shiftCashSales + shiftIn - shiftOut;
   const closedShift: CashRegisterShift = {
-    ...state.currentShift,
+    ...branch.currentShift,
     isOpen: false,
     closedAt: new Date().toISOString(),
-    closedBy: staffName,
-    closedById: staffId,
+    closedBy: req.user?.name || 'Staff',
+    closedById: req.user?.id,
     countedTotal,
     expectedTotal,
-    variance,
+    variance: countedTotal - expectedTotal,
     denominations,
     notes,
+    storeId,
   };
 
-  state.closedShifts.push(closedShift);
-  state.currentShift = null;
-  await saveRegisterState(state);
-
+  branch.closedShifts.push(closedShift);
+  branch.currentShift = null;
+  await saveMultiRegisterState(state);
   res.json({ success: true, shift: closedShift });
 });
 
@@ -260,11 +180,18 @@ const movementSchema = z.object({
   amount: z.number().int().positive().max(10_000_000),
   reason: z.string().trim().min(1).max(200),
   memo: z.string().trim().max(500).optional(),
+  storeId: z.string().min(1),
 });
 
 router.post('/movement', requireKitchen, async (req, res) => {
   const input = movementSchema.parse(req.body);
-  const state = await loadRegisterState();
+  const storeId = requireStoreId(input.storeId);
+  const state = await loadMultiRegisterState();
+  const branch = adoptOpenShiftIfNeeded(state, storeId);
+
+  if (!branch.currentShift?.isOpen) {
+    throw new AppError(409, 'NO_OPEN_SHIFT', 'この店舗のレジを開設してから入出金を登録してください。');
+  }
 
   const movement: CashMovement = {
     id: crypto.randomUUID(),
@@ -275,17 +202,18 @@ router.post('/movement', requireKitchen, async (req, res) => {
     memo: input.memo,
     staffName: req.user?.name || 'Staff',
     staffId: req.user?.id,
+    storeId,
   };
 
-  state.movements.push(movement);
-  await saveRegisterState(state);
-
+  branch.movements.push(movement);
+  await saveMultiRegisterState(state);
   res.status(201).json({ success: true, movement });
 });
 
 // ── POST /api/v1/cash-register/transaction ───────────────────────────────────
 const transactionSchema = z.object({
   orderId: z.string().optional().nullable(),
+  orderIds: z.array(z.string().min(1)).optional(),
   orderNumber: z.number().optional().nullable(),
   tableNumber: z.string().optional().nullable(),
   type: z.enum(['ORDER_SETTLEMENT', 'WALK_IN', 'REFUND']).default('ORDER_SETTLEMENT'),
@@ -300,7 +228,7 @@ const transactionSchema = z.object({
         quantity: z.number().int().positive(),
         unitPrice: z.number().int().nonnegative(),
         lineTotal: z.number().int().nonnegative(),
-      })
+      }),
     )
     .optional(),
   subtotal: z.number().int().nonnegative(),
@@ -310,14 +238,68 @@ const transactionSchema = z.object({
   discount: z.number().int().nonnegative().default(0),
   discountReason: z.string().optional().nullable(),
   total: z.number().int().nonnegative(),
-  paymentMethod: z.enum(['CASH', 'CARD', 'BANK_TRANSFER', 'PAYPAY', 'IC', 'ID_QUICPAY', 'INVOICE']),
+  paymentMethod: z.enum([
+    'CASH',
+    'CARD',
+    'BANK_TRANSFER',
+    'PAYPAY',
+    'RAKUTEN_PAY',
+    'D_PAY',
+    'AU_PAY',
+    'MERPAY',
+    'WECHAT_PAY',
+    'IC',
+    'ID_QUICPAY',
+    'INVOICE',
+  ]),
   amountTendered: z.number().int().nonnegative(),
   changeAmount: z.number().int().nonnegative(),
-  storeId: z.string().optional(),
+  storeId: z.string().min(1),
   storeName: z.string().optional(),
   markCompleted: z.boolean().optional().default(true),
   note: z.string().optional(),
+  squarePaymentId: z.string().trim().max(200).optional().nullable(),
 });
+
+async function completeOrdersForSettlement(orderIds: string[]) {
+  const completedOrderIds: string[] = [];
+  for (const orderId of orderIds) {
+    try {
+      const before = await (prisma as any).pickupOrder.findUnique({
+        where: { id: orderId },
+        select: {
+          id: true,
+          status: true,
+          customerId: true,
+          pointsUsed: true,
+          reward: true,
+          confirmedAt: true,
+          number: true,
+          total: true,
+        },
+      });
+      if (!before) continue;
+      if (before.status === 'COMPLETED') {
+        completedOrderIds.push(orderId);
+        continue;
+      }
+      await (prisma as any).pickupOrder.update({
+        where: { id: orderId },
+        data: {
+          status: 'COMPLETED',
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+      await settleMemberPoints(before, 'COMPLETED');
+      await settleMemberStamp(before, 'COMPLETED');
+      completedOrderIds.push(orderId);
+    } catch (err) {
+      console.warn('Could not mark order COMPLETED via register settlement:', err);
+    }
+  }
+  return completedOrderIds;
+}
 
 const createBillSchema = z.object({
   fulfillment: z.enum(['DINE_IN', 'PICKUP', 'DELIVERY']).default('PICKUP'),
@@ -325,27 +307,34 @@ const createBillSchema = z.object({
   tableNumber: z.string().optional(),
   phone: z.string().optional(),
   note: z.string().optional(),
-  storeId: z.string().optional(),
+  storeId: z.string().min(1),
   storeName: z.string().optional(),
   storeAddress: z.string().optional(),
   storePhone: z.string().optional(),
   taxRate: z.number().int().optional(),
-  items: z.array(z.object({
-    itemId: z.string().optional(),
-    id: z.string().optional(),
-    nameJa: z.string().optional(),
-    nameEn: z.string().optional(),
-    price: z.number().int().optional(),
-    unitPrice: z.number().int().optional(),
-    quantity: z.number().int().positive().default(1),
-  })).min(1),
+  items: z
+    .array(
+      z.object({
+        itemId: z.string().optional(),
+        id: z.string().optional(),
+        nameJa: z.string().optional(),
+        nameEn: z.string().optional(),
+        price: z.number().int().optional(),
+        unitPrice: z.number().int().optional(),
+        quantity: z.number().int().positive().default(1),
+      }),
+    )
+    .min(1),
 });
 
 router.post('/bill', requireKitchen, async (req, res) => {
   const input = createBillSchema.parse(req.body);
+  const storeId = requireStoreId(input.storeId);
   const fulfillment = input.fulfillment;
   const tableNum = input.tableNumber?.trim();
-  const customerName = input.customerName?.trim() || (tableNum ? `テーブル ${tableNum}` : (fulfillment === 'DINE_IN' ? '店内客' : '店頭客'));
+  const customerName =
+    input.customerName?.trim() ||
+    (tableNum ? `テーブル ${tableNum}` : fulfillment === 'DINE_IN' ? '店内客' : '店頭客');
   const phone = input.phone?.trim() || '00-0000-0000';
   let note = input.note?.trim() || '';
   if (tableNum && !note.includes('[テーブル:')) {
@@ -356,25 +345,38 @@ router.post('/bill', requireKitchen, async (req, res) => {
   }
 
   const taxRate = input.taxRate ?? (fulfillment === 'DINE_IN' ? 10 : 8);
+  const menuIds = [
+    ...new Set(input.items.map((it) => it.itemId || it.id).filter((id): id is string => Boolean(id))),
+  ];
+  const menuRows = menuIds.length
+    ? await prisma.menuItem.findMany({
+        where: { id: { in: menuIds } },
+        select: { id: true, price: true, nameJa: true, nameEn: true },
+      })
+    : [];
+  const menuById = new Map(menuRows.map((m) => [m.id, m]));
+
   let subtotal = 0;
   const processedItems = input.items.map((it, idx) => {
-    const nameJa = it.nameJa || it.nameEn || '商品';
-    const nameEn = it.nameEn || nameJa;
+    const menuId = it.itemId || it.id;
+    const menu = menuId ? menuById.get(menuId) : undefined;
+    const nameJa = it.nameJa || menu?.nameJa || it.nameEn || menu?.nameEn || '商品';
+    const nameEn = it.nameEn || menu?.nameEn || nameJa;
     const qty = it.quantity || 1;
-    const unitPrice = it.price ?? it.unitPrice ?? 0;
+    const unitPrice = menu ? Number(menu.price) || 0 : (it.price ?? it.unitPrice ?? 0);
     const lineTotal = unitPrice * qty;
     subtotal += lineTotal;
-    const itemObj: any = {
-      itemId: it.itemId || it.id || crypto.randomUUID(),
+    const itemObj: Record<string, unknown> = {
+      itemId: menuId || crypto.randomUUID(),
       nameJa,
       nameEn,
       unitPrice,
       quantity: qty,
       lineTotal,
     };
-    if (idx === 0 && (input.storeId || input.storeName)) {
+    if (idx === 0) {
       itemObj.store = {
-        id: input.storeId,
+        id: storeId,
         name: input.storeName || '',
         address: input.storeAddress || '',
         phone: input.storePhone || '',
@@ -387,7 +389,7 @@ router.post('/bill', requireKitchen, async (req, res) => {
   const grandTotal = subtotal + tax;
   const orderId = crypto.randomUUID();
   const now = new Date();
-  const dateKey = now.toISOString().slice(0, 10);
+  const dateKey = tokyoTodayPrefix(now);
   const token = crypto.randomBytes(16).toString('base64url');
 
   const maxRow = await (prisma as any).$queryRaw<[{ maxNum: bigint | null }]>`
@@ -424,58 +426,147 @@ router.post('/bill', requireKitchen, async (req, res) => {
 
 router.post('/transaction', requireKitchen, async (req, res) => {
   const input = transactionSchema.parse(req.body);
-  const state = await loadRegisterState();
+  const storeId = requireStoreId(input.storeId);
+  const state = await loadMultiRegisterState();
+  const branch = adoptOpenShiftIfNeeded(state, storeId);
+
+  if (!branch.currentShift?.isOpen) {
+    throw new AppError(409, 'NO_OPEN_SHIFT', 'この店舗のレジを開設してから会計してください。店舗を選んで「レジ開設」を押してください。');
+  }
+
+  const linkedIds = [
+    ...new Set([...(input.orderIds || []), ...(input.orderId ? [input.orderId] : [])].filter(Boolean)),
+  ];
+
+  let completedOrderIds: string[] = [];
+  if (input.markCompleted && linkedIds.length > 0) {
+    completedOrderIds = await completeOrdersForSettlement(linkedIds);
+  }
 
   const transaction: CashRegisterTransaction = {
     id: crypto.randomUUID(),
     timestamp: new Date().toISOString(),
     ...input,
+    storeId,
+    orderId: input.orderId || linkedIds[0] || null,
+    orderIds: linkedIds.length > 0 ? linkedIds : undefined,
+    completedOrderIds: completedOrderIds.length > 0 ? completedOrderIds : undefined,
     staffName: req.user?.name || 'Staff',
     staffId: req.user?.id,
   };
 
-  state.transactions.push(transaction);
-
-  // If this was linked to an active PickupOrder, mark that order as COMPLETED if requested
-  if (input.orderId && input.markCompleted) {
-    try {
-      await (prisma as any).pickupOrder.update({
-        where: { id: input.orderId },
-        data: {
-          status: 'COMPLETED',
-          completedAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-    } catch (err) {
-      console.warn('Could not mark order COMPLETED via register settlement:', err);
-    }
-  }
-
-  await saveRegisterState(state);
-
+  branch.transactions.push(transaction);
+  await saveMultiRegisterState(state);
   res.status(201).json({ success: true, transaction });
 });
 
 // ── POST /api/v1/cash-register/transaction/:id/void ──────────────────────────
 router.post('/transaction/:id/void', requireKitchen, async (req, res) => {
-  const { id } = req.params;
-  const state = await loadRegisterState();
+  const id = String(req.params.id || '');
+  const state = await loadMultiRegisterState();
+  const found = findTransaction(state, id);
+  if (!found) throw new AppError(404, 'TRANSACTION_NOT_FOUND', 'Transaction not found.');
+  if (found.tx.isVoided) {
+    res.json({ success: true, message: 'Transaction already voided.' });
+    return;
+  }
 
-  const tx = state.transactions.find((t) => t.id === id);
-  if (!tx) throw new AppError(404, 'TRANSACTION_NOT_FOUND', 'Transaction not found.');
+  found.tx.isVoided = true;
 
-  tx.isVoided = true;
-  await saveRegisterState(state);
+  const reopenIds = [
+    ...new Set([
+      ...(found.tx.completedOrderIds || []),
+      ...(found.tx.orderIds || []),
+      ...(found.tx.orderId ? [found.tx.orderId] : []),
+    ]),
+  ];
+  for (const orderId of reopenIds) {
+    try {
+      const order = await (prisma as any).pickupOrder.findUnique({
+        where: { id: orderId },
+        select: { id: true, status: true },
+      });
+      if (order?.status === 'COMPLETED') {
+        await (prisma as any).pickupOrder.update({
+          where: { id: orderId },
+          data: {
+            status: 'READY',
+            completedAt: null,
+            updatedAt: new Date(),
+          },
+        });
+      }
+    } catch (err) {
+      console.warn('Could not reopen order after void:', err);
+    }
+  }
 
+  await saveMultiRegisterState(state);
   res.json({ success: true, message: 'Transaction voided.' });
 });
 
-// ── GET /api/v1/cash-register/shifts ─────────────────────────────────────────
-router.get('/shifts', requireKitchen, async (_req, res) => {
-  const state = await loadRegisterState();
+// ── GET /api/v1/cash-register/shifts?storeId= ────────────────────────────────
+router.get('/shifts', requireKitchen, async (req, res) => {
+  const state = await loadMultiRegisterState();
+  const storeId = storeIdFromQuery(req);
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ shifts: state.closedShifts.slice(-30).reverse() });
+
+  if (storeId) {
+    const branch = getBranchState(state, storeId);
+    res.json({ storeId, shifts: [...branch.closedShifts].slice(-30).reverse() });
+    return;
+  }
+
+  const shifts = Object.entries(state.byStore)
+    .flatMap(([sid, branch]) =>
+      (branch.closedShifts || []).map((s) => ({ ...s, storeId: s.storeId || sid })),
+    )
+    .sort((a, b) => String(b.closedAt || '').localeCompare(String(a.closedAt || '')))
+    .slice(0, 60);
+
+  res.json({ storeId: null, shifts });
+});
+
+// ── GET /api/v1/cash-register/sales?storeId= ─────────────────────────────────
+// Sales record breakdown (today, by payment method) for one or all branches.
+router.get('/sales', requireKitchen, async (req, res) => {
+  const state = await loadMultiRegisterState();
+  const storeId = storeIdFromQuery(req);
+  const todayPrefix = tokyoTodayPrefix();
+  res.setHeader('Cache-Control', 'no-store');
+
+  const buildSales = (sid: string) => {
+    const branch = getBranchState(state, sid);
+    const stats = computeBranchStats(branch, todayPrefix);
+    const txs = (branch.transactions || []).filter(
+      (t) => !t.isVoided && t.timestamp && (t.timestamp.startsWith(todayPrefix) || t.timestamp.slice(0, 10) === todayPrefix),
+    );
+    return {
+      storeId: sid,
+      date: todayPrefix,
+      shiftOpen: Boolean(branch.currentShift?.isOpen),
+      shift: branch.currentShift,
+      stats,
+      transactions: txs,
+    };
+  };
+
+  if (storeId) {
+    res.json(buildSales(storeId));
+    return;
+  }
+
+  const stores = Object.keys(state.byStore).map(buildSales);
+  res.json({
+    date: todayPrefix,
+    stores,
+    totals: {
+      todaySales: stores.reduce((s, x) => s + x.stats.todaySales, 0),
+      cashSales: stores.reduce((s, x) => s + x.stats.cashSales, 0),
+      nonCashSales: stores.reduce((s, x) => s + x.stats.nonCashSales, 0),
+      transactionCount: stores.reduce((s, x) => s + x.stats.transactionCount, 0),
+    },
+  });
 });
 
 export default router;

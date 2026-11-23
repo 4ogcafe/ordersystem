@@ -1,0 +1,25 @@
+# This directory is not a public file listing. Only the API gateway may be executed.
+<IfModule mod_autoindex.c>
+  Options -Indexes
+</IfModule>
+
+# Never serve the credential file over HTTP. PHP include from index.php is unaffected.
+<Files "config.php">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</Files>
+
+<FilesMatch "^(config\.php\.|adarsha-config\.php|kalpana-config\.php)">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>

@@ -27,11 +27,11 @@ export default function RefundPolicy() {
     <main style={{ backgroundColor: '#faf7f2', minHeight: '100vh', color: '#1f2937' }}>
       <title>返金・キャンセルポリシー (特定商取引法に基づく表記) | Adarsha (アダルサ)</title>
       <meta name="description" content="本格インド料理アダルサの返金・キャンセルポリシーです。テイクアウト、デリバリー、お席のご予約に関するキャンセルや返金基準をご案内します。" />
-      <link rel="canonical" href="https://pnglike.com/refund-policy" />
+      <link rel="canonical" href="https://adarsha.jp/refund-policy" />
       <meta property="og:title" content="返金・キャンセルポリシー | Adarsha (アダルサ)" />
       <meta property="og:description" content="本格インド料理アダルサの返金・キャンセルポリシーです。" />
       <meta property="og:type" content="website" />
-      <meta property="og:url" content="https://pnglike.com/refund-policy" />
+      <meta property="og:url" content="https://adarsha.jp/refund-policy" />
 
       {/* Hero Header */}
       <div style={{

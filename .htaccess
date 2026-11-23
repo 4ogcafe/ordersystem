@@ -3,6 +3,17 @@
   Options -Indexes
 </IfModule>
 
+# Block the credential file even when rewrite rules are skipped.
+<Files "config.php">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</Files>
+
 DirectoryIndex index.html index.php
 
 # Proper MIME types for images & modern formats
@@ -27,6 +38,7 @@ DirectoryIndex index.html index.php
   # Block environment variables, secrets, keys & internal configs (HTTP 403)
   # ----------------------------------------------------------------------
   RewriteRule (^|/)(\.env.*|kalpana-config\.php|adarsha-config\.php|config\.php)$ - [F,L]
+  RewriteRule ^api/config\.php$ - [F,L]
   RewriteRule ^(apps|packages|docs|\.agents|\.vscode|CLAUDE.*)(/.*)?$ - [F,L]
   RewriteRule (^|/)(package.*\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|docker-compose.*|composer\..*|tsconfig.*\.json|\.git.*)$ - [F,L]
   RewriteRule \.(sql|sqlite|sqlite3|db|dump|bak|backup|old|save|swp|tmp|temp|log)$ - [F,L]
@@ -48,14 +60,26 @@ DirectoryIndex index.html index.php
   # ----------------------------------------------------------------------
   RewriteRule ^api(/.*)?$ api/index.php [QSA,L]
 
-  # Fallback between public_html/uploads and root uploads if either exists
+  # All site images: single store at project-root /uploads/ (same folder PHP/Node write to).
+  # Prefer DOCUMENT_ROOT/uploads; legacy sibling ../uploads is read-only fallback during migration.
   RewriteCond %{REQUEST_URI} ^/uploads/(.+)$
   RewriteCond %{DOCUMENT_ROOT}/uploads/%1 -f
   RewriteRule ^uploads/(.+)$ uploads/$1 [L]
 
   RewriteCond %{REQUEST_URI} ^/uploads/(.+)$
+  RewriteCond %{DOCUMENT_ROOT}/uploads/%1 !-f
   RewriteCond %{DOCUMENT_ROOT}/../uploads/%1 -f
   RewriteRule ^uploads/(.+)$ ../uploads/$1 [L]
+
+  # Legacy root brand logo URLs → /uploads/ (keeps old bookmarks / cached HTML working)
+  RewriteCond %{REQUEST_URI} ^/(adarsha-log\.webp|site-logo-01\.webp|logo-white-01\.png\.webp|new-logo\.webp|web-logo-01-01\.png\.webp)$ [NC]
+  RewriteCond %{DOCUMENT_ROOT}/uploads/%1 -f
+  RewriteRule ^(adarsha-log\.webp|site-logo-01\.webp|logo-white-01\.png\.webp|new-logo\.webp|web-logo-01-01\.png\.webp)$ uploads/$1 [L]
+
+  RewriteCond %{REQUEST_URI} ^/(adarsha-log\.webp|site-logo-01\.webp|logo-white-01\.png\.webp|new-logo\.webp|web-logo-01-01\.png\.webp)$ [NC]
+  RewriteCond %{DOCUMENT_ROOT}/uploads/%1 !-f
+  RewriteCond %{DOCUMENT_ROOT}/../uploads/%1 -f
+  RewriteRule ^(adarsha-log\.webp|site-logo-01\.webp|logo-white-01\.png\.webp|new-logo\.webp|web-logo-01-01\.png\.webp)$ ../uploads/$1 [L]
 
   # ----------------------------------------------------------------------
   # 404 FOR MISSING STATIC ASSETS (PREVENT HTML RETURNED AS IMAGE/CSS)

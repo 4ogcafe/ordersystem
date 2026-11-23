@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Clock, Search, ArrowRight, BookOpen, Sparkles, ChefHat, MapPin } from 'lucide-react';
 import { assetUrl, getPublic } from '../lib/api';
+import SafeImage from '../components/SafeImage';
 
 interface BlogPostSummary {
   id: string;
@@ -88,16 +89,16 @@ export default function Blog() {
   const blogJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'Blog',
-    '@id': 'https://pnglike.com/blog#blog',
+    '@id': 'https://adarsha.jp/blog#blog',
     'name': 'Adarsha (アダルサ) 公式ブログ・スパイスコラム',
     'description': '埼玉県熊谷市の本格インド料理店Adarsha（アダルサ）がお届けする、スパイスの秘密、備長炭タンドール料理、お得なランチ情報や食文化コラム。',
-    'url': 'https://pnglike.com/blog',
+    'url': 'https://adarsha.jp/blog',
     'inLanguage': 'ja',
     'publisher': {
       '@type': 'Restaurant',
       'name': 'Adarsha (アダルサ)',
-      'url': 'https://pnglike.com',
-      'logo': 'https://pnglike.com/adarsha-log.webp',
+      'url': 'https://adarsha.jp',
+      'logo': 'https://adarsha.jp/uploads/adarsha-log.webp',
       'address': {
         '@type': 'PostalAddress',
         'streetAddress': '佐谷田2081',
@@ -111,9 +112,9 @@ export default function Blog() {
       '@type': 'BlogPosting',
       'headline': p.title,
       'description': p.excerpt || p.title,
-      'url': `https://pnglike.com/blog/${p.slug}`,
+      'url': `https://adarsha.jp/blog/${p.slug}`,
       'datePublished': p.publishedAt || p.createdAt,
-      'image': p.coverImage || 'https://pnglike.com/bg-hero-img.webp',
+      'image': assetUrl(p.coverImage) || 'https://adarsha.jp/uploads/site-logo-01.webp',
       'author': {
         '@type': 'Person',
         'name': p.author || 'Adarsha シェフ'
@@ -129,13 +130,13 @@ export default function Blog() {
         '@type': 'ListItem',
         'position': 1,
         'name': 'ホーム',
-        'item': 'https://pnglike.com/'
+        'item': 'https://adarsha.jp/'
       },
       {
         '@type': 'ListItem',
         'position': 2,
         'name': 'ブログ・コラム',
-        'item': 'https://pnglike.com/blog'
+        'item': 'https://adarsha.jp/blog'
       }
     ]
   };
@@ -145,12 +146,12 @@ export default function Blog() {
       <title>ブログ・スパイスコラム | Adarsha (アダルサ) 熊谷の本格インド料理</title>
       <meta name="description" content="熊谷の本格インド料理店アダルサ（Adarsha）がお届けするブログ＆コラム。30種以上の直輸入スパイスの効能、備長炭タンドール窯焼きナン、ランチ情報、シェフ直伝のこだわりをお届けします。" />
       <meta name="keywords" content="熊谷 カレー ブログ, スパイス 効能, インド料理 コラム, チーズナン 熊谷, タンドール窯, アダルサ, Adarsha" />
-      <link rel="canonical" href="https://pnglike.com/blog" />
+      <link rel="canonical" href="https://adarsha.jp/blog" />
       <meta property="og:title" content="ブログ・スパイスコラム | Adarsha (アダルサ) 熊谷" />
       <meta property="og:description" content="熊谷の本格インド料理店アダルサの公式ブログ。スパイスの秘密、備長炭窯焼きナン、ランチやイベント情報を発信中。" />
       <meta property="og:type" content="blog" />
-      <meta property="og:url" content="https://pnglike.com/blog" />
-      <meta property="og:image" content="https://pnglike.com/bg-hero-img.webp" />
+      <meta property="og:url" content="https://adarsha.jp/blog" />
+      <meta property="og:image" content="https://adarsha.jp/uploads/site-logo-01.webp" />
 
       {/* Structured Data for Generative AI & Google Rich Snippets */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(blogJsonLd) }} />
@@ -345,15 +346,10 @@ export default function Blog() {
                 gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))',
               }}>
                 <div style={{ height: '360px', overflow: 'hidden', position: 'relative' }}>
-                  <img
-                    src={assetUrl(featuredPost.coverImage) || '/bg-hero-img.webp'}
+                  <SafeImage
+                    src={assetUrl(featuredPost.coverImage)}
                     alt={featuredPost.title}
-                    onError={(e) => {
-                      const target = e.currentTarget;
-                      if (!target.src.endsWith('/bg-hero-img.webp')) {
-                        target.src = '/bg-hero-img.webp';
-                      }
-                    }}
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                   <div style={{
@@ -477,16 +473,11 @@ export default function Blog() {
                   }}
                 >
                   <Link to={`/blog/${post.slug}`} style={{ display: 'block', height: '200px', overflow: 'hidden', position: 'relative' }}>
-                    <img
-                      src={assetUrl(post.coverImage) || '/bg-hero-img.webp'}
+                    <SafeImage
+                      src={assetUrl(post.coverImage)}
                       alt={post.title}
                       loading="lazy"
-                      onError={(e) => {
-                        const target = e.currentTarget;
-                        if (!target.src.endsWith('/bg-hero-img.webp')) {
-                          target.src = '/bg-hero-img.webp';
-                        }
-                      }}
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s' }}
                     />
                     {post.category && (

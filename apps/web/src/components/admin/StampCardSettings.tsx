@@ -47,7 +47,7 @@ export default function StampCardSettings() {
       .then(res => res.json())
       .then(data =>
         setForm({
-          stampCardEnabled: data.stampCardEnabled !== false,
+          stampCardEnabled: (data.stampCardEnabled ?? data.stampsEnabled) !== false,
           stampsPerCard: data.stampsPerCard ?? DEFAULTS.stampsPerCard,
           stampMinAmount: data.stampMinAmount ?? DEFAULTS.stampMinAmount,
           stampCooldownHours: data.stampCooldownHours ?? DEFAULTS.stampCooldownHours,
@@ -80,8 +80,20 @@ export default function StampCardSettings() {
     try {
       const body = { ...form, stampRewards: [...form.stampRewards].sort((a, b) => a.at - b.at).map(reward => ({ ...reward, titleJa: reward.titleJa.trim() })) };
       const res = await apiFetch('/api/v1/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (res.ok) toast.success('Stamp card settings saved.');
-      else toast.error(await errorMessage(res, 'Failed to save stamp card settings.'));
+      if (res.ok) {
+        const saved = await res.json().catch(() => null);
+        if (saved && typeof saved === 'object') {
+          setForm({
+            stampCardEnabled: (saved.stampCardEnabled ?? saved.stampsEnabled) !== false,
+            stampsPerCard: saved.stampsPerCard ?? body.stampsPerCard,
+            stampMinAmount: saved.stampMinAmount ?? body.stampMinAmount,
+            stampCooldownHours: saved.stampCooldownHours ?? body.stampCooldownHours,
+            stampRewardValidDays: saved.stampRewardValidDays ?? body.stampRewardValidDays,
+            stampRewards: (saved.stampRewards ?? body.stampRewards).map((reward: RewardRow) => ({ ...reward, amount: reward.amount ?? 0 })),
+          });
+        }
+        toast.success('Stamp card settings saved.');
+      } else toast.error(await errorMessage(res, 'Failed to save stamp card settings.'));
     } catch {
       toast.error('Network error.');
     } finally {
@@ -107,17 +119,37 @@ export default function StampCardSettings() {
 
   return (
     <section style={cardStyle}>
-      <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Stamp Card</h3>
-      <p style={{ margin: '0.25rem 0 1.25rem', color: '#6b7280', fontSize: '0.875rem' }}>
-        Members get one stamp when an online order is completed, or when staff scan their member QR at the counter (Stamps, Offers &amp; Points tab → Stamp card at the counter).
-        Rewards are given automatically when a member reaches that stamp. Reaching the Goal (stamp {form.stampsPerCard}) completes and auto-resets the card for the next round. Each reward can be used only once.
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>Stamp Card</h3>
+          <p style={{ margin: '0.25rem 0 0', color: '#6b7280', fontSize: '0.875rem' }}>
+            Members get one stamp when an online order is completed, or when staff scan their member QR at the counter.
+            Rewards unlock automatically at the stamp numbers you set. Goal (stamp {form.stampsPerCard}) completes the card and starts the next round.
+          </p>
+        </div>
+        <span
+          style={{
+            fontSize: '0.72rem',
+            fontWeight: 800,
+            letterSpacing: '0.04em',
+            padding: '4px 10px',
+            borderRadius: 999,
+            background: form.stampCardEnabled ? '#ecfdf5' : '#f3f4f6',
+            color: form.stampCardEnabled ? '#047857' : '#6b7280',
+            border: `1px solid ${form.stampCardEnabled ? '#a7f3d0' : '#e5e7eb'}`,
+            flexShrink: 0,
+          }}
+        >
+          {form.stampCardEnabled ? 'ON' : 'OFF'}
+        </span>
+      </div>
+      <div style={{ height: '1.25rem' }} />
 
       <div className="stamp-admin-layout">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', minWidth: 0 }}>
           <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center' }}>
             <input type="checkbox" checked={form.stampCardEnabled} onChange={e => update({ stampCardEnabled: e.target.checked })} style={{ width: '18px', height: '18px' }} />
-            Stamp card on (when off, members keep their stamps and rewards but no new stamps are given)
+            Stamp card on (when off, members keep stamps/rewards but no new stamps are given)
           </label>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: '1rem' }}>
             <label style={labelStyle}>

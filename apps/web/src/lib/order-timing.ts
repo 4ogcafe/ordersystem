@@ -96,6 +96,11 @@ export function extractBranchLunchDinnerWindows(
   const customLunchStr = settings?.lunchOrderHours?.trim();
   const customDinnerStr = settings?.dinnerOrderHours?.trim();
   const customTakeoutStr = settings?.takeoutOrderHours?.trim() || settings?.pickupHours?.trim();
+  // Admin dine-in / pickup hours take priority over the static store card hours
+  // so Lunch/Dinner set availability matches table-ordering settings.
+  const dineInWindows = parseTimeWindows(
+    settings?.dineInHours?.trim() || settings?.pickupHours?.trim() || '',
+  );
 
   // Check if the store has explicit hours string with ranges
   const storeWindows = parseTimeWindows(store?.hours);
@@ -110,8 +115,21 @@ export function extractBranchLunchDinnerWindows(
     dinnerWindows = parseTimeWindows(customDinnerStr);
   }
 
-  // If store has 2+ ranges (e.g. 11:00-15:00 / 17:00-23:00) and custom settings aren't overriding, or to refine branch hours:
-  if (storeWindows.length >= 2) {
+  if (dineInWindows.length >= 2) {
+    if (lunchWindows.length === 0) lunchWindows = [dineInWindows[0]];
+    if (dinnerWindows.length === 0) dinnerWindows = dineInWindows.slice(1);
+  } else if (dineInWindows.length === 1 && lunchWindows.length === 0 && dinnerWindows.length === 0) {
+    const full = dineInWindows[0];
+    const lunchClose = Math.min(full.close, 16 * 60 + 30);
+    if (full.open < lunchClose) {
+      lunchWindows = [{ open: full.open, close: lunchClose, label: `${formatMinutesToHhmm(full.open)}〜${formatMinutesToHhmm(lunchClose)}` }];
+    }
+    const dinnerOpen = Math.max(full.open, 16 * 60 + 30);
+    if (dinnerOpen < full.close) {
+      dinnerWindows = [{ open: dinnerOpen, close: full.close, label: `${formatMinutesToHhmm(dinnerOpen)}〜${formatMinutesToHhmm(full.close)}` }];
+    }
+  } else if (storeWindows.length >= 2) {
+    // Fall back to the store location card hours (e.g. 11:00-15:00 / 17:00-23:00)
     if (lunchWindows.length === 0) {
       lunchWindows = [storeWindows[0]];
     }
@@ -459,4 +477,92 @@ export function classifySlotMealPeriod(
   if (isMinutesInWindows(mins, lunchWindows)) return 'LUNCH';
   if (isMinutesInWindows(mins, dinnerWindows)) return 'DINNER';
   return mins < 16 * 60 + 30 ? 'LUNCH' : 'DINNER';
+}
+
+type SetMenuLike = {
+  categoryId?: string | null;
+  category?: { id?: string | null; nameEn?: string | null; nameJa?: string | null } | null;
+  nameEn?: string | null;
+  nameJa?: string | null;
+  menuTypes?: string[] | null;
+};
+
+function setMenuNameParts(item: SetMenuLike) {
+  return {
+    catId: (item.categoryId || item.category?.id || '').toLowerCase(),
+    catEn: (item.category?.nameEn || '').toLowerCase(),
+    catJa: item.category?.nameJa || '',
+    nameEn: (item.nameEn || '').toLowerCase(),
+    nameJa: item.nameJa || '',
+    types: Array.isArray(item.menuTypes) ? item.menuTypes : [],
+  };
+}
+
+/** True for Lunch Set categories/items (店内ランチセット). */
+export function isLunchSetMenuEntity(item: SetMenuLike): boolean {
+  const { catId, catEn, catJa, nameEn, nameJa, types } = setMenuNameParts(item);
+  if (
+    catId.includes('dinner_set') ||
+    catEn.includes('dinner set') ||
+    catJa.includes('ディナーセット') ||
+    /dinner\s*set/i.test(nameEn) ||
+    nameJa.includes('ディナーセット')
+  ) {
+    return false;
+  }
+  if (
+    catId.includes('lunch_set') ||
+    catId === 'cat_lunch_drink' ||
+    catEn.includes('lunch set') ||
+    catJa.includes('ランチセット') ||
+    /lunch\s*set/i.test(nameEn) ||
+    nameJa.includes('ランチセット')
+  ) {
+    return true;
+  }
+  // LUNCH-only set dishes without GRAND/TAKEOUT
+  if (
+    types.includes('LUNCH') &&
+    !types.includes('GRAND') &&
+    !types.includes('TAKEOUT') &&
+    (nameJa.includes('セット') || /\bset\b/i.test(nameEn))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** True for Dinner Set categories/items (店内ディナーセット). */
+export function isDinnerSetMenuEntity(item: SetMenuLike): boolean {
+  const { catId, catEn, catJa, nameEn, nameJa } = setMenuNameParts(item);
+  if (
+    catId.includes('lunch_set') ||
+    catEn.includes('lunch set') ||
+    catJa.includes('ランチセット') ||
+    /lunch\s*set/i.test(nameEn) ||
+    nameJa.includes('ランチセット')
+  ) {
+    return false;
+  }
+  return (
+    catId.includes('dinner_set') ||
+    catEn.includes('dinner set') ||
+    catJa.includes('ディナーセット') ||
+    /dinner\s*set/i.test(nameEn) ||
+    nameJa.includes('ディナーセット')
+  );
+}
+
+/**
+ * Whether a lunch/dinner set item may be shown or ordered for the current meal period.
+ * Ala-carte (non-set) items always pass.
+ */
+export function isSetMenuAvailableNow(
+  item: SetMenuLike,
+  timing: Pick<OrderTimingStatus, 'isLunchOpenNow' | 'isDinnerOpenNow' | 'enforceOrderTimeWindow'>,
+): boolean {
+  if (timing.enforceOrderTimeWindow === false) return true;
+  if (isLunchSetMenuEntity(item)) return timing.isLunchOpenNow;
+  if (isDinnerSetMenuEntity(item)) return timing.isDinnerOpenNow;
+  return true;
 }

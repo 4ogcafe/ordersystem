@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { logger } from './lib/logger.js';
+import { resolveUploadDir } from './lib/uploads.js';
 
 const isProduction = process.env.NODE_ENV === 'production';
 const MIN_SECRET_LENGTH = 32;
@@ -39,21 +40,14 @@ export const config = {
   orderMaxPerHour: Number(process.env.ORDER_MAX_PER_HOUR) || 10,
   // Google Places API key (server only) for showing the restaurant's Google rating and reviews.
   googlePlacesApiKey: process.env.GOOGLE_PLACES_API_KEY?.trim() || '',
-  uploadDir: process.env.UPLOAD_DIR
-    ? path.resolve(process.env.UPLOAD_DIR)
-    : [
-        path.resolve(process.cwd(), 'uploads'),
-        path.resolve(process.cwd(), '../../uploads'),
-        path.resolve(__dirname, '../../../uploads'),
-        path.resolve(process.cwd(), 'public_html', 'uploads'),
-      ].find((d) => fs.existsSync(d)) || path.resolve(process.cwd(), 'uploads'),
+  // Single store for all food/menu images: monorepo-root `uploads/` (override with UPLOAD_DIR).
+  uploadDir: resolveUploadDir(process.env.UPLOAD_DIR),
   // Built web app (`pnpm --filter web build`). When present, the API serves the site too.
   webDistDir: path.resolve(
     process.env.WEB_DIST_DIR ||
       [
         path.join(process.cwd(), '..', 'web', 'dist'),
         path.join(process.cwd(), 'apps', 'web', 'dist'),
-        path.join(process.cwd(), 'public_html'),
       ].find((d) => fs.existsSync(d)) ||
       path.join(process.cwd(), '..', 'web', 'dist'),
   ),
@@ -64,5 +58,20 @@ export const config = {
     environment: (process.env.SQUARE_ENVIRONMENT?.trim() || 'sandbox') as 'sandbox' | 'production',
     webhookSignatureKey: process.env.SQUARE_WEBHOOK_SIGNATURE_KEY?.trim() || '',
     webhookUrl: process.env.SQUARE_WEBHOOK_URL?.trim() || '',
+  },
+  line: {
+    channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN?.trim() || '',
+    channelSecret: process.env.LINE_CHANNEL_SECRET?.trim() || '',
+  },
+  mail: {
+    mailer: process.env.MAIL_MAILER?.trim() || 'smtp',
+    host: process.env.MAIL_HOST?.trim() || process.env.SMTP_HOST?.trim() || 'smtp.gmail.com',
+    port: Number(process.env.MAIL_PORT || process.env.SMTP_PORT || 465) || 465,
+    username: process.env.MAIL_USERNAME?.trim() || process.env.SMTP_USERNAME?.trim() || '',
+    password: process.env.MAIL_PASSWORD?.trim() || process.env.SMTP_PASSWORD?.trim() || '',
+    // smtps (465) or tls/starttls (587)
+    encryption: (process.env.MAIL_ENCRYPTION?.trim() || 'smtps').toLowerCase(),
+    fromAddress: (process.env.MAIL_FROM_ADDRESS || '').replace(/^["']|["']$/g, '').trim() || '',
+    fromName: (process.env.MAIL_FROM_NAME || 'アダルサ (Adarsha)').replace(/^["']|["']$/g, '').trim() || 'アダルサ (Adarsha)',
   },
 };

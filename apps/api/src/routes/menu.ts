@@ -197,7 +197,10 @@ router.get('/items', publicCache, async (_req, res) => {
     include: {
       category: true,
       variants: { orderBy: { sortOrder: 'asc' } },
-      optionGroups: { select: { id: true, nameJa: true, nameEn: true, type: true } },
+      optionGroups: {
+        select: { id: true, nameJa: true, nameEn: true, type: true, required: true, options: true, sortOrder: true },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      },
     },
     orderBy: [{ categoryId: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'desc' }],
   });

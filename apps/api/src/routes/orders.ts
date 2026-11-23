@@ -44,13 +44,28 @@ const NEXT_STATUSES: Record<OrderStatus, OrderStatus[]> = {
   NEW: ['CONFIRMED', 'READY', 'CANCELLED'],
   CONFIRMED: ['READY', 'COMPLETED', 'CANCELLED', 'CONFIRMED'],
   READY: ['COMPLETED', 'CANCELLED', 'CONFIRMED'],
-  COMPLETED: [],
+  // Kitchen can reopen a ticket marked done by mistake; loyalty is not awarded twice.
+  COMPLETED: ['READY'],
   CANCELLED: [],
 };
 
+const cartLineOptionSchema = z.object({
+  groupId: z.string().min(1).max(80),
+  groupNameJa: z.string().max(120).optional(),
+  optionId: z.string().min(1).max(80),
+  nameJa: z.string().max(120).optional(),
+  priceAdjust: z.number().int().optional(),
+});
+
 const cartSchema = {
   items: z
-    .array(z.object({ itemId: objectIdString, quantity: z.number().int().min(1).max(MAX_QUANTITY) }))
+    .array(z.object({
+      itemId: objectIdString,
+      quantity: z.number().int().min(1).max(MAX_QUANTITY),
+      /** Client hint only — server recomputes from option groups. */
+      optionAdjust: z.number().int().optional(),
+      options: z.array(cartLineOptionSchema).max(40).optional(),
+    }))
     .min(1)
     .max(MAX_LINES),
   offerId: z.union([objectIdString, z.array(objectIdString)]).nullable().optional(),
@@ -434,11 +449,52 @@ router.get('/', requireKitchen, async (req, res) => {
     ...(active || scope === 'cashier' ? {} : { take: HISTORY_LIMIT }),
   });
 
+  let paymentByOrderId = new Map<string, Record<string, unknown>>();
+  if (scope === 'cashier') {
+    try {
+      const { allTransactions, loadMultiRegisterState } = await import('../lib/cash-register-state.js');
+      const multi = await loadMultiRegisterState();
+      for (const t of allTransactions(multi)) {
+        if (t.isVoided) continue;
+        const ids = [
+          ...(Array.isArray(t.orderIds) ? t.orderIds : []),
+          ...(typeof t.orderId === 'string' ? [t.orderId] : []),
+        ];
+        for (const oid of ids) {
+          if (oid && !paymentByOrderId.has(oid)) paymentByOrderId.set(oid, t as unknown as Record<string, unknown>);
+        }
+      }
+    } catch {
+      paymentByOrderId = new Map();
+    }
+  }
+
   res.setHeader('Cache-Control', 'no-store');
-  res.json(await withDietaryAlerts((orders as Record<string, unknown>[]).map(({ token: _t, ip: _ip, ...o }) => ({
-    ...o,
-    store: extractOrderStore(o),
-  }))));
+  res.json(await withDietaryAlerts((orders as Record<string, unknown>[]).map(({ token: _t, ip: _ip, ...o }) => {
+    const base = {
+      ...o,
+      store: extractOrderStore(o),
+    };
+    if (scope !== 'cashier') return base;
+    const tx = typeof o.id === 'string' ? paymentByOrderId.get(o.id) : undefined;
+    if (tx) {
+      return {
+        ...base,
+        transaction: tx,
+        paymentMethod: tx.paymentMethod ?? 'CASH',
+        paymentStatus: 'PAID',
+        paidAt: tx.timestamp ?? null,
+        amountTendered: tx.amountTendered ?? null,
+        changeAmount: tx.changeAmount ?? null,
+        paidTotal: tx.total ?? o.grandTotal,
+      };
+    }
+    return {
+      ...base,
+      paymentStatus: 'UNPAID',
+      transaction: null,
+    };
+  })));
 });
 
 /** The kitchen sees each member's allergies and dietary needs on their orders. */
@@ -520,6 +576,13 @@ router.post('/kitchen/pause', requireKitchen, async (req, res) => {
   const existing = await prisma.settings.findFirst({ select: { id: true } });
   if (existing) {
     await db.settings.update({ where: { id: existing.id }, data: { orderingPausedUntil: until } });
+  } else {
+    await db.settings.create({
+      data: {
+        id: crypto.randomUUID(),
+        orderingPausedUntil: until,
+      },
+    });
   }
 
   await prisma.auditLog.create({
@@ -579,7 +642,18 @@ router.patch('/:id/status', requireKitchen, async (req, res) => {
   // Fetch current state before updating.
   const before = await db.pickupOrder.findUnique({
     where: { id },
-    select: { id: true, status: true, customerId: true, pointsUsed: true, reward: true, confirmedAt: true, number: true, total: true },
+    select: {
+      id: true,
+      status: true,
+      customerId: true,
+      pointsUsed: true,
+      pointsEarned: true,
+      stampAwarded: true,
+      reward: true,
+      confirmedAt: true,
+      number: true,
+      total: true,
+    },
   }) as Record<string, unknown> | null;
 
   if (!before) throw notFound('Order');
@@ -590,7 +664,10 @@ router.patch('/:id/status', requireKitchen, async (req, res) => {
   // Build the update — each step's timestamp is recorded for kitchen timers.
   const updateData: Record<string, unknown> = { status, updatedAt: new Date() };
   if (status === 'CONFIRMED') { updateData.confirmedAt = new Date(); updateData.readyAt = null; }
-  else if (status === 'READY') updateData.readyAt = new Date();
+  else if (status === 'READY') {
+    updateData.readyAt = new Date();
+    if (before.status === 'COMPLETED') updateData.completedAt = null;
+  }
   else if (status === 'COMPLETED') updateData.completedAt = new Date();
   else if (status === 'CANCELLED') updateData.cancelledAt = new Date();
 
@@ -603,7 +680,7 @@ router.patch('/:id/status', requireKitchen, async (req, res) => {
 
   await settleMemberPoints(before, status);
   const stamp = await settleMemberStamp(before, status);
-  if (status === 'READY') void notifyOrderReady(before);
+  if (status === 'READY' && before.status !== 'COMPLETED') void notifyOrderReady(before);
 
   await prisma.auditLog.create({
     data: {
@@ -619,13 +696,15 @@ router.patch('/:id/status', requireKitchen, async (req, res) => {
 });
 
 /** Members earn points when an order is picked up, and get spent points back when it is cancelled. */
-async function settleMemberPoints(order: Record<string, unknown>, status: OrderStatus) {
+export async function settleMemberPoints(order: Record<string, unknown>, status: OrderStatus) {
   const customerId = typeof order.customerId === 'string' ? order.customerId : null;
   if (!customerId) return;
   const orderId = String(order.id);
   const orderNumber = Number(order.number);
 
   if (status === 'COMPLETED') {
+    // Skip if this order already earned points (e.g. reopened then completed again).
+    if (Number(order.pointsEarned) > 0) return;
     const points = earnedPoints(Number(order.total) || 0, loyaltyConfig(await loadSettings()));
     if (points > 0) {
       await changePoints(customerId, points, 'EARN', { orderId, orderNumber });
@@ -640,9 +719,10 @@ async function settleMemberPoints(order: Record<string, unknown>, status: OrderS
 }
 
 /** A completed member order earns a stamp when it is large enough and the last stamp was long enough ago. */
-async function settleMemberStamp(order: Record<string, unknown>, status: OrderStatus) {
+export async function settleMemberStamp(order: Record<string, unknown>, status: OrderStatus) {
   const customerId = typeof order.customerId === 'string' ? order.customerId : null;
   if (status !== 'COMPLETED' || !customerId) return null;
+  if (order.stampAwarded) return null;
   const orderId = String(order.id);
   const result = await awardStamp(customerId, { source: 'ORDER', amount: stampAmount(order), orderId, orderNumber: Number(order.number) });
   if (result.status === 'AWARDED') await db.pickupOrder.update({ where: { id: orderId }, data: { stampAwarded: true } });

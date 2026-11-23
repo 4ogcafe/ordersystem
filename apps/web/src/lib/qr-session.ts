@@ -65,31 +65,31 @@ export async function validateQrCodeApi(params: {
     const res = await apiFetch('/api/v1/qr/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        qrCode: params.qrCode || params.qr,
+        storeId: params.storeId || params.store,
+        tableNumber: params.tableNumber || params.table,
+      }),
     });
 
-    if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.valid || !data.sessionToken || !data.tableNumber) {
       clearQrSession();
       return null;
     }
 
-    const data = await res.json();
-    if (data?.valid && data.sessionToken && data.tableNumber) {
-      const session: QrSession = {
-        valid: true,
-        sessionToken: data.sessionToken,
-        storeId: data.storeId || params.storeId || params.store || 'musashisakai',
-        tableNumber: data.tableNumber,
-        qrCode: data.qrCode || params.qrCode || params.qr || '',
-        restaurantName: data.restaurantName || 'Adarsha (アダルサ)',
-        expiresAt: data.expiresAt,
-        store: data.store,
-      };
-      saveQrSession(session);
-      return session;
-    }
-    clearQrSession();
-    return null;
+    const session: QrSession = {
+      valid: true,
+      sessionToken: data.sessionToken,
+      storeId: data.storeId || params.storeId || params.store || 'musashisakai',
+      tableNumber: String(data.tableNumber),
+      qrCode: data.qrCode || params.qrCode || params.qr || '',
+      restaurantName: data.restaurantName || 'Adarsha (アダルサ)',
+      expiresAt: data.expiresAt,
+      store: data.store,
+    };
+    saveQrSession(session);
+    return session;
   } catch {
     return null;
   }
@@ -98,34 +98,36 @@ export async function validateQrCodeApi(params: {
 /** Verifies existing session with backend */
 export async function checkServerQrSession(): Promise<QrSession | null> {
   const current = getStoredQrSession();
+  if (!current?.sessionToken) return null;
   try {
-    const headers: Record<string, string> = {};
-    if (current?.sessionToken) {
-      headers['X-QR-Session'] = current.sessionToken;
-    }
-
     const res = await apiFetch('/api/v1/qr/session', {
-      headers,
+      headers: { 'X-QR-Session': current.sessionToken },
     });
+    // Soft failure (network / gateway): keep the local session until it expires.
     if (!res.ok) {
-      clearQrSession();
-      return null;
+      return current;
     }
-    const data = await res.json();
+    const data = await res.json().catch(() => null);
     if (data?.valid && data.sessionToken && data.tableNumber) {
       const session: QrSession = {
         valid: true,
         sessionToken: data.sessionToken,
-        storeId: data.storeId,
-        tableNumber: data.tableNumber,
-        qrCode: data.qrCode,
-        expiresAt: data.expiresAt,
+        storeId: data.storeId || current.storeId,
+        tableNumber: String(data.tableNumber),
+        qrCode: data.qrCode || current.qrCode,
+        expiresAt: data.expiresAt || current.expiresAt,
+        restaurantName: current.restaurantName,
+        store: current.store,
       };
       saveQrSession(session);
       return session;
     }
-    clearQrSession();
-    return null;
+    // Explicit invalid from server — only clear when we got a clear "valid: false".
+    if (data && data.valid === false) {
+      clearQrSession();
+      return null;
+    }
+    return current;
   } catch {
     return current; // if offline, use stored if valid
   }
