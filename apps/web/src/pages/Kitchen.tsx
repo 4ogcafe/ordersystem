@@ -150,7 +150,7 @@ export default function Kitchen() {
             if (matchesStore) {
               setMobileColumn('NEW');
               const branchName = orderBranch ? `【${orderBranch.name}】` : '';
-              notify.success(`🔔 新規注文受付 ${branchName}#${formatOrderNumber(order.number)} · ${isDelivery(order) ? 'デリバリー' : 'テイクアウト'} ${clockTime(order.pickupAt)}`, { duration: 9000, id: `new-${order.id}` });
+              notify.success(`🔔 新規注文受付 ${branchName}#${formatOrderNumber(order.number)} · ${isDelivery(order) ? 'デリバリー' : order.fulfillment === 'DINE_IN' ? '店内' : 'テイクアウト'} ${clockTime(order.pickupAt)}`, { duration: 9000, id: `new-${order.id}` });
               if (autoPrintRef.current) {
                 const storeConfig = getStorePrinterConfig(orderBranch?.id);
                 printTicket(order, order.dietaryAlert ? alertText(order.dietaryAlert) : null, storeConfig);

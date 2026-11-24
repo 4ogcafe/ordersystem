@@ -37,6 +37,15 @@ interface TableQrItem {
 const DEFAULT_TABLE_NAMES = '1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, カウンター1, カウンター2, カウンター3';
 const DEFAULT_PUBLIC_SITE = 'https://adarsha.jp';
 const PUBLIC_SITE_PREF_KEY = 'adarsha_table_qr_public_origin';
+const PREVIEW_STORE_PREF_KEY = 'adarsha_table_qr_preview_store';
+
+function parseQrList(qrPayload: unknown): TableQrItem[] {
+  if (Array.isArray(qrPayload)) return qrPayload as TableQrItem[];
+  if (qrPayload && typeof qrPayload === 'object' && Array.isArray((qrPayload as { tables?: unknown }).tables)) {
+    return (qrPayload as { tables: TableQrItem[] }).tables;
+  }
+  return [];
+}
 
 /** Normalize a site hostname/URL to https origin (no trailing slash). */
 function normalizePublicOrigin(raw: string | null | undefined): string {
@@ -73,11 +82,37 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
   const [form, setForm] = useState<TableOrderingForm | null>(null);
   const [saving, setSaving] = useState(false);
   const [stores, setStores] = useState<StoreLocation[]>(DEFAULT_STORE_LOCATIONS);
-  const [previewStoreId, setPreviewStoreId] = useState<string>('musashisakai');
+  const [previewStoreId, setPreviewStoreId] = useState<string>(() => {
+    try {
+      return localStorage.getItem(PREVIEW_STORE_PREF_KEY) || 'musashisakai';
+    } catch {
+      return 'musashisakai';
+    }
+  });
   const [previewTable, setPreviewTable] = useState<string>('1');
   const [tableQrs, setTableQrs] = useState<TableQrItem[]>([]);
+  const [syncingQr, setSyncingQr] = useState(false);
   const [squareConfigured, setSquareConfigured] = useState<boolean | null>(null);
   const [publicOrigin, setPublicOrigin] = useState<string>(DEFAULT_PUBLIC_SITE);
+
+  const refreshTableQrs = async (opts?: { silent?: boolean }) => {
+    setSyncingQr(true);
+    try {
+      const res = await apiFetch('/api/v1/admin/tables/qr');
+      if (!res.ok) {
+        if (!opts?.silent) toast.error('テーブルQRの同期に失敗しました');
+        return [] as TableQrItem[];
+      }
+      const qrList = parseQrList(await res.json());
+      setTableQrs(qrList);
+      return qrList;
+    } catch {
+      if (!opts?.silent) toast.error('テーブルQRの同期に失敗しました');
+      return [] as TableQrItem[];
+    } finally {
+      setSyncingQr(false);
+    }
+  };
 
   useEffect(() => {
     Promise.all([
@@ -88,11 +123,12 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
     ]).then(([settings, storeList, qrPayload, square]) => {
       if (Array.isArray(storeList) && storeList.length > 0) {
         setStores(storeList);
-        setPreviewStoreId(storeList[0].id);
+        setPreviewStoreId(prev => {
+          if (storeList.some((s: StoreLocation) => s.id === prev)) return prev;
+          return storeList[0].id;
+        });
       }
-      const qrList = Array.isArray(qrPayload)
-        ? qrPayload
-        : (Array.isArray(qrPayload?.tables) ? qrPayload.tables : []);
+      const qrList = parseQrList(qrPayload);
       if (qrList.length > 0) {
         setTableQrs(qrList);
       }
@@ -114,6 +150,17 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
     });
   }, []);
 
+  // When 対象店舗 changes, re-sync QR rows so printed links bind that branch + table
+  useEffect(() => {
+    if (!previewStoreId) return;
+    try {
+      localStorage.setItem(PREVIEW_STORE_PREF_KEY, previewStoreId);
+    } catch {
+      // ignore
+    }
+    void refreshTableQrs({ silent: true });
+  }, [previewStoreId]);
+
   if (!form) return null;
 
   const update = (patch: Partial<TableOrderingForm>) => setForm(prev => prev ? { ...prev, ...patch } : null);
@@ -124,6 +171,10 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
     .filter(Boolean);
 
   const selectedStore = stores.find(s => s.id === previewStoreId) || stores[0];
+  const storeQrRows = tableQrs.filter(q => q.storeId === previewStoreId);
+  const storeQrReadyCount = parsedTables.filter(tNum =>
+    storeQrRows.some(q => String(q.tableNumber) === String(tNum) && q.isActive !== false && Boolean(q.qrCode)),
+  ).length;
 
   const siteOrigin = normalizePublicOrigin(publicOrigin) || DEFAULT_PUBLIC_SITE;
   const publicOriginLooksLocal =
@@ -453,7 +504,7 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
           </div>
 
           <p style={{ margin: '0 0 12px', fontSize: '0.82rem', color: '#6b7280', lineHeight: 1.5 }}>
-            テーブルごとに専用QRコードを自動発行します。お客様がスキャンすると、該当店舗とテーブル番号が自動セットされた注文画面が開きます。
+            「対象店舗」を選ぶとその店舗専用のQRを発行します。お客様がスキャンすると、<strong>店舗とテーブルが自動選択</strong>された店内注文画面が開きます（GPSの最寄店では上書きしません）。
           </p>
 
           <div style={{ marginBottom: '14px' }}>
@@ -476,12 +527,18 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
             </p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
             <div>
               <label style={labelStyle}>対象店舗</label>
               <select
                 value={previewStoreId}
-                onChange={e => setPreviewStoreId(e.target.value)}
+                onChange={e => {
+                  setPreviewStoreId(e.target.value);
+                  toast.success(`対象店舗を切り替えました。QRは「${stores.find(s => s.id === e.target.value)?.name || e.target.value}」用に同期します`, {
+                    id: 'qr-target-store',
+                    duration: 2200,
+                  });
+                }}
                 style={inputStyle}
               >
                 {stores.map(st => (
@@ -506,6 +563,51 @@ export default function TableOrderingSettings({ onSaved }: { onSaved?: () => voi
                 ))}
               </select>
             </div>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              marginBottom: 14,
+              padding: '10px 12px',
+              borderRadius: 8,
+              background: storeQrReadyCount >= parsedTables.length ? '#ecfdf5' : '#fff7ed',
+              border: `1px solid ${storeQrReadyCount >= parsedTables.length ? '#a7f3d0' : '#fed7aa'}`,
+            }}
+          >
+            <div style={{ fontSize: '0.78rem', color: '#374151', lineHeight: 1.45 }}>
+              <strong style={{ color: '#111827' }}>{selectedStore.name}</strong>
+              {' · '}
+              QR発行済み {storeQrReadyCount}/{parsedTables.length} 席
+              {storeQrReadyCount < parsedTables.length ? '（未発行席は印刷時に store+table で自動解決）' : '（スキャンで店舗・席を自動セット）'}
+            </div>
+            <button
+              type="button"
+              disabled={syncingQr}
+              onClick={async () => {
+                const list = await refreshTableQrs();
+                const ready = parsedTables.filter(tNum =>
+                  list.some(q => q.storeId === previewStoreId && String(q.tableNumber) === String(tNum) && q.qrCode),
+                ).length;
+                toast.success(`${selectedStore.name} のQRを同期しました（${ready}/${parsedTables.length}席）`, {
+                  id: 'qr-sync-store',
+                });
+              }}
+              style={{
+                ...printSingleButtonStyle,
+                padding: '6px 10px',
+                fontSize: '0.78rem',
+                opacity: syncingQr ? 0.65 : 1,
+                cursor: syncingQr ? 'wait' : 'pointer',
+              }}
+            >
+              <Store size={14} />
+              {syncingQr ? '同期中…' : 'この店舗のQRを同期'}
+            </button>
           </div>
 
           {/* QR Code Stand Preview Card */}

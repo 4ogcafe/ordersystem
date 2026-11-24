@@ -75,9 +75,9 @@ export function assetUrl(url: string | null | undefined): string {
   return path;
 }
 
-/** Canonical logo path in the single image store. */
-export const SITE_LOGO_URL = '/uploads/adarsha-log.webp';
-export const SITE_OG_IMAGE_URL = '/uploads/site-logo-01.webp';
+/** Canonical logo — prefer bundled /brand so QR/dine-in UI works when /uploads is missing on the host. */
+export const SITE_LOGO_URL = '/brand/adarsha-logo.webp';
+export const SITE_OG_IMAGE_URL = '/brand/site-logo.webp';
 
 /** Authenticated request: sends session cookies and Authorization Bearer header, never using HTTP cache. */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {

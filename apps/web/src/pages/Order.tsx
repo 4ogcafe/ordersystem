@@ -292,9 +292,30 @@ export default function Order() {
     toast('お席のセッションを終了しました。通常のテイクアウト画面を表示します。', { icon: '👋' });
   };
 
+  // Avoid re-validating the same QR URL after we sync store/table into the query string
+  const lastQrValidateKey = useRef('');
+
   // Secure dynamic QR validation effect
   useEffect(() => {
     if (queryQr || queryTable) {
+      const validateKey = `${queryQr}|${queryStore}|${queryTable}`;
+      const existing = getStoredQrSession();
+      if (
+        lastQrValidateKey.current === validateKey &&
+        existing?.valid &&
+        (!queryStore || existing.storeId === queryStore) &&
+        (!queryTable || String(existing.tableNumber) === String(queryTable))
+      ) {
+        setQrSession(existing);
+        setTableNumber(existing.tableNumber);
+        if (existing.storeId) {
+          setSelectedStoreId(existing.storeId);
+          saveOrderStoreId(existing.storeId, 'qr');
+        }
+        setIsValidatingQr(false);
+        return;
+      }
+
       setIsValidatingQr(true);
       const decodedQr = (() => {
         if (!queryQr) return undefined;
@@ -304,17 +325,20 @@ export default function Order() {
           return queryQr;
         }
       })();
+      // /table/:n and /dine-in/:n often omit ?store= — fall back to selected/saved store
       validateQrCodeApi({
         qrCode: decodedQr,
-        storeId: queryStore || undefined,
+        storeId: queryStore || selectedStoreId || undefined,
         tableNumber: queryTable || undefined,
       }).then(session => {
         if (session && session.valid) {
+          lastQrValidateKey.current = `${session.qrCode || queryQr}|${session.storeId || queryStore}|${session.tableNumber || queryTable}`;
           setQrSession(session);
           setTableNumber(session.tableNumber);
+          // 対象店舗 QR → lock branch + table (do not let GPS / prior pick override)
           if (session.storeId) {
             setSelectedStoreId(session.storeId);
-            saveOrderStoreId(session.storeId);
+            saveOrderStoreId(session.storeId, 'qr');
           }
 
           let existingChoice = '';
@@ -323,6 +347,8 @@ export default function Order() {
           } catch {}
 
           const urlWantsDineIn = queryFulfillment.toUpperCase() === 'DINE_IN' || !queryFulfillment;
+          const nextFulfillment: Fulfillment =
+            existingChoice === 'PICKUP' ? 'PICKUP' : 'DINE_IN';
           if (existingChoice === 'PICKUP') {
             setFulfillment('PICKUP');
             setShowQrChoice(false);
@@ -337,10 +363,44 @@ export default function Order() {
             setShowQrChoice(true);
           }
 
-          toast.success(`🍽️ 【${session.restaurantName || 'Adarsha'}】テーブル ${session.tableNumber} へようこそ！`, {
-            id: 'qr-welcome',
-            duration: 3500,
-          });
+          // Keep URL in sync with validated 対象店舗 + テーブル so share/reload stays correct
+          setSearchParams(p => {
+            const storeId = session.storeId || '';
+            const table = String(session.tableNumber || '');
+            const qr = session.qrCode || '';
+            let changed = false;
+            if (storeId && p.get('store') !== storeId) {
+              p.set('store', storeId);
+              changed = true;
+            }
+            if (table && p.get('table') !== table) {
+              p.set('table', table);
+              changed = true;
+            }
+            if (qr && p.get('qr') !== qr) {
+              p.set('qr', qr);
+              changed = true;
+            }
+            const wantFul = nextFulfillment === 'PICKUP' ? 'PICKUP' : 'DINE_IN';
+            if (p.get('fulfillment') !== wantFul) {
+              p.set('fulfillment', wantFul);
+              changed = true;
+            }
+            return changed ? p : p;
+          }, { replace: true });
+
+          const storeLabel =
+            session.store?.name ||
+            stores.find(s => s.id === session.storeId)?.name ||
+            session.storeId ||
+            '';
+          toast.success(
+            `🍽️ 【${storeLabel || session.restaurantName || 'Adarsha'}】テーブル ${session.tableNumber} へようこそ！`,
+            {
+              id: 'qr-welcome',
+              duration: 3500,
+            },
+          );
         } else {
           clearQrSession();
           setQrSession(null);
@@ -378,6 +438,7 @@ export default function Order() {
         setTableNumber(stored.tableNumber);
         if (stored.storeId) {
           setSelectedStoreId(stored.storeId);
+          saveOrderStoreId(stored.storeId, 'qr');
         }
         try {
           if (!sessionStorage.getItem('adarsha_qr_choice')) {
@@ -487,6 +548,14 @@ export default function Order() {
   }, [stores]);
 
   const handleSelectStore = (store: StoreLocation) => {
+    // Active seat QR locks 対象店舗 — switching branch requires exiting the table session
+    if (isQrActive && fulfillment === 'DINE_IN') {
+      toast.error('お席QRセッション中は店舗を変更できません。持帰に切り替えるか、セッションを終了してください。', {
+        id: 'qr-store-locked',
+        duration: 3500,
+      });
+      return;
+    }
     setSelectedStoreId(store.id);
     // 'manual': the customer chose this, so nearest-store detection won't override it next visit.
     saveOrderStoreId(store.id, 'manual');
@@ -509,6 +578,9 @@ export default function Order() {
     stores,
     maxKm: maxDistanceKm,
     onSelect: store => {
+      // Never override a seat QR / 対象店舗 lock with GPS
+      if (getStoredQrSession()?.valid || getStoreSelectionSource() === 'qr') return;
+      if (queryQr || queryTable) return;
       setSelectedStoreId(store.id);
       saveOrderStoreId(store.id, 'auto');
     },
@@ -521,20 +593,44 @@ export default function Order() {
   };
 
   // On page load: detect automatically unless the customer already picked a store themselves
-  // (requirement: never override a manual choice), arrived via a ?store= link, or disabled in dashboard.
+  // (requirement: never override a manual choice), arrived via a ?store= / table QR link, or disabled in dashboard.
   const autoLocateTried = useRef(false);
   const locate = nearest.locate;
   useEffect(() => {
     if (!storesLoaded || autoLocateTried.current) return;
     autoLocateTried.current = true;
-    if (!isAutoSelectEnabled || queryStoreId || getStoreSelectionSource() === 'manual') return;
+    const source = getStoreSelectionSource();
+    if (
+      !isAutoSelectEnabled ||
+      queryStoreId ||
+      queryQr ||
+      queryTable ||
+      isQrActive ||
+      source === 'manual' ||
+      source === 'qr'
+    ) {
+      return;
+    }
     void locate();
-  }, [storesLoaded, queryStoreId, isAutoSelectEnabled, locate]);
+  }, [storesLoaded, queryStoreId, queryQr, queryTable, isQrActive, isAutoSelectEnabled, locate]);
 
-  const selectedStore = useMemo(
-    () => stores.find(s => s.id === selectedStoreId) ?? stores[0] ?? DEFAULT_STORE_LOCATIONS[0],
-    [stores, selectedStoreId]
-  );
+  // Prefer QR session store (対象店舗) over any stale selected id while dine-in QR is active
+  const selectedStore = useMemo(() => {
+    const qrStoreId = qrSession?.valid ? qrSession.storeId : '';
+    if (qrStoreId) {
+      const fromList = stores.find(s => s.id === qrStoreId);
+      if (fromList) return fromList;
+      if (qrSession?.store && typeof qrSession.store === 'object' && qrSession.store.id === qrStoreId) {
+        return {
+          ...(stores[0] ?? DEFAULT_STORE_LOCATIONS[0]),
+          ...qrSession.store,
+          id: qrStoreId,
+          name: String(qrSession.store.name || qrStoreId),
+        } as StoreLocation;
+      }
+    }
+    return stores.find(s => s.id === selectedStoreId) ?? stores[0] ?? DEFAULT_STORE_LOCATIONS[0];
+  }, [stores, selectedStoreId, qrSession]);
 
   const dynamicAreaTabs = useMemo(() => extractDynamicAreaTabs(stores), [stores]);
 

@@ -87,14 +87,36 @@ async function ensureStoreTableQrCodes(): Promise<number> {
   return created;
 }
 
-function normalizeQrCode(raw: string): string {
+/** Pull qr / store / table out of a bare code or a full /order?… URL. */
+function parseQrInput(raw: string): { qrCode: string; storeId?: string; tableNumber?: string } {
   const value = raw.trim();
-  if (!value) return '';
+  if (!value) return { qrCode: '' };
+
+  let storeId: string | undefined;
+  let tableNumber: string | undefined;
+  if (/[?&](store|table)=/i.test(value) || /^https?:\/\//i.test(value) || value.includes('/order')) {
+    try {
+      const href = value.includes('://')
+        ? value
+        : `https://local.invalid${value.startsWith('/') ? value : `/${value}`}`;
+      const u = new URL(href);
+      storeId = u.searchParams.get('store') || undefined;
+      tableNumber = u.searchParams.get('table') || undefined;
+    } catch {
+      /* ignore malformed URL */
+    }
+  }
+
   const fromQuery = value.match(/[?&]qr=([a-zA-Z0-9_\-]+)/);
-  if (fromQuery) return fromQuery[1];
+  if (fromQuery) return { qrCode: fromQuery[1], storeId, tableNumber };
   const fromPath = value.match(/\/qr\/([a-zA-Z0-9_\-]+)/);
-  if (fromPath) return fromPath[1];
-  return value;
+  if (fromPath) return { qrCode: fromPath[1], storeId, tableNumber };
+
+  // Bare table QR token (not a URL)
+  if (!value.includes('://') && !value.includes('?') && !value.includes('/')) {
+    return { qrCode: value, storeId, tableNumber };
+  }
+  return { qrCode: '', storeId, tableNumber };
 }
 
 async function findQrRow(opts: {
@@ -103,7 +125,11 @@ async function findQrRow(opts: {
   tableNumber?: string;
 }): Promise<TableQrRow | null> {
   await ensureTable();
-  const qrCode = opts.qrCode ? normalizeQrCode(opts.qrCode) : '';
+  const parsed = opts.qrCode ? parseQrInput(opts.qrCode) : { qrCode: '' };
+  const qrCode = parsed.qrCode;
+  const storeId = (opts.storeId || parsed.storeId || '').trim();
+  const tableNumber = (opts.tableNumber || parsed.tableNumber || '').trim();
+
   if (qrCode) {
     const rows = await prisma.$queryRawUnsafe<TableQrRow[]>(
       'SELECT * FROM TableQrCode WHERE qrCode = ? LIMIT 1',
@@ -111,21 +137,35 @@ async function findQrRow(opts: {
     );
     if (rows[0]) return rows[0];
   }
-  if (opts.storeId && opts.tableNumber) {
+  if (storeId && tableNumber) {
     const rows = await prisma.$queryRawUnsafe<TableQrRow[]>(
       'SELECT * FROM TableQrCode WHERE storeId = ? AND tableNumber = ? LIMIT 1',
-      opts.storeId.trim(),
-      opts.tableNumber.trim(),
+      storeId,
+      tableNumber,
     );
     if (rows[0]) return rows[0];
     // Auto-create missing table QR so printed store+table links still work
     await ensureStoreTableQrCodes();
     const again = await prisma.$queryRawUnsafe<TableQrRow[]>(
       'SELECT * FROM TableQrCode WHERE storeId = ? AND tableNumber = ? LIMIT 1',
-      opts.storeId.trim(),
-      opts.tableNumber.trim(),
+      storeId,
+      tableNumber,
     );
     return again[0] || null;
+  }
+  // /table/1 style links: table only — prefer musashisakai, else any active match
+  if (tableNumber) {
+    await ensureStoreTableQrCodes();
+    const preferred = await prisma.$queryRawUnsafe<TableQrRow[]>(
+      "SELECT * FROM TableQrCode WHERE tableNumber = ? AND storeId = 'musashisakai' AND isActive = 1 LIMIT 1",
+      tableNumber,
+    );
+    if (preferred[0]) return preferred[0];
+    const any = await prisma.$queryRawUnsafe<TableQrRow[]>(
+      'SELECT * FROM TableQrCode WHERE tableNumber = ? AND isActive = 1 ORDER BY storeId ASC LIMIT 1',
+      tableNumber,
+    );
+    return any[0] || null;
   }
   return null;
 }
@@ -185,11 +225,13 @@ const validateSchema = z.object({
 
 router.post('/validate', async (req, res) => {
   const input = validateSchema.parse(req.body ?? {});
-  const qrCode = input.qrCode || input.qr || '';
-  const storeId = input.storeId || input.store || '';
-  const tableNumber = input.tableNumber || input.table || '';
+  const rawQr = input.qrCode || input.qr || '';
+  const parsed = rawQr ? parseQrInput(rawQr) : { qrCode: '' };
+  const qrCode = parsed.qrCode || rawQr;
+  const storeId = input.storeId || input.store || parsed.storeId || '';
+  const tableNumber = input.tableNumber || input.table || parsed.tableNumber || '';
 
-  if (!qrCode && !(storeId && tableNumber)) {
+  if (!qrCode && !tableNumber) {
     throw new AppError(400, 'QR_REQUIRED', 'QRコードをスキャンしてください。');
   }
 
@@ -320,6 +362,42 @@ adminRouter.post('/toggle', async (req, res) => {
   );
   res.json({ success: true, isActive });
 });
+
+/** Verify a QR table session from X-QR-Session / cookie / body token. */
+export function verifyQrSessionFromRequest(
+  req: express.Request,
+  opts?: { sessionToken?: string | null; expectedTable?: string | null; expectedStoreId?: string | null },
+): { storeId: string; tableNumber: string; qrCode: string } {
+  const token = (opts?.sessionToken || '').trim() || readQrToken(req) || '';
+  if (!token) {
+    throw new AppError(401, 'QR_SESSION_REQUIRED', 'お席のQRセッションが必要です。もう一度QRコードをスキャンしてください。');
+  }
+  try {
+    const payload = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] }) as {
+      typ?: string;
+      qrCode?: string;
+      storeId?: string;
+      tableNumber?: string;
+    };
+    if (payload.typ !== 'qr_session' || !payload.tableNumber) {
+      throw new AppError(401, 'QR_SESSION_INVALID', 'お席セッションが無効です。もう一度QRコードをスキャンしてください。');
+    }
+    if (opts?.expectedTable && String(opts.expectedTable) !== String(payload.tableNumber)) {
+      throw new AppError(403, 'QR_TABLE_MISMATCH', 'QRのお席番号と注文のお席が一致しません。');
+    }
+    if (opts?.expectedStoreId && payload.storeId && String(opts.expectedStoreId) !== String(payload.storeId)) {
+      throw new AppError(403, 'QR_STORE_MISMATCH', 'QRの店舗と注文の店舗が一致しません。');
+    }
+    return {
+      storeId: String(payload.storeId || ''),
+      tableNumber: String(payload.tableNumber),
+      qrCode: String(payload.qrCode || ''),
+    };
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw new AppError(401, 'QR_SESSION_EXPIRED', 'お席セッションの有効期限が切れました。もう一度QRコードをスキャンしてください。');
+  }
+}
 
 export { adminRouter as qrAdminRoutes };
 export default router;

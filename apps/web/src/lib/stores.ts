@@ -203,7 +203,8 @@ export const ORDER_STORE_STORAGE_KEY = 'adarsha_selected_store_id';
  * nearest-store feature must not override it automatically on their next visit.
  */
 export const ORDER_STORE_SOURCE_KEY = 'adarsha_selected_store_source';
-export type StoreSelectionSource = 'manual' | 'auto';
+/** 'qr' = table QR / 対象店舗 link locked the branch; nearest-store must not override it. */
+export type StoreSelectionSource = 'manual' | 'auto' | 'qr';
 
 export function getSavedOrderStoreId(stores: StoreLocation[] = DEFAULT_STORE_LOCATIONS): string {
   try {
@@ -217,11 +218,11 @@ export function getSavedOrderStoreId(stores: StoreLocation[] = DEFAULT_STORE_LOC
   return stores[0]?.id || DEFAULT_STORE_LOCATIONS[0].id;
 }
 
-/** Whether the saved store came from a manual pick or from nearest-store detection (null = never chosen). */
+/** Whether the saved store came from a manual pick, nearest-store, or table QR (null = never chosen). */
 export function getStoreSelectionSource(): StoreSelectionSource | null {
   try {
     const source = localStorage.getItem(ORDER_STORE_SOURCE_KEY);
-    return source === 'manual' || source === 'auto' ? source : null;
+    return source === 'manual' || source === 'auto' || source === 'qr' ? source : null;
   } catch {
     return null;
   }

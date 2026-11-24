@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { UtensilsCrossed, Sparkles } from 'lucide-react';
+import BrandMark from '../BrandMark';
 import '../../pages/dining-order.css';
 
 interface QrScanPreloaderProps {
@@ -38,10 +39,10 @@ export default function QrScanPreloader({
         {/* Circular Logo with Pulse Ring */}
         <div className="dio-qr-preloader-logo-ring">
           <div className="dio-qr-preloader-pulse-glow" />
-          <img
-            src="/uploads/adarsha-log.webp"
+          <BrandMark
             alt="Adarsha (アダルサ)"
             className="dio-qr-preloader-logo-img"
+            size={88}
           />
         </div>
 

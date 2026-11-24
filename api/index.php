@@ -5095,15 +5095,23 @@ if ($method === 'POST' && ($subPath === '/qr/validate' || $subPath === '/qr/vali
     $storeId = trim((string)($input['storeId'] ?? $input['store'] ?? $_GET['store'] ?? ''));
     $tableNumber = trim((string)($input['tableNumber'] ?? $input['table'] ?? $_GET['table'] ?? ''));
 
-    // Normalize QR code if passed as full or partial URL
+    // Normalize QR code if passed as full or partial URL; also pull store/table from /order?… links
     $qrCode = $rawCode;
     if (preg_match('/[?&]qr=([a-zA-Z0-9_\-]+)/', $rawCode, $m)) {
         $qrCode = $m[1];
     } elseif (preg_match('/\/qr\/([a-zA-Z0-9_\-]+)/', $rawCode, $m)) {
         $qrCode = $m[1];
+    } elseif (preg_match('#^https?://#i', $rawCode) || strpos($rawCode, '/order') !== false || strpos($rawCode, '?') !== false) {
+        $qrCode = '';
+    }
+    if ($storeId === '' && preg_match('/[?&]store=([^&]+)/', $rawCode, $sm)) {
+        $storeId = trim(urldecode($sm[1]));
+    }
+    if ($tableNumber === '' && preg_match('/[?&]table=([^&]+)/', $rawCode, $tm)) {
+        $tableNumber = trim(urldecode($tm[1]));
     }
 
-    if ($qrCode === '' && ($storeId === '' || $tableNumber === '')) {
+    if ($qrCode === '' && $tableNumber === '') {
         http_response_code(400);
         echo json_encode([
             'valid' => false,
@@ -5127,6 +5135,18 @@ if ($method === 'POST' && ($subPath === '/qr/validate' || $subPath === '/qr/vali
         $stmt = $pdo->prepare('SELECT * FROM TableQrCode WHERE storeId = ? AND tableNumber = ? LIMIT 1');
         $stmt->execute([$storeId, $tableNumber]);
         $row = $stmt->fetch() ?: null;
+    }
+    // /table/1 style links: table only — prefer musashisakai, else any active match
+    if (!$row && $tableNumber !== '') {
+        ensureStoreTableQrCodes($pdo, $jwtSecret);
+        $stmt = $pdo->prepare("SELECT * FROM TableQrCode WHERE tableNumber = ? AND storeId = 'musashisakai' AND isActive = 1 LIMIT 1");
+        $stmt->execute([$tableNumber]);
+        $row = $stmt->fetch() ?: null;
+        if (!$row) {
+            $stmt = $pdo->prepare('SELECT * FROM TableQrCode WHERE tableNumber = ? AND isActive = 1 ORDER BY storeId ASC LIMIT 1');
+            $stmt->execute([$tableNumber]);
+            $row = $stmt->fetch() ?: null;
+        }
     }
 
     if (!$row) {

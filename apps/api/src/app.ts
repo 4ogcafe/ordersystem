@@ -29,6 +29,7 @@ import storeRoutes from './routes/stores.js';
 import cashRegisterRoutes from './routes/cash-register.js';
 import lineRoutes, { handleLineWebhook } from './routes/line.js';
 import qrRoutes, { qrAdminRoutes } from './routes/qr.js';
+import tablesRoutes from './routes/tables.js';
 import { BRAND_IMAGE_FILES } from './lib/uploads.js';
 
 const JSON_BODY_LIMIT = '100kb';
@@ -132,6 +133,7 @@ export function createApp() {
   app.use('/api/v1/cash-register', cashRegisterRoutes);
   app.use('/api/v1/line', lineRoutes);
   app.use('/api/v1/qr', qrRoutes);
+  app.use('/api/v1/tables', tablesRoutes);
   app.use('/api/v1/admin/tables/qr', qrAdminRoutes);
 
   if (fs.existsSync(path.join(config.webDistDir, 'index.html'))) {

@@ -1195,10 +1195,10 @@ export default function CashCounter() {
       // Fulfillment filter
       if (filter !== 'ALL' && o.fulfillment !== filter) return false;
 
-      // Store / Branch filter
+      // Store / Branch filter — only drop when the order has a resolved branch that differs
       if (storeFilter !== 'ALL') {
         const resolved = resolveOrderStore(o, stores);
-        if (resolved?.id !== storeFilter) return false;
+        if (resolved?.id && resolved.id !== storeFilter) return false;
       }
       return true;
     });
@@ -1208,7 +1208,7 @@ export default function CashCounter() {
     return consolidatedOrders.filter(o => {
       if (storeFilter !== 'ALL') {
         const resolved = resolveOrderStore(o, stores);
-        if (resolved?.id !== storeFilter) return false;
+        if (resolved?.id && resolved.id !== storeFilter) return false;
       }
       return o.paymentStatus === 'UNPAID';
     }).length;

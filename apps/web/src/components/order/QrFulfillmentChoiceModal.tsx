@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { UtensilsCrossed, ShoppingBag, MapPin, ArrowRight, X } from 'lucide-react';
 import { type StoreLocation } from '../../lib/stores';
+import BrandMark from '../BrandMark';
 import { useBodyScrollLock } from '../../lib/useBodyScrollLock';
 
 interface QrFulfillmentChoiceModalProps {
@@ -124,11 +125,7 @@ export default function QrFulfillmentChoiceModal({
               justifyContent: 'center',
             }}
           >
-            <img
-              src="/uploads/adarsha-log.webp"
-              alt="Adarsha"
-              style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }}
-            />
+            <BrandMark alt="Adarsha" size={54} style={{ width: '100%', height: '100%' }} />
           </div>
 
           <h2 style={{ margin: '0 0 4px', fontSize: '1.25rem', fontWeight: 900, letterSpacing: '-0.01em' }}>

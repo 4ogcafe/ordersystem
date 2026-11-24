@@ -21,6 +21,7 @@ import {
   isSetMenuAvailableNow,
 } from '../../lib/order-timing';
 import QrScanPreloader from './QrScanPreloader';
+import BrandMark from '../BrandMark';
 import { useBodyScrollLock } from '../../lib/useBodyScrollLock';
 import '../../pages/dining-order.css';
 
@@ -193,7 +194,8 @@ const SNACK_OPTIONS: CustomOptionItem[] = [
 
 export default function DineInOrderExperience({
   initialTableNumber,
-  selectedStore,
+  selectedStore: selectedStoreProp,
+  stores = [],
   fulfillment = 'DINE_IN',
   qrSession,
   onSwitchToTakeout,
@@ -203,6 +205,25 @@ export default function DineInOrderExperience({
 }: DineInOrderExperienceProps) {
   const { customer, signIn, signOut } = useCustomer();
   const isTakeout = fulfillment === 'PICKUP' || fulfillment === 'DELIVERY';
+
+  // 対象店舗 from QR session wins over any stale picker value
+  const selectedStore = useMemo((): StoreLocation => {
+    const qrStoreId = qrSession?.valid ? qrSession.storeId : '';
+    if (qrStoreId) {
+      const fromList = stores.find(s => s.id === qrStoreId);
+      if (fromList) return fromList;
+      if (selectedStoreProp.id === qrStoreId) return selectedStoreProp;
+      if (qrSession?.store && typeof qrSession.store === 'object') {
+        return {
+          ...selectedStoreProp,
+          ...qrSession.store,
+          id: qrStoreId,
+          name: String(qrSession.store.name || selectedStoreProp.name || qrStoreId),
+        } as StoreLocation;
+      }
+    }
+    return selectedStoreProp;
+  }, [qrSession, stores, selectedStoreProp]);
 
   // Settings & state - Japanese is default
   const [tableNumber, setTableNumber] = useState<string>(() => initialTableNumber || '1');
@@ -1065,11 +1086,14 @@ export default function DineInOrderExperience({
       <header className="dio-header">
         <div className="dio-header-inner">
           <div className="dio-header-left">
-            <div className="dio-header-logo-wrap">
-              <img src="/uploads/adarsha-log.webp" alt="Adarsha" className="dio-header-logo" />
+            <div className="dio-header-logo-wrap" aria-hidden={false}>
+              <BrandMark className="dio-header-logo" size={48} alt="Adarsha (アダルサ)" />
             </div>
 
             <div className="dio-header-brand-wrap">
+              <div className="dio-header-kicker">
+                {lang === 'ja' ? '本格インド料理' : 'Authentic Indian Cuisine'}
+              </div>
               <div className="dio-header-title-lines">
                 <span className="dio-header-brand">{lang === 'ja' ? 'アダルサ' : 'Adarsha'}</span>
                 <span className="dio-header-branch">{branchDisplayName}</span>
@@ -1169,41 +1193,28 @@ export default function DineInOrderExperience({
             </button>
           </div>
         </div>
+
+        <div className="dio-store-strip">
+          <div className="dio-store-strip-inner">
+            <span className="dio-store-strip-badge">
+              {isTakeout
+                ? (lang === 'ja' ? 'テイクアウト' : 'Takeout')
+                : (lang === 'ja' ? 'お席から注文' : 'Table order')}
+            </span>
+            {selectedStore.address && (
+              <span className="dio-store-strip-text" title={selectedStore.address}>
+                {selectedStore.address}
+              </span>
+            )}
+            {selectedStore.hours && (
+              <span className="dio-store-strip-hours">{selectedStore.hours}</span>
+            )}
+          </div>
+        </div>
       </header>
 
       {/* ── HORIZONTAL CATEGORY SCROLLING BAR ── */}
       <div className="dio-categories-bar">
-        {isTakeout ? (
-          (onOpenChoiceModal || onSwitchToDineIn) && (
-            <button
-              type="button"
-              className="dio-cat-chip dio-cat-chip-switch"
-              onClick={() => {
-                if (onSwitchToDineIn) onSwitchToDineIn();
-                else if (onOpenChoiceModal) onOpenChoiceModal();
-              }}
-              title={lang === 'ja' ? '店内飲食（お席でご注文）に切り替え' : 'Switch to Dine-In'}
-            >
-              <UtensilsCrossed size={13} />
-              <span>{lang === 'ja' ? (tableNumber ? `席${tableNumber}で食事` : '店内へ切替') : 'Dine-In'}</span>
-            </button>
-          )
-        ) : (
-          (onOpenChoiceModal || onSwitchToTakeout) && (
-            <button
-              type="button"
-              className="dio-cat-chip dio-cat-chip-switch"
-              onClick={() => {
-                if (onOpenChoiceModal) onOpenChoiceModal();
-                else if (onSwitchToTakeout) onSwitchToTakeout();
-              }}
-              title={lang === 'ja' ? 'テイクアウト（お持ち帰り）に切り替え' : 'Switch to Takeout'}
-            >
-              <ShoppingBag size={13} />
-              <span>{lang === 'ja' ? '持帰へ切替' : 'To Go'}</span>
-            </button>
-          )
-        )}
         <button
           type="button"
           className={`dio-cat-chip ${selectedCategoryId === 'all' ? 'is-active' : ''}`}
@@ -1402,8 +1413,11 @@ export default function DineInOrderExperience({
                       }}
                     />
                   ) : (
-                    <div className="dio-item-thumb-fallback">
-                      <ChefHat size={30} color="#d97706" />
+                    <div className="dio-item-thumb-fallback" aria-hidden="true">
+                      <span className="dio-item-thumb-initial">
+                        {(lang === 'ja' ? (item.nameJa || item.nameEn) : item.nameEn).trim().charAt(0) || 'A'}
+                      </span>
+                      <span className="dio-item-thumb-mark">Adarsha</span>
                     </div>
                   )}
 
@@ -1427,8 +1441,14 @@ export default function DineInOrderExperience({
                       ? (item.descriptionJa || item.descriptionEn || '本格スパイスで仕上げた当店自慢の一品。')
                       : (item.descriptionEn || item.descriptionJa || 'Authentic dish freshly prepared with spices.')}
                   </p>
-                  <div className="dio-item-price">
-                    {yen(item.price)}
+                  <div className="dio-item-price-row">
+                    <div className="dio-item-price">{yen(item.price)}</div>
+                    {item.isVegetarian && (
+                      <span className="dio-item-tag dio-item-tag-veg">{lang === 'ja' ? 'ベジ' : 'Veg'}</span>
+                    )}
+                    {item.isRecommended && (
+                      <span className="dio-item-tag dio-item-tag-rec">{lang === 'ja' ? 'おすすめ' : 'Popular'}</span>
+                    )}
                   </div>
                 </div>
 

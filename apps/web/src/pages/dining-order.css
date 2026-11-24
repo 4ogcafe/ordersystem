@@ -23,10 +23,13 @@
 .dio-wrapper {
   @apply min-h-screen antialiased;
 
-  background-color: var(--dio-bg);
+  background:
+    radial-gradient(1200px 420px at 10% -10%, rgba(184, 46, 31, 0.06), transparent 55%),
+    radial-gradient(900px 360px at 100% 0%, rgba(217, 119, 6, 0.05), transparent 50%),
+    var(--dio-bg);
   padding-bottom: 92px; /* Space for sticky bottom cart bar */
   color: var(--dio-dark);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 /* --------------------------------------------------------------------------
@@ -36,9 +39,9 @@
   @apply sticky z-40;
 
   top: 0;
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #fffdfb 100%);
   border-bottom: 1px solid var(--dio-border);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 2px 14px rgba(28, 16, 12, 0.06);
 }
 
 .dio-header-inner {
@@ -46,24 +49,28 @@
 
   max-width: 800px;
   margin: 0 auto;
-  padding: 8px 12px;
+  padding: 10px 14px 8px;
 }
 
 .dio-header-left {
-    @apply flex items-center gap-2.5 shrink-0 min-w-0;
+    @apply flex items-center gap-3 shrink-0 min-w-0;
   }
 
 .dio-header-logo-wrap {
   @apply flex items-center shrink-0;
+
+  padding: 2px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #fed7aa, #fecaca 55%, #fdba74);
+  box-shadow: 0 3px 10px rgba(184, 46, 31, 0.16);
 }
 
 .dio-header-logo {
   @apply rounded-full object-cover;
 
-  height: 44px;
-  width: 44px;
-  border: 1.5px solid #fed7aa;
-  box-shadow: 0 2px 6px rgba(184, 46, 31, 0.12);
+  height: 48px !important;
+  width: 48px !important;
+  border: 2px solid #ffffff;
   background: #ffffff;
 }
 
@@ -71,8 +78,18 @@
     @apply flex flex-col items-start text-left min-w-0;
   }
 
+.dio-header-kicker {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9a3412;
+  line-height: 1.1;
+  margin-bottom: 1px;
+}
+
 .dio-header-title-lines {
-  @apply flex flex-col;
+  @apply flex flex-row items-baseline gap-1.5 flex-wrap;
 
   line-height: 1.15;
 }
@@ -80,18 +97,64 @@
 .dio-header-brand {
   @apply font-black whitespace-nowrap;
 
-  font-size: 1.25rem;
+  font-size: 1.22rem;
   color: var(--dio-primary);
   line-height: 1.15;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
 .dio-header-branch {
   @apply font-extrabold whitespace-nowrap;
 
-  font-size: 1.05rem;
-  color: var(--dio-primary);
+  font-size: 0.95rem;
+  color: #7c2d12;
   line-height: 1.15;
+}
+
+.dio-store-strip {
+  border-top: 1px solid #f3e7dc;
+  background: linear-gradient(90deg, #fff7ed 0%, #ffffff 45%, #fffbeb 100%);
+}
+
+.dio-store-strip-inner {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 6px 14px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dio-store-strip-badge {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #9a3412;
+  background: #ffedd5;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.dio-store-strip-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dio-store-strip-hours {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #92400e;
+  white-space: nowrap;
 }
 
 .dio-header-pills-row {
@@ -219,14 +282,20 @@
     @apply gap-1.5;
   }
   .dio-header-logo {
-    height: 38px;
-    width: 38px;
+    height: 40px !important;
+    width: 40px !important;
   }
   .dio-header-brand {
-    font-size: 1.15rem;
+    font-size: 1.1rem;
   }
   .dio-header-branch {
-    font-size: 0.96rem;
+    font-size: 0.9rem;
+  }
+  .dio-header-kicker {
+    font-size: 0.62rem;
+  }
+  .dio-store-strip-hours {
+    display: none;
   }
   .dio-table-pill, .dio-switch-pill {
     font-size: 0.68rem;
@@ -250,14 +319,14 @@
     @apply gap-1;
   }
   .dio-header-logo {
-    height: 32px;
-    width: 32px;
+    height: 36px !important;
+    width: 36px !important;
   }
   .dio-header-brand {
-    font-size: 1.02rem;
+    font-size: 1rem;
   }
   .dio-header-branch {
-    font-size: 0.88rem;
+    font-size: 0.84rem;
   }
   .dio-table-pill, .dio-switch-pill {
     font-size: 0.64rem;
@@ -456,8 +525,58 @@
 .dio-item-thumb-fallback {
   @apply w-full h-full grid place-items-center;
 
-  background: linear-gradient(135deg, #fef3c7 0%, #fee2e2 100%);
-  color: #d97706;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.55), transparent 45%),
+    linear-gradient(145deg, #fff7ed 0%, #fed7aa 48%, #fecaca 100%);
+  color: #9a3412;
+  gap: 2px;
+  padding: 8px;
+  text-align: center;
+}
+
+.dio-item-thumb-initial {
+  font-size: 1.55rem;
+  font-weight: 900;
+  line-height: 1;
+  color: #9a3412;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.dio-item-thumb-mark {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #b45309;
+  opacity: 0.9;
+}
+
+.dio-item-price-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.dio-item-tag {
+  font-size: 0.62rem;
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 2px 7px;
+  line-height: 1.2;
+}
+
+.dio-item-tag-veg {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.dio-item-tag-rec {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fdba74;
 }
 
 .dio-item-fav-heart {
