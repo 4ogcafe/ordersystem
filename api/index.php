@@ -1305,8 +1305,20 @@ function runDatabaseMigrations(PDO $pdo): array {
     // Ensure missing columns exist in existing tables
     $columnsToEnsure = [
         ['MenuItem', 'isOrderable', "BOOLEAN NOT NULL DEFAULT 1"],
+        ['Settings', 'aboutHeroImage', "VARCHAR(191) NULL"],
         ['Settings', 'aboutHeroTag', "VARCHAR(191) NULL"],
         ['Settings', 'aboutHeroTitle', "VARCHAR(191) NULL"],
+        ['Settings', 'aboutStoryJa', "TEXT NULL"],
+        ['Settings', 'aboutStoryLabelJa', "VARCHAR(191) NULL"],
+        ['Settings', 'aboutStoryTitleJa', "VARCHAR(191) NULL"],
+        ['Settings', 'aboutSpiceLabelJa', "VARCHAR(191) NULL"],
+        ['Settings', 'aboutSpiceTitleJa', "VARCHAR(191) NULL"],
+        ['Settings', 'aboutSpiceDescJa', "TEXT NULL"],
+        ['Settings', 'aboutSpiceImage', "VARCHAR(191) NULL"],
+        ['Settings', 'aboutChefLabelJa', "VARCHAR(191) NULL"],
+        ['Settings', 'aboutChefTitleJa', "VARCHAR(191) NULL"],
+        ['Settings', 'aboutChefDescJa', "TEXT NULL"],
+        ['Settings', 'aboutChefImage', "VARCHAR(191) NULL"],
         ['Settings', 'heroTagJa', "VARCHAR(191) NULL"],
         ['Settings', 'heroSubJa', "TEXT NULL"],
         ['Settings', 'menuExplorerLabelJa', "VARCHAR(191) NULL"],
@@ -1401,6 +1413,22 @@ function runDatabaseMigrations(PDO $pdo): array {
         $pdo->exec("UPDATE `AppSecret` SET `publicKey` = REPLACE(`publicKey`, '/uploads/1793190780-e9bb908ae77c6b3d.webp', '/uploads/site-logo-01.webp') WHERE `id` = 'PAGE_SETTINGS_EXT'");
         $pdo->exec("UPDATE `Settings` SET `contactHeroImage` = '/uploads/1792268800986-e39305dca03d0356.jpg' WHERE `contactHeroImage` = '/uploads/1792892694-9c0fbb49d9a78676.jpg' OR `contactHeroImage` IS NULL OR `contactHeroImage` = ''");
         $pdo->exec("UPDATE `Settings` SET `footerLogo` = '/uploads/site-logo-01.webp' WHERE `footerLogo` = '/uploads/1793190780-e9bb908ae77c6b3d.webp' OR `footerLogo` = '/site-logo-01.webp' OR `footerLogo` = '/adarsha-log.webp'");
+        // About page images — same-origin /uploads on each host (no cross-domain media)
+        $pdo->exec("UPDATE `Settings` SET `aboutHeroImage` = '/uploads/1792268627977-04a9cb4d784139f9.jpg' WHERE `aboutHeroImage` IS NULL OR `aboutHeroImage` = '' OR `aboutHeroImage` LIKE '%bg-hero-img%'");
+        $pdo->exec("UPDATE `Settings` SET `aboutSpiceImage` = '/uploads/1792845269-3c46d03a68dd8916.webp' WHERE `aboutSpiceImage` IS NULL OR `aboutSpiceImage` = '' OR `aboutSpiceImage` LIKE '%bg-hero-img%'");
+        $pdo->exec("UPDATE `Settings` SET `aboutChefImage` = '/uploads/1792268800986-e39305dca03d0356.jpg' WHERE `aboutChefImage` IS NULL OR `aboutChefImage` = '' OR `aboutChefImage` LIKE '%bg-hero-img%'");
+        try {
+            $secStmt = $pdo->prepare('SELECT publicKey FROM AppSecret WHERE id = ?');
+            $secStmt->execute(['PAGE_SETTINGS_EXT']);
+            $secRow = $secStmt->fetch();
+            $ext = ($secRow && !empty($secRow['publicKey'])) ? (json_decode($secRow['publicKey'], true) ?: []) : [];
+            $storyImg = $ext['aboutStoryImage'] ?? '';
+            if ($storyImg === '' || $storyImg === null || stripos((string)$storyImg, 'bg-hero-img') !== false) {
+                $ext['aboutStoryImage'] = '/uploads/1792268554871-2f79adbc5cc35dfe.webp';
+                $upsert = $pdo->prepare('INSERT INTO AppSecret (id, publicKey, privateKey) VALUES (?, ?, "") ON DUPLICATE KEY UPDATE publicKey = VALUES(publicKey)');
+                $upsert->execute(['PAGE_SETTINGS_EXT', json_encode($ext, JSON_UNESCAPED_UNICODE)]);
+            }
+        } catch (Exception $e) {}
     } catch (Exception $e) {}
 
     try {
@@ -1626,6 +1654,8 @@ try {
     $pdo->query('SELECT 1 FROM `BlogPost` LIMIT 1');
     $pdo->query('SELECT `isEmailVerified`, `verificationAttempts` FROM `Customer` LIMIT 1');
     $pdo->query('SELECT 1 FROM `RateLimit` LIMIT 1');
+    // About page image columns were added later — force migrate when absent
+    $pdo->query('SELECT `aboutHeroImage`, `aboutSpiceImage`, `aboutChefImage` FROM `Settings` LIMIT 1');
 } catch (Exception $e) {
     runDatabaseMigrations($pdo);
 }
@@ -1633,6 +1663,23 @@ try {
 // Keep expanding the dine-in catalog (INSERT IGNORE) even on already-seeded databases
 try {
     ensureDefaultDatabaseData($pdo);
+} catch (Throwable $e) {}
+
+// Keep About page images filled (idempotent) so /about never falls back to missing bg-hero-img.webp
+try {
+    $pdo->exec("UPDATE `Settings` SET `aboutHeroImage` = '/uploads/1792268627977-04a9cb4d784139f9.jpg' WHERE `aboutHeroImage` IS NULL OR `aboutHeroImage` = '' OR `aboutHeroImage` LIKE '%bg-hero-img%'");
+    $pdo->exec("UPDATE `Settings` SET `aboutSpiceImage` = '/uploads/1792845269-3c46d03a68dd8916.webp' WHERE `aboutSpiceImage` IS NULL OR `aboutSpiceImage` = '' OR `aboutSpiceImage` LIKE '%bg-hero-img%'");
+    $pdo->exec("UPDATE `Settings` SET `aboutChefImage` = '/uploads/1792268800986-e39305dca03d0356.jpg' WHERE `aboutChefImage` IS NULL OR `aboutChefImage` = '' OR `aboutChefImage` LIKE '%bg-hero-img%'");
+    $secStmt = $pdo->prepare('SELECT publicKey FROM AppSecret WHERE id = ?');
+    $secStmt->execute(['PAGE_SETTINGS_EXT']);
+    $secRow = $secStmt->fetch();
+    $ext = ($secRow && !empty($secRow['publicKey'])) ? (json_decode($secRow['publicKey'], true) ?: []) : [];
+    $storyImg = isset($ext['aboutStoryImage']) ? (string)$ext['aboutStoryImage'] : '';
+    if ($storyImg === '' || stripos($storyImg, 'bg-hero-img') !== false) {
+        $ext['aboutStoryImage'] = '/uploads/1792268554871-2f79adbc5cc35dfe.webp';
+        $upsert = $pdo->prepare('INSERT INTO AppSecret (id, publicKey, privateKey) VALUES (?, ?, "") ON DUPLICATE KEY UPDATE publicKey = VALUES(publicKey)');
+        $upsert->execute(['PAGE_SETTINGS_EXT', json_encode($ext, JSON_UNESCAPED_UNICODE)]);
+    }
 } catch (Throwable $e) {}
 
 // -------------------------------------------------------------

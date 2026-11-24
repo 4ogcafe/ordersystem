@@ -4,6 +4,18 @@ import { assetUrl, getPublic } from '../lib/api';
 import EmphasisText from '../components/EmphasisText';
 import SafeImage from '../components/SafeImage';
 
+/** Same-origin /uploads defaults — never the removed bg-hero-img.webp placeholder. */
+const ABOUT_IMAGE_DEFAULTS = {
+  hero: '/uploads/1792268627977-04a9cb4d784139f9.jpg',
+  story: '/uploads/1792268554871-2f79adbc5cc35dfe.webp',
+  spice: '/uploads/1792845269-3c46d03a68dd8916.webp',
+  chef: '/uploads/1792268800986-e39305dca03d0356.jpg',
+} as const;
+
+function aboutImage(url: string | null | undefined, fallback: string): string {
+  return assetUrl(url) || fallback;
+}
+
 export default function About() {
   const [settings, setSettings] = useState<any>({});
 
@@ -12,6 +24,11 @@ export default function About() {
       .then(data => setSettings(data))
       .catch(console.error);
   }, []);
+
+  const heroSrc = aboutImage(settings.aboutHeroImage, ABOUT_IMAGE_DEFAULTS.hero);
+  const storySrc = aboutImage(settings.aboutStoryImage, ABOUT_IMAGE_DEFAULTS.story);
+  const spiceSrc = aboutImage(settings.aboutSpiceImage, ABOUT_IMAGE_DEFAULTS.spice);
+  const chefSrc = aboutImage(settings.aboutChefImage, ABOUT_IMAGE_DEFAULTS.chef);
 
   const storyParagraphs = (settings.aboutStoryJa || 'Adarsha（アダルサ）は、サンスクリット語で「理想」や「模範」を意味します。\n私たちは、インドの伝統的なスパイスと製法を守りながら、日本の皆さまの味覚に寄り添う新しいインディアン・ダイニングを創造しています。\n\n本場インドのホテルで腕を磨いたシェフが、厳選された数十種類のスパイスを巧みにブレンド。\n特注のタンドール（土窯）で焼き上げる備長炭の香ばしいナンやタンドリーチキンは、多くのお客様に愛されています。').split('\n').filter((p: string) => p.trim().length > 0);
 
@@ -24,11 +41,11 @@ export default function About() {
       <meta property="og:description" content="埼玉県熊谷市の本格インド料理店アダルサの物語、伝統スパイスへのこだわり、特注の備長炭タンドール窯、シェフをご紹介します。" />
       <meta property="og:type" content="website" />
       <meta property="og:url" content="https://adarsha.jp/about" />
-      <meta property="og:image" content={assetUrl(settings.aboutHeroImage) || "https://adarsha.jp/uploads/site-logo-01.webp"} />
+      <meta property="og:image" content={heroSrc} />
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:title" content="私たちについて | Adarsha (アダルサ)" />
       <meta name="twitter:description" content="熊谷の本格インド料理店アダルサの物語、スパイスへのこだわり、シェフをご紹介します。" />
-      <meta name="twitter:image" content={assetUrl(settings.aboutHeroImage) || "https://adarsha.jp/uploads/site-logo-01.webp"} />
+      <meta name="twitter:image" content={heroSrc} />
 
       {/* Structured Data */}
       <script
@@ -76,7 +93,7 @@ export default function About() {
       {/* About Hero */}
       <div className="home-hero" style={{ height: '50vh', minHeight: '400px' }}>
         <SafeImage
-          src={assetUrl(settings.aboutHeroImage)}
+          src={heroSrc}
           alt=""
           fetchPriority="high"
           className="slide-bg-img"
@@ -247,7 +264,7 @@ export default function About() {
                 }}
               >
                 <SafeImage
-                  src={assetUrl(settings.aboutStoryImage)}
+                  src={storySrc}
                   alt={settings.aboutStoryTitleJa?.replace(/<[^>]*>/g, '') || "本場インドの味を、熊谷へ"}
                   loading="lazy"
                   decoding="async"
@@ -365,7 +382,7 @@ export default function About() {
         <div style={{ maxWidth: '1100px', margin: '0 auto', display: 'flex', flexWrap: 'wrap', gap: '40px', alignItems: 'center' }}>
           <div style={{ flex: '1 1 400px' }}>
             <SafeImage
-              src={assetUrl(settings.aboutSpiceImage)}
+              src={spiceSrc}
               alt={settings.aboutSpiceTitleJa?.replace(/<[^>]*>/g, '') || "厳選直輸入スパイス"}
               loading="lazy"
               decoding="async"
@@ -393,7 +410,7 @@ export default function About() {
         <div style={{ maxWidth: '1100px', margin: '0 auto', display: 'flex', flexWrap: 'wrap', gap: '40px', alignItems: 'center', flexDirection: 'row-reverse' }}>
           <div style={{ flex: '1 1 400px' }}>
             <SafeImage
-              src={assetUrl(settings.aboutChefImage)}
+              src={chefSrc}
               alt={settings.aboutChefTitleJa?.replace(/<[^>]*>/g, '') || "熟練のシェフ"}
               loading="lazy"
               decoding="async"
