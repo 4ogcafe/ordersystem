@@ -305,14 +305,30 @@ function ensureDefaultDatabaseData(PDO $pdo): array {
                     $upd = $pdo->prepare('UPDATE `User` SET passwordHash = ?, isActive = 1, role = ?, updatedAt = ? WHERE id = ?');
                     $upd->execute([$hash, 'ADMIN', $now, $row['id']]);
                     $seeded['bootstrapped_admin'] = $email;
+                    try {
+                        $pdo->prepare("DELETE FROM RateLimit WHERE keyStr LIKE 'login_staff%'")->execute();
+                    } catch (Throwable $e) {}
                 } elseif ($email === $bootstrapEmail) {
                     $hash = password_hash($bootstrapPassword, PASSWORD_BCRYPT);
                     $newId = 'usr_bootstrap_' . substr(bin2hex(random_bytes(8)), 0, 12);
                     $ins = $pdo->prepare('INSERT INTO `User` (id, email, name, role, isActive, passwordHash, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, ?, ?, ?)');
                     $ins->execute([$newId, $email, 'Adarsha Admin', 'ADMIN', $hash, $now, $now]);
                     $seeded['created_bootstrap_admin'] = $email;
+                    try {
+                        $pdo->prepare("DELETE FROM RateLimit WHERE keyStr LIKE 'login_staff%'")->execute();
+                    } catch (Throwable $e) {}
                 }
             }
+        }
+
+        // One-shot: clear staff login lockouts left from the admin-password outage.
+        $lockFlag = getAppSecretConfig($pdo, 'SECURITY_LOGIN_LOCKOUT_CLEARED', ['cleared' => false]);
+        if (empty($lockFlag['cleared'])) {
+            try {
+                $pdo->prepare("DELETE FROM RateLimit WHERE keyStr LIKE 'login_staff%' OR keyStr LIKE 'login_cust%'")->execute();
+                saveAppSecretConfig($pdo, 'SECURITY_LOGIN_LOCKOUT_CLEARED', ['cleared' => true, 'at' => $now]);
+                $seeded['cleared_login_lockouts'] = 1;
+            } catch (Throwable $e) {}
         }
     } catch (Exception $e) {}
 
@@ -9175,20 +9191,8 @@ if ($method === 'POST' && ($subPath === '/auth/login' || $subPath === '/auth/log
     }
 
     $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-    $rlIp = checkRateLimit($pdo, 'login_staff_ip', $ip, 15, 900, 900);
-    $rlEmail = checkRateLimit($pdo, 'login_staff_email', $email, 5, 900, 900);
-    if (!$rlIp['allowed'] || !$rlEmail['allowed']) {
-        $retryAfter = max($rlIp['retryAfter'], $rlEmail['retryAfter']);
-        http_response_code(429);
-        echo json_encode([
-            'error' => [
-                'code' => 'TOO_MANY_ATTEMPTS',
-                'message' => 'ログインの試行回数が上限を超過しました。' . ceil($retryAfter / 60) . '分後に再度お試しください。'
-            ]
-        ]);
-        exit;
-    }
-
+    // Verify credentials before enforcing lockout so a correct password after a reset
+    // is not blocked by earlier failed attempts.
     $stmt = $pdo->prepare('SELECT id, name, email, role, passwordHash, isActive FROM User WHERE LOWER(email) = ? LIMIT 1');
     $stmt->execute([$email]);
     $user = $stmt->fetch();
@@ -9198,15 +9202,29 @@ if ($method === 'POST' && ($subPath === '/auth/login' || $subPath === '/auth/log
         $verified = password_verify($password, $user['passwordHash']);
     }
 
-    if (!$user || !$verified || empty($user['isActive'])) {
-        recordRateLimitFailure($pdo, 'login_staff_ip', $ip, 15, 900, 900);
-        recordRateLimitFailure($pdo, 'login_staff_email', $email, 5, 900, 900);
+    if ($user && $verified && !empty($user['isActive'])) {
+        clearRateLimit($pdo, 'login_staff_email', $email);
+        clearRateLimit($pdo, 'login_staff_ip', $ip);
+    } else {
+        $rlIp = checkRateLimit($pdo, 'login_staff_ip', $ip, 30, 900, 300);
+        $rlEmail = checkRateLimit($pdo, 'login_staff_email', $email, 15, 900, 300);
+        if (!$rlIp['allowed'] || !$rlEmail['allowed']) {
+            $retryAfter = max($rlIp['retryAfter'], $rlEmail['retryAfter']);
+            http_response_code(429);
+            echo json_encode([
+                'error' => [
+                    'code' => 'TOO_MANY_ATTEMPTS',
+                    'message' => 'ログインの試行回数が上限を超過しました。' . max(1, (int)ceil($retryAfter / 60)) . '分後に再度お試しください。'
+                ]
+            ]);
+            exit;
+        }
+        recordRateLimitFailure($pdo, 'login_staff_ip', $ip, 30, 900, 300);
+        recordRateLimitFailure($pdo, 'login_staff_email', $email, 15, 900, 300);
         http_response_code(401);
         echo json_encode(['error' => ['code' => 'INVALID_CREDENTIALS', 'message' => 'Invalid email or password']]);
         exit;
     }
-
-    clearRateLimit($pdo, 'login_staff_email', $email);
 
     $sessionUser = [
         'id' => $user['id'],

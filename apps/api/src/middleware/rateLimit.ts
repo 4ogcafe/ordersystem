@@ -40,7 +40,10 @@ export function rateLimit(options: RateLimitOptions): RequestHandler {
       window = { count: 0, resetAt: now + options.windowMs };
       windows.set(key, window);
     }
-    if (window.count >= max) {
+
+    // Login-style limiters: never reject before the handler so a correct password
+    // after failed attempts still signs in. Failures are counted on the way out.
+    if (window.count >= max && !options.failuresOnly) {
       res.setHeader('Retry-After', Math.ceil((window.resetAt - now) / 1000));
       throw new AppError(429, 'RATE_LIMITED', 'Too many requests. Please try again later.');
     }
