@@ -183,7 +183,7 @@ export default function BlogPost() {
       'url': 'https://adarsha.jp',
       'logo': {
         '@type': 'ImageObject',
-        'url': 'https://adarsha.jp/uploads/adarsha-log.webp'
+        'url': 'https://adarsha.jp/brand/adarsha-logo.webp'
       },
       'address': {
         '@type': 'PostalAddress',

@@ -92,7 +92,17 @@ export default function Login() {
       <meta name="robots" content="noindex, nofollow" />
       <div style={{ backgroundColor: 'white', padding: '2rem', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', width: '100%', maxWidth: '420px', boxSizing: 'border-box' }}>
         <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: '0 0 0.25rem', textAlign: 'center' }}>Staff Login</h1>
-        <p style={{ margin: '0 0 1.25rem', textAlign: 'center', color: '#6b7280', fontSize: '0.875rem' }}>For admin, staff and kitchen accounts.</p>
+        <p style={{ margin: '0 0 1.25rem', textAlign: 'center', color: '#6b7280', fontSize: '0.875rem' }}>
+          For admin, staff and kitchen accounts.
+          {import.meta.env.DEV && (
+            <>
+              <br />
+              <span style={{ fontSize: '0.78rem', color: '#9a3412' }}>
+                Local default: admin@example.com / admin121
+              </span>
+            </>
+          )}
+        </p>
 
         {reason === 'idle_timeout' && (
           <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#92400e', backgroundColor: '#fef3c7', border: '1px solid #fde68a', padding: '0.65rem 0.75rem', borderRadius: '6px', marginBottom: '1.25rem', fontSize: '0.85rem', lineHeight: 1.4 }}>

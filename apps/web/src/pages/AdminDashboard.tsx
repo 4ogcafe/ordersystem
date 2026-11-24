@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch, errorMessage } from '../lib/api';
 import { clearStaffSession, setStaffSession } from '../lib/auth-storage';
+import BrandMark from '../components/BrandMark';
 import SessionSecurityGuard from '../components/admin/SessionSecurityGuard';
 import OrdersTab from '../components/admin/OrdersTab';
 import CashCounterTab from '../components/admin/CashCounterTab';
@@ -222,7 +223,7 @@ export default function AdminDashboard() {
       }}>
         <div style={{ padding: '2rem 1.5rem', display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
           <div style={{ width: '40px', height: '40px', borderRadius: '8px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <img src="/uploads/adarsha-log.webp" alt="Adarsha" style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: '50%' }} />
+            <BrandMark alt="Adarsha" size={40} />
           </div>
           <span style={{ fontSize: '1.25rem', fontWeight: '700', color: '#111827', letterSpacing: '-0.5px' }}>Adarsha Admin</span>
           <button type="button" className="adm-close-btn" onClick={() => setSidebarOpen(false)} aria-label="Close menu">

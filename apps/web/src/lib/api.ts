@@ -75,9 +75,10 @@ export function assetUrl(url: string | null | undefined): string {
   return path;
 }
 
-/** Canonical logo — prefer bundled /brand so QR/dine-in UI works when /uploads is missing on the host. */
+/** Canonical logo paths (also imported via BrandMark for hashed Vite assets). */
 export const SITE_LOGO_URL = '/brand/adarsha-logo.webp';
 export const SITE_OG_IMAGE_URL = '/brand/site-logo.webp';
+export const SITE_LOGO_SVG_URL = '/brand/adarsha-stamp-logo.svg';
 
 /** Authenticated request: sends session cookies and Authorization Bearer header, never using HTTP cache. */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {

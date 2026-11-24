@@ -36,8 +36,10 @@ export const config = {
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   // New member accounts allowed per IP per hour (spam protection).
   registerMaxPerHour: Number(process.env.REGISTER_MAX_PER_HOUR) || 10,
-  // Orders allowed per IP per hour (spam protection).
-  orderMaxPerHour: Number(process.env.ORDER_MAX_PER_HOUR) || 10,
+  // Orders allowed per IP per hour (spam protection). Higher default: restaurant Wi‑Fi NATs many phones onto one IP.
+  orderMaxPerHour: Number(process.env.ORDER_MAX_PER_HOUR) || 120,
+  // Extra headroom for verified table QR / dine-in orders (per store+table bucket).
+  dineInOrderMaxPerHour: Number(process.env.DINE_IN_ORDER_MAX_PER_HOUR) || 60,
   // Google Places API key (server only) for showing the restaurant's Google rating and reviews.
   googlePlacesApiKey: process.env.GOOGLE_PLACES_API_KEY?.trim() || '',
   // Single store for all food/menu images: monorepo-root `uploads/` (override with UPLOAD_DIR).

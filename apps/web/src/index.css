@@ -149,32 +149,68 @@ body.scroll-locked {
 .nav-logo img { @apply max-w-none; }
 
 .nav-backdrop { position: fixed; inset: 0; background: rgba(42, 35, 33, 0.45); z-index: 98; }
+.nav-brand-mark {
+  border: 1.5px solid #f0e9df;
+  box-shadow: 0 2px 8px rgba(42, 35, 33, 0.08);
+}
 .nav-mobile {
   position: absolute;
   left: 0;
   right: 0;
   top: 100%;
   z-index: 99;
-  background: #fff;
+  background: linear-gradient(180deg, #ffffff 0%, #faf7f2 100%);
   border-top: 1px solid #f0e9df;
   box-shadow: 0 20px 40px -20px rgba(42, 35, 33, 0.35);
-  padding: 8px 20px 20px;
+  padding: 12px 16px 22px;
   max-height: calc(100dvh - 72px);
   overflow-y: auto;
   box-sizing: border-box;
 }
+.nav-mobile-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 6px 14px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #efe6da;
+}
+.nav-mobile-head-title {
+  font-weight: 900;
+  font-size: 1.05rem;
+  color: var(--dark-bark);
+  line-height: 1.2;
+}
+.nav-mobile-head-sub {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 600;
+  margin-top: 2px;
+}
 .nav-mobile ul { list-style: none; margin: 0; padding: 0; }
 .nav-mobile li a {
-  display: block;
-  padding: 14px 4px;
-  border-bottom: 1px solid #f3ede4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 10px;
+  margin: 4px 0;
+  border-radius: 12px;
+  border-bottom: none;
   color: var(--dark-bark);
   font-weight: 700;
   font-size: 1rem;
   text-decoration: none;
+  background: #fff;
+  border: 1px solid #f0e9df;
+  box-shadow: 0 1px 2px rgba(42, 35, 33, 0.03);
 }
-.nav-mobile li a.active { color: var(--spice); }
-.nav-mobile-actions { display: grid; gap: 10px; margin-top: 18px; }
+.nav-mobile li a.active {
+  color: var(--spice);
+  border-color: #f0c9b0;
+  background: #fff8f3;
+}
+.nav-mobile-actions { display: grid; gap: 10px; margin-top: 16px; }
 
 /* Tablets and small laptops: the six links no longer fit, so they move into the ☰ menu. */
 @media (max-width: 1240px) {
@@ -314,13 +350,104 @@ body.scroll-locked {
 
 /* Footer */
 .footer {
-  @apply bg-dark-bark px-5 pb-8 pt-16 text-white/80;
+  @apply bg-dark-bark px-5 pb-8 pt-14 text-white/80;
+  background:
+    radial-gradient(900px 320px at 0% 0%, rgba(199, 86, 38, 0.18), transparent 55%),
+    radial-gradient(700px 280px at 100% 20%, rgba(254, 215, 170, 0.08), transparent 50%),
+    var(--dark-bark);
+}
+.footer-grid {
+  @apply mx-auto grid max-w-[1200px] gap-10;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
 }
 .footer h3 {
-  @apply mb-6 font-display text-white;
+  @apply mb-5 font-display text-white;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
 }
 .footer p {
   @apply mb-4 text-[0.9rem] leading-[1.8];
+}
+.footer-brand-link {
+  @apply mb-5 inline-flex items-center gap-3 no-underline;
+}
+.footer-brand-mark {
+  border: 2px solid rgba(254, 215, 170, 0.45);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  background: #fff;
+}
+.footer-brand-name {
+  @apply font-display text-2xl font-extrabold leading-none tracking-[0.02em] text-white;
+}
+.footer-brand-sub {
+  @apply mt-[4px] block text-[0.74rem] tracking-[0.04em] text-white/70;
+}
+.footer-tagline {
+  @apply mb-5 text-[0.88rem] leading-[1.8] text-white/80;
+}
+.footer-cta-row {
+  @apply flex flex-wrap items-center gap-3;
+}
+.footer-blog-cta {
+  @apply inline-flex items-center gap-2 rounded-lg bg-[#c75626] px-[16px] py-[9px] text-[0.85rem] font-bold text-white no-underline shadow-[0_2px_8px_rgba(199,86,38,0.35)] transition-all duration-200;
+}
+.footer-blog-cta:hover {
+  @apply -translate-y-px bg-[#d86330];
+}
+.footer-nav-list {
+  @apply m-0 list-none p-0;
+  display: grid;
+  gap: 6px;
+}
+.footer-nav-item {
+  @apply flex items-center justify-between gap-3 no-underline;
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
+  font-weight: 700;
+  font-size: 0.92rem;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.footer-nav-item svg {
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+.footer-nav-item:hover,
+.footer-nav-item.is-current {
+  background: rgba(199, 86, 38, 0.16);
+  border-color: rgba(254, 215, 170, 0.35);
+  color: #fed7aa;
+}
+.footer-nav-item.is-current svg,
+.footer-nav-item:hover svg {
+  opacity: 0.95;
+}
+.footer-bottom {
+  @apply mx-auto mt-10 flex max-w-[1200px] flex-wrap items-center justify-between gap-3.5 border-t border-white/12 pt-5 text-[0.85rem] text-gray-400;
+}
+.footer-bottom-links {
+  @apply flex flex-wrap items-center gap-4;
+}
+@media (max-width: 640px) {
+  .footer {
+    @apply px-4 pb-7 pt-12;
+  }
+  .footer-grid {
+    gap: 28px;
+  }
+  .footer-brand-name {
+    font-size: 1.45rem;
+  }
+  .footer-tagline {
+    font-size: 0.84rem;
+    line-height: 1.75;
+  }
+  .footer-nav-item {
+    padding: 12px 14px;
+    font-size: 0.95rem;
+  }
 }
 
 /* Review Marquee Auto-slider */
@@ -966,7 +1093,7 @@ body.scroll-locked {
 .footer-info a { @apply text-inherit no-underline; }
 .footer-info a:hover { @apply text-gold underline; }
 .footer-info-name { @apply font-bold text-white; }
-.footer-socials { @apply mt-[18px] mb-0 flex list-none gap-2.5 p-0; }
+.footer-socials { @apply m-0 flex list-none gap-2.5 p-0; }
 .footer-socials a { @apply grid h-[38px] w-[38px] place-items-center rounded-full bg-white/8 text-white transition-colors duration-150; }
 .footer-socials a:hover { @apply bg-gold text-dark-bark; }
 

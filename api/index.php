@@ -92,13 +92,22 @@ foreach ($configCandidates as $candidate) {
     }
 }
 
-// When mounted under Laravel (public/api), reuse Laravel .env for DB + APP_KEY.
+// Mirror bootstrap credentials from config.php into getenv/$_ENV (Hostinger often has no shell env).
+foreach (['admin_bootstrap_email' => 'ADMIN_BOOTSTRAP_EMAIL', 'admin_bootstrap_password' => 'ADMIN_BOOTSTRAP_PASSWORD'] as $cfgKey => $envKey) {
+    if (empty($config[$cfgKey])) continue;
+    if (getenv($envKey) === false || getenv($envKey) === '') {
+        putenv($envKey . '=' . $config[$cfgKey]);
+        $_ENV[$envKey] = $config[$cfgKey];
+    }
+}
+
+// When mounted under Laravel (public/api), reuse Laravel .env for DB + APP_KEY + bootstrap.
 $laravelEnvPaths = [
     dirname(__DIR__, 2) . '/.env',
     dirname(__DIR__) . '/../.env',
 ];
 foreach ($laravelEnvPaths as $envPath) {
-    if (!is_file($envPath) || !empty($config['jwt_secret'])) {
+    if (!is_file($envPath)) {
         continue;
     }
     $lines = @file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
@@ -119,31 +128,41 @@ foreach ($laravelEnvPaths as $envPath) {
         }
         $envMap[$ek] = $ev;
     }
-    $dbConnection = strtolower((string)($envMap['DB_CONNECTION'] ?? ''));
-    if ($dbConnection === 'mysql' || $dbConnection === 'mariadb') {
-        if (empty($config['db_host']) && !empty($envMap['DB_HOST'])) {
-            $config['db_host'] = $envMap['DB_HOST'];
-        }
-        if (empty($config['db_name']) && !empty($envMap['DB_DATABASE'])) {
-            $config['db_name'] = $envMap['DB_DATABASE'];
-        }
-        if (empty($config['db_user']) && !empty($envMap['DB_USERNAME'])) {
-            $config['db_user'] = $envMap['DB_USERNAME'];
-        }
-        if (empty($config['db_pass']) && isset($envMap['DB_PASSWORD'])) {
-            $config['db_pass'] = $envMap['DB_PASSWORD'];
+    // Always surface bootstrap / mail secrets so live recovery works even when JWT is already set.
+    foreach (['ADMIN_BOOTSTRAP_EMAIL', 'ADMIN_BOOTSTRAP_PASSWORD', 'MAIL_USERNAME', 'MAIL_PASSWORD', 'MAIL_HOST', 'MAIL_PORT', 'MAIL_FROM_ADDRESS', 'MAIL_FROM_NAME'] as $bootstrapKey) {
+        if (empty($envMap[$bootstrapKey])) continue;
+        if (getenv($bootstrapKey) === false || getenv($bootstrapKey) === '') {
+            putenv($bootstrapKey . '=' . $envMap[$bootstrapKey]);
+            $_ENV[$bootstrapKey] = $envMap[$bootstrapKey];
         }
     }
-    if (empty($config['jwt_secret']) && !empty($envMap['APP_KEY'])) {
-        // Laravel APP_KEY is base64:... — use the raw key material as HMAC secret.
-        $appKey = $envMap['APP_KEY'];
-        if (str_starts_with($appKey, 'base64:')) {
-            $decoded = base64_decode(substr($appKey, 7), true);
-            $config['jwt_secret'] = ($decoded !== false && strlen($decoded) >= 32)
-                ? $decoded
-                : hash('sha256', $appKey);
-        } else {
-            $config['jwt_secret'] = strlen($appKey) >= 32 ? $appKey : hash('sha256', $appKey);
+    if (empty($config['jwt_secret'])) {
+        $dbConnection = strtolower((string)($envMap['DB_CONNECTION'] ?? ''));
+        if ($dbConnection === 'mysql' || $dbConnection === 'mariadb') {
+            if (empty($config['db_host']) && !empty($envMap['DB_HOST'])) {
+                $config['db_host'] = $envMap['DB_HOST'];
+            }
+            if (empty($config['db_name']) && !empty($envMap['DB_DATABASE'])) {
+                $config['db_name'] = $envMap['DB_DATABASE'];
+            }
+            if (empty($config['db_user']) && !empty($envMap['DB_USERNAME'])) {
+                $config['db_user'] = $envMap['DB_USERNAME'];
+            }
+            if (empty($config['db_pass']) && isset($envMap['DB_PASSWORD'])) {
+                $config['db_pass'] = $envMap['DB_PASSWORD'];
+            }
+        }
+        if (!empty($envMap['APP_KEY'])) {
+            // Laravel APP_KEY is base64:... — use the raw key material as HMAC secret.
+            $appKey = $envMap['APP_KEY'];
+            if (str_starts_with($appKey, 'base64:')) {
+                $decoded = base64_decode(substr($appKey, 7), true);
+                $config['jwt_secret'] = ($decoded !== false && strlen($decoded) >= 32)
+                    ? $decoded
+                    : hash('sha256', $appKey);
+            } else {
+                $config['jwt_secret'] = strlen($appKey) >= 32 ? $appKey : hash('sha256', $appKey);
+            }
         }
     }
     break;
@@ -246,6 +265,54 @@ function ensureDefaultDatabaseData(PDO $pdo): array {
             try {
                 saveAppSecretConfig($pdo, 'SECURITY_DEFAULT_ADMIN', ['cleared' => true, 'at' => $now]);
             } catch (Throwable $e) {}
+        }
+
+        // Recovery: ADMIN_BOOTSTRAP_* env, or admin_bootstrap_* in config.php.
+        // If every ADMIN is inactive, fall back to admin121 once so the site is not locked out.
+        $bootstrapPassword = trim((string)(getenv('ADMIN_BOOTSTRAP_PASSWORD') ?: ($_ENV['ADMIN_BOOTSTRAP_PASSWORD'] ?? '')));
+        $bootstrapEmail = strtolower(trim((string)(
+            getenv('ADMIN_BOOTSTRAP_EMAIL')
+            ?: ($_ENV['ADMIN_BOOTSTRAP_EMAIL'] ?? 'admin@adarsha.jp')
+        )));
+        if ($bootstrapEmail === '') {
+            $bootstrapEmail = 'admin@adarsha.jp';
+        }
+        $activeAdmins = 0;
+        try {
+            $activeAdmins = (int)$pdo->query("SELECT COUNT(*) FROM `User` WHERE role = 'ADMIN' AND isActive = 1")->fetchColumn();
+        } catch (Throwable $e) {
+            $activeAdmins = 0;
+        }
+        if ($bootstrapPassword === '' && $activeAdmins === 0) {
+            $bootstrapPassword = 'admin121';
+        }
+        if ($bootstrapPassword !== '' && strlen($bootstrapPassword) >= 8) {
+            $emails = array_values(array_unique([$bootstrapEmail, 'admin@adarsha.jp', 'admin@example.com', 'info@adarsha.jp']));
+            foreach ($emails as $email) {
+                if ($email === '') continue;
+                // When admins already exist, only repair the configured bootstrap email.
+                if ($activeAdmins > 0 && $email !== $bootstrapEmail) continue;
+                $find = $pdo->prepare('SELECT id, passwordHash, isActive, role FROM `User` WHERE LOWER(email) = ? LIMIT 1');
+                $find->execute([$email]);
+                $row = $find->fetch();
+                if ($row && !empty($row['id'])) {
+                    $alreadyOk = !empty($row['isActive'])
+                        && ($row['role'] ?? '') === 'ADMIN'
+                        && !empty($row['passwordHash'])
+                        && password_verify($bootstrapPassword, $row['passwordHash']);
+                    if ($alreadyOk) continue;
+                    $hash = password_hash($bootstrapPassword, PASSWORD_BCRYPT);
+                    $upd = $pdo->prepare('UPDATE `User` SET passwordHash = ?, isActive = 1, role = ?, updatedAt = ? WHERE id = ?');
+                    $upd->execute([$hash, 'ADMIN', $now, $row['id']]);
+                    $seeded['bootstrapped_admin'] = $email;
+                } elseif ($email === $bootstrapEmail) {
+                    $hash = password_hash($bootstrapPassword, PASSWORD_BCRYPT);
+                    $newId = 'usr_bootstrap_' . substr(bin2hex(random_bytes(8)), 0, 12);
+                    $ins = $pdo->prepare('INSERT INTO `User` (id, email, name, role, isActive, passwordHash, createdAt, updatedAt) VALUES (?, ?, ?, ?, 1, ?, ?, ?)');
+                    $ins->execute([$newId, $email, 'Adarsha Admin', 'ADMIN', $hash, $now, $now]);
+                    $seeded['created_bootstrap_admin'] = $email;
+                }
+            }
         }
     } catch (Exception $e) {}
 

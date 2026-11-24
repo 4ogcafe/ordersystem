@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useCustomer } from '../lib/customer-context';
 import { useCart } from '../lib/cart-context';
-import { Menu, ShoppingCart, UserRound, X } from 'lucide-react';
+import { Menu, ShoppingBag, ShoppingCart, UserRound, X } from 'lucide-react';
+import BrandMark from './BrandMark';
 import ReservationModal from './ReservationModal';
 import { useBodyScrollLock } from '../lib/useBodyScrollLock';
 
@@ -12,6 +13,7 @@ const NAV_LINKS = [
   { to: '/menu/lunch', label: 'ランチメニュー' },
   { to: '/menu/takeout', label: 'テイクアウト' },
   { to: '/menu/grand', label: 'グランドメニュー' },
+  { to: '/order', label: 'オンライン注文' },
   { to: '/contact', label: 'お問い合わせ' },
 ];
 
@@ -61,10 +63,8 @@ export default function Navbar() {
     <>
       <nav className="navbar">
         <div className="nav-inner">
-          <Link className="nav-logo" to="/">
-            <div className="flex h-10 items-center">
-              <img src="/uploads/adarsha-log.webp" alt="Adarsha" width={40} height={40} className="h-full w-auto rounded-full object-contain" />
-            </div>
+          <Link className="nav-logo" to="/" aria-label="アダルサ ホーム">
+            <BrandMark alt="Adarsha" size={40} className="nav-brand-mark" />
             <div>
               <div className="nav-logo-text">アダルサ<span>.</span></div>
               <span className="nav-logo-sub">本格インド料理店</span>
@@ -104,10 +104,24 @@ export default function Navbar() {
           <>
             <div className="nav-backdrop" onClick={() => setMenuOpen(false)} aria-hidden="true" />
             <div id="mobile-menu" className="nav-mobile">
+              <div className="nav-mobile-head">
+                <BrandMark alt="" size={36} aria-hidden="true" />
+                <div>
+                  <div className="nav-mobile-head-title">アダルサ</div>
+                  <div className="nav-mobile-head-sub">メニューを選んでお進みください</div>
+                </div>
+              </div>
               <ul>
                 {NAV_LINKS.map(link => (
                   <li key={link.to}>
-                    <Link to={link.to} className={isActive(link.to) ? 'active' : ''} aria-current={isActive(link.to) ? 'page' : undefined}>{link.label}</Link>
+                    <Link
+                      to={link.to}
+                      className={isActive(link.to) ? 'active' : ''}
+                      aria-current={isActive(link.to) ? 'page' : undefined}
+                    >
+                      {link.label}
+                      {link.to === '/order' && <ShoppingBag size={16} aria-hidden="true" />}
+                    </Link>
                   </li>
                 ))}
               </ul>

@@ -134,8 +134,33 @@ const listQuerySchema = z.object({ scope: z.enum(['active', 'history', 'cashier'
 
 const orderLimiter = rateLimit({
   windowMs: ORDER_WINDOW_MS,
-  max: config.orderMaxPerHour,
-  key: (req) => req.ip ?? 'unknown',
+  // Dine-in QR seats share restaurant Wi‑Fi — bucket by store+table, with a higher ceiling.
+  max: (req) => {
+    const body = (req.body ?? {}) as { fulfillment?: string; qrSessionToken?: string };
+    const hasQr =
+      Boolean(body.qrSessionToken) ||
+      Boolean(req.header('X-QR-Session')) ||
+      String(body.fulfillment || '').toUpperCase() === 'DINE_IN';
+    return hasQr ? config.dineInOrderMaxPerHour : config.orderMaxPerHour;
+  },
+  key: (req) => {
+    const body = (req.body ?? {}) as {
+      fulfillment?: string;
+      storeId?: string;
+      tableNumber?: string;
+      qrSessionToken?: string;
+    };
+    const fulfillment = String(body.fulfillment || '').toUpperCase();
+    const table = String(body.tableNumber || '').trim();
+    const store = String(body.storeId || '').trim();
+    const hasQr = Boolean(body.qrSessionToken) || Boolean(req.header('X-QR-Session'));
+    if (fulfillment === 'DINE_IN' && (hasQr || table)) {
+      return `order:dine:${store || 'store'}:${table || 'table'}:${req.ip ?? 'ip'}`;
+    }
+    return `order:ip:${req.ip ?? 'unknown'}`;
+  },
+  // Honeypot bait must not burn the real customer's budget.
+  skip: (req) => Boolean((req.body as { website?: string } | undefined)?.website),
 });
 
 /** Short daily order numbers (1, 2, 3…) that staff can call out at the counter. */

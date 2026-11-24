@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { BookOpen, Clock, ExternalLink, Mail, MapPin, Phone, Store } from 'lucide-react';
+import { BookOpen, ChevronRight, Clock, ExternalLink, Mail, MapPin, Phone, Store } from 'lucide-react';
+import BrandMark from './BrandMark';
 import { DEFAULT_FOOTER_LINKS, DEFAULT_TAGLINE } from '../lib/footer';
 
 const SOCIALS = [
@@ -20,7 +21,7 @@ const MAIN_STORE = {
   holiday: '年中無休',
   phone: '0422-36-2210',
   email: 'info@adarsha.jp',
-  mapsUrl: 'https://maps.google.com/?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E6%AD%A6%E8%94%B5%E9%87%8E%E5%B8%82%E5%A2%832-14-10+%E3%82%AF%E3%83%AC%E3%83%BC%E3%83%AB%E6%AD%A6%E8%94%B5%E9%87%8E1F+%E3%82%A2%E3%83%80%E3%83%AB%E3%82%サ',
+  mapsUrl: 'https://maps.google.com/?q=%E6%9D%B1%E4%BA%AC%E9%83%BD%E6%AD%A6%E8%94%B5%E9%87%8E%E5%B8%82%E5%A2%832-14-10+%E3%82%AF%E3%83%AC%E3%83%BC%E3%83%AB%E6%AD%A6%E8%94%B5%E9%87%8E1F+%E3%82%A2%E3%83%80%E3%83%AB%E3%82%B5',
 };
 
 export default function Footer() {
@@ -34,74 +35,59 @@ export default function Footer() {
 
   return (
     <footer className="footer" role="contentinfo">
-      <div className="mx-auto grid max-w-[1200px] grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-10">
+      <div className="footer-grid">
         {/* Column 1: Brand & About */}
-        <div>
-          <Link to="/" className="mb-[18px] inline-flex items-center gap-2.5 no-underline" aria-label="Adarsha ホーム">
-            <div className="flex h-11 w-11 items-center justify-center">
-              <img
-                src="/uploads/adarsha-log.webp"
-                alt="Adarsha (アダルサ) ロゴ"
-                width={44}
-                height={44}
-                className="h-full w-full rounded-full object-contain"
-              />
-            </div>
+        <div className="footer-brand">
+          <Link to="/" className="footer-brand-link" aria-label="Adarsha ホーム">
+            <BrandMark alt="Adarsha (アダルサ) ロゴ" size={48} className="footer-brand-mark" />
             <div>
-              <div className="font-display text-2xl font-extrabold leading-none tracking-[0.02em] text-white">
+              <div className="footer-brand-name">
                 アダルサ<span className="text-spice">.</span>
               </div>
-              <span className="mt-[3px] block text-[0.74rem] tracking-[0.04em] text-white/70">
-                本格インド料理店 · ADARSHA
-              </span>
+              <span className="footer-brand-sub">本格インド料理店 · ADARSHA</span>
             </div>
           </Link>
 
-          <p className="mb-[18px] text-[0.88rem] leading-[1.8] text-white/80">
-            {DEFAULT_TAGLINE}
-          </p>
+          <p className="footer-tagline">{DEFAULT_TAGLINE}</p>
 
-          <div className="mb-5">
-            <Link
-              to="/blog"
-              className="inline-flex items-center gap-2 rounded-lg bg-[#c75626] px-[18px] py-[9px] text-[0.85rem] font-bold text-white no-underline shadow-[0_2px_8px_rgba(199,86,38,0.35)] transition-all duration-200 hover:-translate-y-px hover:bg-[#d86330]"
-            >
+          <div className="footer-cta-row">
+            <Link to="/blog" className="footer-blog-cta">
               <BookOpen size={16} aria-hidden="true" />
               <span>公式ブログ・スパイスコラム</span>
             </Link>
+            <ul className="footer-socials" aria-label="SNS公式アカウント">
+              {SOCIALS.map(social => (
+                <li key={social.key}>
+                  <a
+                    href={social.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Adarsha公式 ${social.label}`}
+                    title={`Adarsha公式 ${social.label}`}
+                  >
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                      <path d={social.path} fill="currentColor" />
+                    </svg>
+                  </a>
+                </li>
+              ))}
+            </ul>
           </div>
-
-          <ul className="footer-socials" aria-label="SNS公式アカウント">
-            {SOCIALS.map(social => (
-              <li key={social.key}>
-                <a
-                  href={social.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`Adarsha公式 ${social.label}`}
-                  title={`Adarsha公式 ${social.label}`}
-                >
-                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                    <path d={social.path} fill="currentColor" />
-                  </svg>
-                </a>
-              </li>
-            ))}
-          </ul>
         </div>
 
         {/* Column 2: Quick Links */}
-        <div>
+        <div className="footer-nav-col">
           <h3>メニュー・リンク</h3>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, lineHeight: '2.1' }}>
+          <ul className="footer-nav-list">
             {DEFAULT_FOOTER_LINKS.map(link => (
               <li key={link.url}>
                 <Link
                   to={link.url}
-                  className="footer-link"
+                  className={`footer-nav-item${isCurrent(link.url) ? ' is-current' : ''}`}
                   aria-current={isCurrent(link.url) ? 'page' : undefined}
                 >
-                  {link.label}
+                  <span>{link.label}</span>
+                  <ChevronRight size={16} aria-hidden="true" />
                 </Link>
               </li>
             ))}
@@ -109,7 +95,7 @@ export default function Footer() {
         </div>
 
         {/* Column 3: Store & Head Office Information */}
-        <div>
+        <div className="footer-store-col">
           <h3>店舗・代表情報</h3>
           <ul className="footer-info">
             <li className="footer-info-name mb-1 text-base text-white">
@@ -173,11 +159,11 @@ export default function Footer() {
       </div>
 
       {/* Bottom Bar: Copyright & Policies */}
-      <div className="mx-auto mt-10 flex max-w-[1200px] flex-wrap items-center justify-between gap-3.5 border-t border-white/12 pt-5 text-[0.85rem] text-gray-400">
+      <div className="footer-bottom">
         <div>
           © {year} インド料理レストラン アダルサ (Adarsha). All Rights Reserved.
         </div>
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="footer-bottom-links">
           <Link to="/privacy-policy" className="footer-link text-gray-300 no-underline">
             プライバシーポリシー
           </Link>

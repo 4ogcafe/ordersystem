@@ -69,9 +69,18 @@ function verifiedUserId(token: string): string {
   throw unauthenticated();
 }
 
+function readStaffToken(req: Request): string | undefined {
+  const header = req.header('Authorization');
+  if (header?.toLowerCase().startsWith('bearer ')) {
+    const bearer = header.slice(7).trim();
+    if (bearer) return bearer;
+  }
+  return readCookie(req, SESSION_COOKIE) ?? readCookie(req, 'kalpana_session');
+}
+
 /** Loads the user on every request so deactivation and role changes apply immediately. */
 async function authenticate(req: Request): Promise<SessionUser> {
-  const token = readCookie(req, SESSION_COOKIE) ?? readCookie(req, 'kalpana_session');
+  const token = readStaffToken(req);
   if (!token) throw unauthenticated();
   const user = await prisma.user.findUnique({
     where: { id: verifiedUserId(token) },

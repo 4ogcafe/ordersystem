@@ -48,8 +48,17 @@ function AppContent() {
   })();
 
   const isQrUrl = location.pathname.startsWith('/qr') || searchParams.has('qr');
-  // Dedicated QR preview UI is active if scanning/opening QR route or in active QR session with Dine-In
-  const isTableApp = isQrUrl || (isDineIn && searchParams.get('fulfillment')?.toUpperCase() !== 'PICKUP');
+  // Only treat table-order surfaces as the QR app — leftover QR sessions must not strip Navbar/Footer from Home/About/etc.
+  const isOrderSurface =
+    location.pathname.startsWith('/order') ||
+    location.pathname.startsWith('/table') ||
+    location.pathname.startsWith('/dine-in') ||
+    location.pathname.startsWith('/qr');
+  const isTableApp =
+    isQrUrl ||
+    (isDineIn &&
+      isOrderSurface &&
+      searchParams.get('fulfillment')?.toUpperCase() !== 'PICKUP');
 
   // Hide regular website Navbar, Footer, and CartDrawer for internal staff apps and active table QR diners
   // Normal website visitors and customer account users will see the complete website Navbar & Footer!

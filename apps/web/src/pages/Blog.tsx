@@ -98,7 +98,7 @@ export default function Blog() {
       '@type': 'Restaurant',
       'name': 'Adarsha (アダルサ)',
       'url': 'https://adarsha.jp',
-      'logo': 'https://adarsha.jp/uploads/adarsha-log.webp',
+      'logo': 'https://adarsha.jp/brand/adarsha-logo.webp',
       'address': {
         '@type': 'PostalAddress',
         'streetAddress': '佐谷田2081',
