@@ -60,7 +60,7 @@ DirectoryIndex index.html index.php
   # ----------------------------------------------------------------------
   RewriteRule ^api(/.*)?$ api/index.php [QSA,L]
 
-  # All site images: single store at project-root /uploads/ (same folder PHP/Node write to).
+  # All site images: single shared store at /uploads/ (one file for every branch + domain).
   # Prefer DOCUMENT_ROOT/uploads; legacy sibling ../uploads is read-only fallback during migration.
   RewriteCond %{REQUEST_URI} ^/uploads/(.+)$
   RewriteCond %{DOCUMENT_ROOT}/uploads/%1 -f
@@ -70,6 +70,13 @@ DirectoryIndex index.html index.php
   RewriteCond %{DOCUMENT_ROOT}/uploads/%1 !-f
   RewriteCond %{DOCUMENT_ROOT}/../uploads/%1 -f
   RewriteRule ^uploads/(.+)$ ../uploads/$1 [L]
+
+  # Hostinger main site may not have the upload files — fall back to the shared media host.
+  RewriteCond %{HTTP_HOST} ^(www\.)?adarsha\.jp$ [NC]
+  RewriteCond %{REQUEST_URI} ^/uploads/(.+)$
+  RewriteCond %{DOCUMENT_ROOT}/uploads/%1 !-f
+  RewriteCond %{DOCUMENT_ROOT}/../uploads/%1 !-f
+  RewriteRule ^uploads/(.+)$ https://order.adarsha.jp/uploads/$1 [R=302,L]
 
   # Legacy root brand logo URLs → /uploads/ (keeps old bookmarks / cached HTML working)
   RewriteCond %{REQUEST_URI} ^/(adarsha-log\.webp|site-logo-01\.webp|logo-white-01\.png\.webp|new-logo\.webp|web-logo-01-01\.png\.webp)$ [NC]
@@ -81,11 +88,25 @@ DirectoryIndex index.html index.php
   RewriteCond %{DOCUMENT_ROOT}/../uploads/%1 -f
   RewriteRule ^(adarsha-log\.webp|site-logo-01\.webp|logo-white-01\.png\.webp|new-logo\.webp|web-logo-01-01\.png\.webp)$ ../uploads/$1 [L]
 
+  RewriteCond %{HTTP_HOST} ^(www\.)?adarsha\.jp$ [NC]
+  RewriteCond %{REQUEST_URI} ^/(adarsha-log\.webp|site-logo-01\.webp|logo-white-01\.png\.webp|new-logo\.webp|web-logo-01-01\.png\.webp)$ [NC]
+  RewriteCond %{DOCUMENT_ROOT}/uploads/%1 !-f
+  RewriteRule ^(adarsha-log\.webp|site-logo-01\.webp|logo-white-01\.png\.webp|new-logo\.webp|web-logo-01-01\.png\.webp)$ https://order.adarsha.jp/uploads/$1 [R=302,L]
+
   # ----------------------------------------------------------------------
   # 404 FOR MISSING STATIC ASSETS (PREVENT HTML RETURNED AS IMAGE/CSS)
   # ----------------------------------------------------------------------
-  RewriteCond %{REQUEST_URI} ^/(assets|uploads)/ [OR]
+  RewriteCond %{REQUEST_URI} ^/assets/
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^ - [R=404,L]
+
+  RewriteCond %{REQUEST_URI} ^/uploads/
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{HTTP_HOST} !^(www\.)?adarsha\.jp$ [NC]
+  RewriteRule ^ - [R=404,L]
+
   RewriteCond %{REQUEST_URI} \.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2)$ [NC]
+  RewriteCond %{REQUEST_URI} !^/uploads/
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteRule ^ - [R=404,L]
 

@@ -1836,10 +1836,10 @@ if (
         exit;
     }
 
-    http_response_code(404);
-    header('Content-Type: text/plain; charset=utf-8');
-    header('Cache-Control: no-store');
-    echo 'Image not found';
+    // Shared media host: one /uploads file for every branch + domain.
+    $sharedMedia = 'https://order.adarsha.jp/uploads/' . rawurlencode($reqFile);
+    header('Location: ' . $sharedMedia, true, 302);
+    header('Cache-Control: public, max-age=300');
     exit;
 }
 

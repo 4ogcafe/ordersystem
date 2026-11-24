@@ -19,7 +19,31 @@ function resolveApiBase(): string {
   return '';
 }
 
+/**
+ * Single shared media store. Live food/logo files currently sit on order.adarsha.jp/uploads
+ * (adarsha.jp/uploads is empty on Hostinger). One file path serves every branch + both domains.
+ */
+const CANONICAL_MEDIA_ORIGIN = 'https://order.adarsha.jp';
+
+function resolveMediaBase(): string {
+  const fromEnv = (
+    import.meta.env.VITE_MEDIA_URL ||
+    import.meta.env.VITE_UPLOADS_URL ||
+    ''
+  ).replace(/\/$/, '');
+  if (fromEnv) return fromEnv;
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname.toLowerCase();
+    // Same-origin when the browser is already on the host that has the files.
+    if (host === 'order.adarsha.jp') return '';
+    // Local Vite / Node already proxies /uploads.
+    if (host === 'localhost' || host === '127.0.0.1') return '';
+  }
+  return CANONICAL_MEDIA_ORIGIN;
+}
+
 const API_BASE = resolveApiBase();
+const MEDIA_BASE = resolveMediaBase();
 
 // Any host in front of /uploads/ is this app's own file, including older copies of the site.
 const UPLOAD_ORIGIN_REGEX = /^https?:\/\/[^/]+(?=\/uploads\/)/;
@@ -27,9 +51,14 @@ const DOMAIN_STRIP_REGEX = /^https?:\/\/((?:[\w-]+\.)?adarsha\.jp|localhost(:\d+
 const LOCAL_IMAGE = '';
 const PUBLIC_CACHE_MS = 60_000;
 
+function withMediaBase(path: string): string {
+  if (!path.startsWith('/')) return path;
+  return `${MEDIA_BASE}${path}`;
+}
+
 /**
  * Normalizes any image URL (relative, absolute localhost, or missing leading slashes)
- * so it works reliably in development, production, and nested routes (/admin/*, /menu/*).
+ * so it works on adarsha.jp, order.adarsha.jp, and every branch — one shared /uploads file.
  */
 export function assetUrl(url: string | null | undefined): string {
   if (!url) return '';
@@ -40,57 +69,63 @@ export function assetUrl(url: string | null | undefined): string {
   if (/bg-hero-img/i.test(trimmed) || /unsplash\.com/i.test(trimmed)) return LOCAL_IMAGE;
   if (/^(data:|blob:)/i.test(trimmed)) return trimmed;
 
-  // Strip this site's own origin so images stay on the current host.
+  // Strip this site's own origin so we can re-point to the canonical media host.
   let path = trimmed.replace(UPLOAD_ORIGIN_REGEX, '').replace(DOMAIN_STRIP_REGEX, '');
 
-  // 3. Fix missing leading slash for uploads
+  // Fix missing leading slash for uploads
   if (/^uploads\//i.test(path)) {
     path = `/${path}`;
   } else if (/^\/?public\/uploads\//i.test(path)) {
     path = path.replace(/^\/?public/, '');
   }
 
-  // 3b. Map carousel slide images to clean versioned banners
+  // Map carousel slide images to clean versioned banners
   if (path.includes('hero-slide-1') || path.includes('1793707743') || path.includes('0d3ca7b4cb55a2c2') || path.includes('1791677310137')) {
-    return `${API_BASE}/uploads/hero-slide-1-special-set-v2.webp`;
+    return withMediaBase('/uploads/hero-slide-1-special-set-v2.webp');
   }
   if (path.includes('hero-slide-2') || path.includes('1793707859') || path.includes('11e753d772ddb0d5') || path.includes('1791677360469')) {
-    return `${API_BASE}/uploads/hero-slide-2-garlic-naan-v2.webp`;
+    return withMediaBase('/uploads/hero-slide-2-garlic-naan-v2.webp');
   }
   if (path.includes('hero-slide-3') || path.includes('1793707977') || path.includes('52b4ff533e02d77d') || path.includes('1791677400636')) {
-    return `${API_BASE}/uploads/hero-slide-3-green-salad-v2.webp`;
+    return withMediaBase('/uploads/hero-slide-3-green-salad-v2.webp');
   }
 
-  // Strip leading slash for filename checks
   const bare = path.replace(/^\//, '');
 
-  // Brand / site logos now live only under /uploads/ (legacy root paths still resolve).
+  // Brand / site logos under shared /uploads/
   if (/^(adarsha-log|logo-white|new-logo|site-logo|web-logo)[^/]*\.(webp|png|jpg|svg)$/i.test(bare)) {
-    return `${API_BASE}/uploads/${bare}`;
+    return withMediaBase(`/uploads/${bare}`);
   }
 
-  // 4. If path starts with /uploads/
   if (path.startsWith('/uploads/')) {
-    return `${API_BASE}${path}`;
+    return withMediaBase(path);
   }
 
-  // 5. If it's a known upload filename without directory prefix (e.g. 179...-....jpg|webp|png)
+  // Known upload filename without directory prefix
   if (/^\d{10,14}-[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp|gif|svg)$/i.test(bare)) {
-    return `${API_BASE}/uploads/${bare}`;
+    return withMediaBase(`/uploads/${bare}`);
   }
 
-  // 6. Other root-relative site images (e.g. old /bg-hero) — prefer uploads when possible
+  // Other root-relative site images — prefer shared uploads
   if (/^\/[\w.-]+\.(webp|png|jpe?g|gif|svg)$/i.test(path) && !path.includes('/', 1)) {
-    return `${API_BASE}/uploads/${bare}`;
+    return withMediaBase(`/uploads/${bare}`);
   }
 
-  // 7. If path is a relative path without leading slash, and not external http/https, prepend slash
+  // Relative path without leading slash
   if (!/^https?:\/\//i.test(path) && !path.startsWith('/')) {
+    if (/^uploads\//i.test(path)) return withMediaBase(`/${path}`);
     return `/${path}`;
   }
 
   return path;
 }
+
+/** Absolute uploads URL helpers (admin / meta tags). */
+export function mediaUrl(path: string): string {
+  return assetUrl(path.startsWith('/') ? path : `/${path}`);
+}
+
+export const MEDIA_ORIGIN = MEDIA_BASE || (typeof window !== 'undefined' ? window.location.origin : CANONICAL_MEDIA_ORIGIN);
 
 /** Canonical logo paths (also imported via BrandMark for hashed Vite assets). */
 export const SITE_LOGO_URL = '/brand/adarsha-logo.webp';
