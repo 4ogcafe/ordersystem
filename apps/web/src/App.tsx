@@ -48,7 +48,7 @@ function AppContent() {
   })();
 
   const isQrUrl = location.pathname.startsWith('/qr') || searchParams.has('qr');
-  // Only treat table-order surfaces as the QR app — leftover QR sessions must not strip Navbar/Footer from Home/About/etc.
+  // Only treat table-order surfaces as the QR app — leftover QR sessions must not strip Navbar/Footer from Home/About/Menu/etc.
   const isOrderSurface =
     location.pathname.startsWith('/order') ||
     location.pathname.startsWith('/table') ||
@@ -57,15 +57,10 @@ function AppContent() {
   const hasTableContext =
     Boolean(searchParams.get('table') || searchParams.get('store')) ||
     Boolean(location.pathname.match(/^\/(table|dine-in)\/[^/]+/));
-  const isOrderHost =
-    typeof window !== 'undefined' &&
-    /^(order\.)?adarsha\.jp$/i.test(window.location.hostname) &&
-    window.location.hostname.startsWith('order.');
-  // Any QR / table-order surface (including takeout-from-table) uses the dedicated dine-in chrome —
-  // never stack global Navbar/Footer on top of dio-header / dio-bottom-bar.
+  // QR / table-order surfaces only — never treat the whole order.adarsha.jp host as table-app
+  // (that hid the menu chrome and broke browsing /menu/*).
   const isTableApp =
     isQrUrl ||
-    isOrderHost ||
     (isOrderSurface && hasTableContext) ||
     (isDineIn && isOrderSurface);
 

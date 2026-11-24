@@ -23,7 +23,7 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0');
 header('Pragma: no-cache');
 header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
-$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+$origin = trim((string)($_SERVER['HTTP_ORIGIN'] ?? ''));
 $allowedOrigins = [
     'https://adarsha.jp',
     'https://www.adarsha.jp',
@@ -47,18 +47,23 @@ if ($origin !== '') {
     }
 }
 
+// Always Vary on Origin so CDN/edge never cache the wrong ACAO for order.adarsha.jp vs adarsha.jp
+header('Vary: Origin');
 if ($isAllowedOrigin) {
     header("Access-Control-Allow-Origin: {$origin}");
     header('Access-Control-Allow-Credentials: true');
-    header('Vary: Origin');
+} elseif ($origin === '') {
+    // Same-origin / non-browser clients — no ACAO needed, but keep a safe default for simple GETs
+    header('Access-Control-Allow-Origin: https://adarsha.jp');
 } else {
+    // Unknown origin: do not reflect it; still advertise primary site for public GETs
     header('Access-Control-Allow-Origin: https://adarsha.jp');
 }
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-QR-Session');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
+    http_response_code(204);
     exit;
 }
 

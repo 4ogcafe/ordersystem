@@ -1,22 +1,12 @@
 import { getStaffToken, getCustomerToken, clearStaffSession } from './auth-storage';
 
 /**
- * Empty in development: Vite proxies /api and /uploads to the API (see vite.config.ts).
- * On order.adarsha.jp the SPA still needs the main API for JSON — media stays same-origin.
+ * Empty = same-origin `/api` (Vite proxies in dev; each live host uses its own API).
+ * Override with VITE_API_URL only when a host truly has no local API.
+ * Never cross-call adarsha.jp ↔ order.adarsha.jp by default (CORS + separate data).
  */
 function resolveApiBase(): string {
-  const fromEnv = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
-  if (fromEnv) return fromEnv;
-  if (typeof window !== 'undefined') {
-    const host = window.location.hostname.toLowerCase();
-    if (
-      host === 'order.adarsha.jp' ||
-      (host.endsWith('.adarsha.jp') && host !== 'adarsha.jp' && host !== 'www.adarsha.jp')
-    ) {
-      return 'https://adarsha.jp';
-    }
-  }
-  return '';
+  return (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 }
 
 const API_BASE = resolveApiBase();
