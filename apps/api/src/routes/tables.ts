@@ -7,6 +7,11 @@ import { z } from 'zod';
 import { AppError } from '../lib/errors.js';
 import { prisma } from '../lib/prisma.js';
 import { requireKitchen } from '../middleware/auth.js';
+import {
+  forceUnlockTable,
+  markTablePaymentPending,
+  settleTableSession,
+} from '../lib/table-session.js';
 import { verifyQrSessionFromRequest } from './qr.js';
 
 const router = express.Router();
@@ -112,6 +117,17 @@ router.post('/request-bill', async (req, res) => {
     expectedTable: input.tableNumber,
     expectedStoreId: input.storeId,
   });
+  const token =
+    (input.qrSessionToken || '').trim() ||
+    String(req.headers['x-qr-session'] || '').trim();
+  if (session.storeId && token) {
+    await markTablePaymentPending({
+      storeId: session.storeId,
+      tableNumber: session.tableNumber,
+      sessionToken: token,
+      actor: 'QR_CLIENT',
+    });
+  }
   const alert: FloorAlert = {
     id: `fa_${crypto.randomBytes(8).toString('hex')}`,
     storeId: session.storeId || input.storeId || '',
@@ -124,6 +140,56 @@ router.post('/request-bill', async (req, res) => {
   alerts.unshift(alert);
   await saveAlerts(alerts.slice(0, 200));
   res.status(201).json({ success: true, alert });
+});
+
+const resetSchema = z.object({
+  storeId: z.string().trim().min(1).max(100),
+  tableNumber: z.string().trim().min(1).max(64),
+  reason: z.string().trim().max(200).optional(),
+});
+
+/** Staff: mark table paid / force-unlock so the next guest can scan. */
+router.post('/reset', requireKitchen, async (req, res) => {
+  const input = resetSchema.parse(req.body ?? {});
+  await forceUnlockTable({
+    storeId: input.storeId,
+    tableNumber: input.tableNumber,
+    actor: 'STAFF',
+    reason: input.reason || 'staff_reset',
+  });
+
+  // Complete open dine-in rounds whose note encodes this table.
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE PickupOrder
+       SET status = 'COMPLETED', updatedAt = NOW(3)
+       WHERE fulfillment = 'DINE_IN'
+         AND status IN ('NEW','CONFIRMED','READY')
+         AND note LIKE ?`,
+      `%[テーブル: ${input.tableNumber}]%`,
+    );
+  } catch {
+    /* best-effort */
+  }
+
+  res.json({
+    success: true,
+    storeId: input.storeId,
+    tableNumber: input.tableNumber,
+    status: 'AVAILABLE',
+  });
+});
+
+/** Staff: settle after cash/card payment (same unlock as reset, with payment actor). */
+router.post('/mark-paid', requireKitchen, async (req, res) => {
+  const input = resetSchema.parse(req.body ?? {});
+  await settleTableSession({
+    storeId: input.storeId,
+    tableNumber: input.tableNumber,
+    actor: 'STAFF',
+    paymentRef: input.reason || 'mark_paid',
+  });
+  res.json({ success: true, status: 'AVAILABLE' });
 });
 
 export default router;

@@ -10,6 +10,11 @@ import { localDateKey } from '../lib/pickup.js';
 import { idParam, objectIdString, optionalText } from '../lib/schemas.js';
 import { requireKitchen } from '../middleware/auth.js';
 import { optionalCustomer } from '../middleware/customerAuth.js';
+import {
+  activateTableSession,
+  getOrCreateTableSession,
+  isTableLockedForToken,
+} from '../lib/table-session.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { MAX_QUANTITY, pricingSummary, quoteOrder, type OrderLine } from '../services/order-pricing.js';
 import { changePoints } from '../services/points.js';
@@ -285,6 +290,7 @@ router.post('/', orderLimiter, optionalCustomer, async (req, res) => {
 
   // QR table orders must carry a verified table session (header / cookie / body token).
   let qrTableNumber = '';
+  let qrSessionTokenForLock = '';
   if (isDineIn) {
     const session = verifyQrSessionFromRequest(req, {
       sessionToken: input.qrSessionToken,
@@ -292,9 +298,24 @@ router.post('/', orderLimiter, optionalCustomer, async (req, res) => {
       expectedStoreId: input.storeId || null,
     });
     qrTableNumber = session.tableNumber;
+    qrSessionTokenForLock =
+      (input.qrSessionToken || '').trim() ||
+      String(req.headers['x-qr-session'] || '').trim();
     // 対象店舗 QR is authoritative — always bind order to the scanned branch + table
     if (session.storeId) input.storeId = session.storeId;
     if (session.tableNumber) input.tableNumber = session.tableNumber;
+
+    if (session.storeId && qrTableNumber && qrSessionTokenForLock) {
+      const tableSession = await getOrCreateTableSession(session.storeId, qrTableNumber);
+      const gate = isTableLockedForToken(tableSession, qrSessionTokenForLock);
+      if (gate.locked) {
+        throw new AppError(
+          409,
+          'TABLE_LOCKED',
+          'このお席では現在、未会計の注文が進行中です。新しいご注文はお受けできません。店員にお声がけください。',
+        );
+      }
+    }
   }
 
   const rawSettings = await loadSettings();
@@ -513,6 +534,22 @@ router.post('/', orderLimiter, optionalCustomer, async (req, res) => {
     if (reward) await releaseReward(orderId);
     throw err;
   }
+
+  if (isDineIn && qrSessionTokenForLock && input.storeId && qrTableNumber) {
+    const lockResult = await activateTableSession({
+      storeId: input.storeId,
+      tableNumber: qrTableNumber,
+      sessionToken: qrSessionTokenForLock,
+      orderId,
+      actor: 'QR_CLIENT',
+    });
+    if (!lockResult.ok) {
+      // Order was already persisted — keep it for the owner; reject only foreign devices.
+      // (Owner path always returns ok; this guards races from a second device.)
+      throw new AppError(409, lockResult.code, lockResult.message);
+    }
+  }
+
   res.status(201).json({
     token,
     number,

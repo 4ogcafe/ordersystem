@@ -61,22 +61,21 @@ function AppContent() {
     typeof window !== 'undefined' &&
     /^(order\.)?adarsha\.jp$/i.test(window.location.hostname) &&
     window.location.hostname.startsWith('order.');
+  // Any QR / table-order surface (including takeout-from-table) uses the dedicated dine-in chrome —
+  // never stack global Navbar/Footer on top of dio-header / dio-bottom-bar.
   const isTableApp =
     isQrUrl ||
     isOrderHost ||
     (isOrderSurface && hasTableContext) ||
-    (isDineIn &&
-      isOrderSurface &&
-      searchParams.get('fulfillment')?.toUpperCase() !== 'PICKUP');
+    (isDineIn && isOrderSurface);
 
   // Hide regular website Navbar, Footer, and CartDrawer for internal staff apps and active table QR diners
-  // Normal website visitors and customer account users will see the complete website Navbar & Footer!
   const internalRoutes = ['/login', '/admin', '/kitchen', '/cash-counter', '/cashier'];
   const isInternal = internalRoutes.some(route => location.pathname === route || location.pathname.startsWith(route + '/'));
   const hideNavAndFooter = isInternal || isTableApp;
 
   return (
-    <div className={hideNavAndFooter ? 'antialiased app-screen' : 'antialiased'}>
+    <div className={hideNavAndFooter ? 'antialiased app-screen' : 'antialiased'} data-table-app={isTableApp ? '1' : undefined}>
       {!hideNavAndFooter && <MaintenanceBanner />}
       {!hideNavAndFooter && <Navbar />}
       <Suspense fallback={<div style={{ minHeight: '60vh' }} aria-busy="true" />}>
@@ -114,7 +113,7 @@ function AppContent() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
-      {!hideNavAndFooter && !isDineIn && <CartDrawer />}
+      {!hideNavAndFooter && <CartDrawer />}
       {!hideNavAndFooter && <LineChatButton />}
       {!hideNavAndFooter && <Footer />}
     </div>

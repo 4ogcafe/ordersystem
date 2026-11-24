@@ -4535,6 +4535,8 @@ if ($method === 'POST' && ($subPath === '/orders' || $subPath === '/orders/')) {
     $tableNumber = trim((string)($input['tableNumber'] ?? ''));
     $name = trim((string)($input['name'] ?? ''));
     $phone = trim((string)($input['phone'] ?? ''));
+    $qrToken = '';
+    $qrPayload = null;
 
     if ($isDineIn) {
         $qrToken = trim((string)($input['qrSessionToken'] ?? $input['qrToken'] ?? ''));
@@ -4569,6 +4571,10 @@ if ($method === 'POST' && ($subPath === '/orders' || $subPath === '/orders/')) {
             exit;
         }
 
+        // 対象店舗 from QR is authoritative
+        if (!empty($qrPayload['storeId'])) {
+            $input['storeId'] = $qrPayload['storeId'];
+        }
         if (!empty($input['storeId']) && $qrPayload['storeId'] !== $input['storeId']) {
             http_response_code(403);
             echo json_encode([
@@ -4593,6 +4599,23 @@ if ($method === 'POST' && ($subPath === '/orders' || $subPath === '/orders/')) {
                 ]
             ], JSON_UNESCAPED_UNICODE);
             exit;
+        }
+
+        // Block foreign devices while this table has an unpaid active session
+        $lockStoreId = (string)($qrPayload['storeId'] ?? $input['storeId'] ?? '');
+        if ($lockStoreId !== '' && $tableNumber !== '' && $qrToken !== '') {
+            $ts = adarshaGetOrCreateTableSession($pdo, $lockStoreId, $tableNumber);
+            $gate = adarshaTableLockGate($ts, $qrToken);
+            if (!empty($gate['locked'])) {
+                http_response_code(409);
+                echo json_encode([
+                    'error' => [
+                        'code' => 'TABLE_LOCKED',
+                        'message' => 'このお席では現在、未会計の注文が進行中です。新しいご注文はお受けできません。店員にお声がけください。',
+                    ]
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
         }
 
         if ($name === '') {
@@ -4704,6 +4727,13 @@ if ($method === 'POST' && ($subPath === '/orders' || $subPath === '/orders/')) {
             try {
                 $pdo->prepare("UPDATE PickupOrder SET tableNumber = ? WHERE id = ?")->execute([$tableNumber, $orderId]);
             } catch (Exception $e) {}
+        }
+
+        if ($isDineIn && !empty($qrToken) && !empty($qrPayload['storeId']) && $tableNumber !== '') {
+            $act = adarshaActivateTableSession($pdo, (string)$qrPayload['storeId'], $tableNumber, $qrToken, $orderId, 'QR_CLIENT');
+            if (empty($act['ok'])) {
+                throw new Exception($act['message'] ?? 'TABLE_LOCKED');
+            }
         }
 
         if ($customerId && $quote['pointsUsed'] > 0) {
@@ -4943,6 +4973,158 @@ if ($method === 'GET' && ($subPath === '/orders/table' || $subPath === '/orders/
 }
 
 // -------------------------------------------------------------
+// TableSession state machine (AVAILABLE → ACTIVE_UNPAID → PAYMENT_PENDING → AVAILABLE)
+// -------------------------------------------------------------
+function ensureTableSessionSchema(PDO $pdo): void {
+    static $done = false;
+    if ($done) return;
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `TableSession` (
+            `id` VARCHAR(191) NOT NULL,
+            `storeId` VARCHAR(191) NOT NULL,
+            `tableNumber` VARCHAR(64) NOT NULL,
+            `status` VARCHAR(32) NOT NULL DEFAULT 'AVAILABLE',
+            `ownerTokenHash` VARCHAR(64) NULL,
+            `orderIdsJson` TEXT NULL,
+            `openedAt` DATETIME(3) NULL,
+            `paidAt` DATETIME(3) NULL,
+            `closedAt` DATETIME(3) NULL,
+            `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+            `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `TableSession_store_table_key` (`storeId`, `tableNumber`),
+            INDEX `TableSession_status_idx` (`status`)
+        )");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `TableSessionEvent` (
+            `id` VARCHAR(191) NOT NULL,
+            `sessionId` VARCHAR(191) NOT NULL,
+            `storeId` VARCHAR(191) NOT NULL,
+            `tableNumber` VARCHAR(64) NOT NULL,
+            `fromStatus` VARCHAR(32) NULL,
+            `toStatus` VARCHAR(32) NOT NULL,
+            `actor` VARCHAR(32) NOT NULL DEFAULT 'QR_CLIENT',
+            `metaJson` TEXT NULL,
+            `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+            PRIMARY KEY (`id`),
+            INDEX `TableSessionEvent_session_idx` (`sessionId`),
+            INDEX `TableSessionEvent_store_table_idx` (`storeId`, `tableNumber`)
+        )");
+    } catch (Throwable $e) {}
+    $done = true;
+}
+
+function adarshaHashQrToken(string $token): string {
+    return hash('sha256', $token);
+}
+
+function adarshaLogTableSessionEvent(PDO $pdo, array $p): void {
+    try {
+        $id = 'tse_' . bin2hex(random_bytes(10));
+        $ins = $pdo->prepare('INSERT INTO TableSessionEvent (id, sessionId, storeId, tableNumber, fromStatus, toStatus, actor, metaJson, createdAt) VALUES (?,?,?,?,?,?,?,?,NOW(3))');
+        $ins->execute([
+            $id,
+            $p['sessionId'],
+            $p['storeId'],
+            $p['tableNumber'],
+            $p['fromStatus'] ?? null,
+            $p['toStatus'],
+            $p['actor'] ?? 'QR_CLIENT',
+            isset($p['meta']) ? json_encode($p['meta'], JSON_UNESCAPED_UNICODE) : null,
+        ]);
+    } catch (Throwable $e) {}
+}
+
+function adarshaGetOrCreateTableSession(PDO $pdo, string $storeId, string $tableNumber): array {
+    ensureTableSessionSchema($pdo);
+    $stmt = $pdo->prepare('SELECT * FROM TableSession WHERE storeId = ? AND tableNumber = ? LIMIT 1');
+    $stmt->execute([$storeId, $tableNumber]);
+    $row = $stmt->fetch();
+    if ($row) return $row;
+    $id = 'ts_' . bin2hex(random_bytes(10));
+    $ins = $pdo->prepare("INSERT INTO TableSession (id, storeId, tableNumber, status, createdAt, updatedAt) VALUES (?, ?, ?, 'AVAILABLE', NOW(3), NOW(3))");
+    $ins->execute([$id, $storeId, $tableNumber]);
+    $stmt->execute([$storeId, $tableNumber]);
+    return $stmt->fetch() ?: ['id' => $id, 'storeId' => $storeId, 'tableNumber' => $tableNumber, 'status' => 'AVAILABLE', 'ownerTokenHash' => null];
+}
+
+function adarshaTableLockGate(array $session, ?string $token): array {
+    $status = (string)($session['status'] ?? 'AVAILABLE');
+    $active = in_array($status, ['ACTIVE_UNPAID', 'PAYMENT_PENDING'], true);
+    if (!$active) return ['locked' => false, 'isOwner' => true, 'status' => $status];
+    $hash = $token ? adarshaHashQrToken($token) : '';
+    $isOwner = $hash !== '' && !empty($session['ownerTokenHash']) && hash_equals((string)$session['ownerTokenHash'], $hash);
+    return ['locked' => !$isOwner, 'isOwner' => $isOwner, 'status' => $status];
+}
+
+function adarshaActivateTableSession(PDO $pdo, string $storeId, string $tableNumber, string $token, string $orderId, string $actor = 'QR_CLIENT'): array {
+    ensureTableSessionSchema($pdo);
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("INSERT INTO TableSession (id, storeId, tableNumber, status, createdAt, updatedAt) VALUES (?, ?, ?, 'AVAILABLE', NOW(3), NOW(3)) ON DUPLICATE KEY UPDATE updatedAt = updatedAt")
+            ->execute(['ts_' . bin2hex(random_bytes(10)), $storeId, $tableNumber]);
+        $stmt = $pdo->prepare('SELECT * FROM TableSession WHERE storeId = ? AND tableNumber = ? LIMIT 1 FOR UPDATE');
+        $stmt->execute([$storeId, $tableNumber]);
+        $session = $stmt->fetch();
+        if (!$session) {
+            $pdo->rollBack();
+            return ['ok' => false, 'code' => 'SESSION_MISSING', 'message' => 'Table session missing'];
+        }
+        $gate = adarshaTableLockGate($session, $token);
+        if ($gate['locked']) {
+            $pdo->rollBack();
+            return ['ok' => false, 'code' => 'TABLE_LOCKED', 'message' => 'このお席では現在、未会計の注文が進行中です。店員にお声がけください。', 'session' => $session];
+        }
+        $orderIds = [];
+        if (!empty($session['orderIdsJson'])) {
+            $decoded = json_decode((string)$session['orderIdsJson'], true);
+            if (is_array($decoded)) $orderIds = $decoded;
+        }
+        if (!in_array($orderId, $orderIds, true)) $orderIds[] = $orderId;
+        $from = (string)($session['status'] ?? 'AVAILABLE');
+        $upd = $pdo->prepare("UPDATE TableSession SET status = 'ACTIVE_UNPAID', ownerTokenHash = ?, orderIdsJson = ?, openedAt = COALESCE(openedAt, NOW(3)), paidAt = NULL, closedAt = NULL, updatedAt = NOW(3) WHERE id = ?");
+        $upd->execute([adarshaHashQrToken($token), json_encode($orderIds), $session['id']]);
+        adarshaLogTableSessionEvent($pdo, [
+            'sessionId' => $session['id'],
+            'storeId' => $storeId,
+            'tableNumber' => $tableNumber,
+            'fromStatus' => $from,
+            'toStatus' => 'ACTIVE_UNPAID',
+            'actor' => $actor,
+            'meta' => ['orderId' => $orderId],
+        ]);
+        $pdo->commit();
+        return ['ok' => true];
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        return ['ok' => false, 'code' => 'LOCK_FAILED', 'message' => $e->getMessage()];
+    }
+}
+
+function adarshaSettleTableSession(PDO $pdo, string $storeId, string $tableNumber, string $actor = 'STAFF', ?string $paymentRef = null): void {
+    $session = adarshaGetOrCreateTableSession($pdo, $storeId, $tableNumber);
+    $from = (string)($session['status'] ?? 'AVAILABLE');
+    $pdo->prepare("UPDATE TableSession SET status = 'AVAILABLE', ownerTokenHash = NULL, orderIdsJson = NULL, paidAt = NOW(3), closedAt = NOW(3), updatedAt = NOW(3) WHERE id = ?")
+        ->execute([$session['id']]);
+    adarshaLogTableSessionEvent($pdo, [
+        'sessionId' => $session['id'],
+        'storeId' => $storeId,
+        'tableNumber' => $tableNumber,
+        'fromStatus' => $from,
+        'toStatus' => 'PAID_SETTLED',
+        'actor' => $actor,
+        'meta' => $paymentRef ? ['paymentRef' => $paymentRef] : null,
+    ]);
+    adarshaLogTableSessionEvent($pdo, [
+        'sessionId' => $session['id'],
+        'storeId' => $storeId,
+        'tableNumber' => $tableNumber,
+        'fromStatus' => 'PAID_SETTLED',
+        'toStatus' => 'AVAILABLE',
+        'actor' => $actor,
+    ]);
+}
+
+// -------------------------------------------------------------
 // Endpoint: POST /tables/reset (Free up / auto-reset table session)
 // -------------------------------------------------------------
 if ($method === 'POST' && ($subPath === '/tables/reset' || $subPath === '/tables/reset/')) {
@@ -4958,21 +5140,25 @@ if ($method === 'POST' && ($subPath === '/tables/reset' || $subPath === '/tables
     }
 
     try {
-        $storeCond = !empty($storeId) ? "AND (storeId = ? OR storeId IS NULL)" : "";
         $sql = "UPDATE PickupOrder SET status = 'COMPLETED', completedAt = NOW(), updatedAt = NOW() 
                 WHERE status IN ('NEW', 'CONFIRMED', 'PREPARING', 'READY', 'ACCEPTED') 
-                  AND (tableNumber = ? OR note LIKE ? OR note LIKE ?) $storeCond";
+                  AND (tableNumber = ? OR note LIKE ? OR note LIKE ?)";
         $params = [$tableNum, "%[テーブル: {$tableNum}]%", "%[テーブル:{$tableNum}]%"];
-        if (!empty($storeId)) {
-            $params[] = $storeId;
-        }
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
     } catch (\Throwable $e) {}
 
+    if ($storeId !== '') {
+        try {
+            adarshaSettleTableSession($pdo, $storeId, $tableNum, 'STAFF', 'staff_reset');
+        } catch (Throwable $e) {}
+    }
+
     echo json_encode([
         'success' => true,
         'tableNumber' => $tableNum,
+        'storeId' => $storeId,
+        'status' => 'AVAILABLE',
         'message' => "テーブル {$tableNum} をリセット・解放しました。",
     ], JSON_UNESCAPED_UNICODE);
     exit;
@@ -5142,6 +5328,25 @@ if ($method === 'POST' && ($subPath === '/tables/request-bill' || $subPath === '
     }
 
     $storeId = trim((string)($input['storeId'] ?? ''));
+    $billToken = trim((string)($input['qrSessionToken'] ?? $_SERVER['HTTP_X_QR_SESSION'] ?? ''));
+    if ($storeId !== '' && $tableNum !== '' && $billToken !== '') {
+        try {
+            $ts = adarshaGetOrCreateTableSession($pdo, $storeId, $tableNum);
+            $gate = adarshaTableLockGate($ts, $billToken);
+            if (empty($gate['locked'])) {
+                $from = (string)($ts['status'] ?? 'AVAILABLE');
+                $pdo->prepare("UPDATE TableSession SET status = 'PAYMENT_PENDING', updatedAt = NOW(3) WHERE id = ?")->execute([$ts['id']]);
+                adarshaLogTableSessionEvent($pdo, [
+                    'sessionId' => $ts['id'],
+                    'storeId' => $storeId,
+                    'tableNumber' => $tableNum,
+                    'fromStatus' => $from,
+                    'toStatus' => 'PAYMENT_PENDING',
+                    'actor' => 'QR_CLIENT',
+                ]);
+            }
+        } catch (Throwable $e) {}
+    }
     $msgId = generateUuidV4();
     $now = (new DateTime('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s.v');
     $nowIso = (new DateTime('now', new DateTimeZone('Asia/Tokyo')))->format('c');
@@ -5213,6 +5418,17 @@ if ($method === 'POST' && ($subPath === '/qr/validate' || $subPath === '/qr/vali
         ], JSON_UNESCAPED_UNICODE);
         exit;
     }
+    if ($qrCode === '' && $tableNumber !== '' && $storeId === '') {
+        http_response_code(400);
+        echo json_encode([
+            'valid' => false,
+            'error' => [
+                'code' => 'STORE_REQUIRED',
+                'message' => '店舗情報がないQRです。正しいお席のQRコードをスキャンしてください。'
+            ]
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
 
     $row = null;
     if ($qrCode !== '') {
@@ -5227,18 +5443,6 @@ if ($method === 'POST' && ($subPath === '/qr/validate' || $subPath === '/qr/vali
         $stmt->execute([$storeId, $tableNumber]);
         $row = $stmt->fetch() ?: null;
     }
-    // /table/1 style links: table only — prefer musashisakai, else any active match
-    if (!$row && $tableNumber !== '') {
-        ensureStoreTableQrCodes($pdo, $jwtSecret);
-        $stmt = $pdo->prepare("SELECT * FROM TableQrCode WHERE tableNumber = ? AND storeId = 'musashisakai' AND isActive = 1 LIMIT 1");
-        $stmt->execute([$tableNumber]);
-        $row = $stmt->fetch() ?: null;
-        if (!$row) {
-            $stmt = $pdo->prepare('SELECT * FROM TableQrCode WHERE tableNumber = ? AND isActive = 1 ORDER BY storeId ASC LIMIT 1');
-            $stmt->execute([$tableNumber]);
-            $row = $stmt->fetch() ?: null;
-        }
-    }
 
     if (!$row) {
         http_response_code(404);
@@ -5247,6 +5451,29 @@ if ($method === 'POST' && ($subPath === '/qr/validate' || $subPath === '/qr/vali
             'error' => [
                 'code' => 'INVALID_QR',
                 'message' => '無効なQRコードです。お席のQRコードをご確認ください。'
+            ]
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if ($storeId !== '' && (string)$row['storeId'] !== $storeId) {
+        http_response_code(403);
+        echo json_encode([
+            'valid' => false,
+            'error' => [
+                'code' => 'STORE_MISMATCH',
+                'message' => 'QRの店舗と選択店舗が一致しません。正しいお席のQRをご利用ください。'
+            ]
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if ($tableNumber !== '' && (string)$row['tableNumber'] !== $tableNumber) {
+        http_response_code(403);
+        echo json_encode([
+            'valid' => false,
+            'error' => [
+                'code' => 'TABLE_MISMATCH',
+                'message' => 'QRのお席番号が一致しません。正しいお席のQRをご利用ください。'
             ]
         ], JSON_UNESCAPED_UNICODE);
         exit;
@@ -5282,33 +5509,10 @@ if ($method === 'POST' && ($subPath === '/qr/validate' || $subPath === '/qr/vali
             ->execute([$row['id']]);
     } catch (Exception $e) {}
 
-    // Generate cryptographically signed QR session token (valid 4 hours for dine-in session)
-    $sessionTtl = 14400; // 4 hours
-    $sessionPayload = [
-        'typ' => 'qr_session',
-        'qrId' => $row['id'],
-        'storeId' => $row['storeId'],
-        'tableNumber' => $row['tableNumber'],
-        'qrCode' => $row['qrCode'],
-        'iat' => time(),
-        'exp' => time() + $sessionTtl,
-    ];
-    $qrSessionToken = createJwt($sessionPayload, $jwtSecret, $sessionTtl);
-
-    // Set Session Cookie (expires => 0: deleted when browser is closed or reset)
-    setcookie('kalpana_qr_session', $qrSessionToken, [
-        'expires' => 0,
-        'path' => '/',
-        'domain' => '',
-        'secure' => true,
-        'httponly' => true,
-        'samesite' => 'Lax',
-    ]);
-
     // Find store details
     $storeInfo = [
         'id' => $row['storeId'],
-        'name' => $row['storeId'] === 'musashisakai' ? '武蔵境店' : ($row['storeId'] === 'kumagaya' ? '熊谷店' : '行田店'),
+        'name' => $row['storeId'] === 'musashisakai' ? '武蔵境店' : ($row['storeId'] === 'chiba' ? '千葉店' : ($row['storeId'] === 'higashikoganei' ? '東小金井店' : $row['storeId'])),
     ];
     try {
         $stStmt = $pdo->query('SELECT storeLocations FROM Settings LIMIT 1');
@@ -5326,8 +5530,85 @@ if ($method === 'POST' && ($subPath === '/qr/validate' || $subPath === '/qr/vali
         }
     } catch (Exception $e) {}
 
+    $existingToken = trim((string)($input['sessionToken'] ?? ''));
+    if ($existingToken === '' && !empty($_SERVER['HTTP_X_QR_SESSION'])) {
+        $existingToken = trim((string)$_SERVER['HTTP_X_QR_SESSION']);
+    }
+    if ($existingToken === '') {
+        $existingToken = trim((string)(getBearerOrCookie('kalpana_qr_session') ?? ''));
+    }
+
+    $tableSession = adarshaGetOrCreateTableSession($pdo, (string)$row['storeId'], (string)$row['tableNumber']);
+    $gate = adarshaTableLockGate($tableSession, $existingToken !== '' ? $existingToken : null);
+
+    if (!empty($gate['locked'])) {
+        setcookie('kalpana_qr_session', '', [
+            'expires' => time() - 3600,
+            'path' => '/',
+            'domain' => '',
+            'secure' => true,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+        http_response_code(409);
+        echo json_encode([
+            'valid' => false,
+            'tableLocked' => true,
+            'canOrder' => false,
+            'lockStatus' => $gate['status'],
+            'storeId' => $row['storeId'],
+            'tableNumber' => $row['tableNumber'],
+            'qrCode' => $row['qrCode'],
+            'store' => $storeInfo,
+            'restaurantName' => 'Adarsha (アダルサ)',
+            'error' => [
+                'code' => 'TABLE_LOCKED',
+                'message' => 'このお席では現在、未会計の注文が進行中です。新しいご注文はお受けできません。お困りの際は店員にお声がけください。',
+            ],
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $sessionTtl = 14400; // 4 hours
+    $qrSessionToken = $existingToken;
+    $reuse = false;
+    if ($qrSessionToken !== '' && !empty($gate['isOwner'])) {
+        $payload = verifyJwt($qrSessionToken, $jwtSecret);
+        if (is_array($payload)
+            && ($payload['typ'] ?? '') === 'qr_session'
+            && (string)($payload['storeId'] ?? '') === (string)$row['storeId']
+            && (string)($payload['tableNumber'] ?? '') === (string)$row['tableNumber']
+        ) {
+            $reuse = true;
+        }
+    }
+    if (!$reuse) {
+        $sessionPayload = [
+            'typ' => 'qr_session',
+            'qrId' => $row['id'],
+            'storeId' => $row['storeId'],
+            'tableNumber' => $row['tableNumber'],
+            'qrCode' => $row['qrCode'],
+            'iat' => time(),
+            'exp' => time() + $sessionTtl,
+        ];
+        $qrSessionToken = createJwt($sessionPayload, $jwtSecret, $sessionTtl);
+    }
+
+    setcookie('kalpana_qr_session', $qrSessionToken, [
+        'expires' => 0,
+        'path' => '/',
+        'domain' => '',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+
     echo json_encode([
         'valid' => true,
+        'canOrder' => true,
+        'tableLocked' => false,
+        'lockStatus' => $gate['status'],
         'sessionToken' => $qrSessionToken,
         'storeId' => $row['storeId'],
         'tableNumber' => $row['tableNumber'],

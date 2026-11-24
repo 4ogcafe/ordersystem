@@ -19,6 +19,7 @@ import {
   type CashRegisterShift,
   type CashRegisterTransaction,
 } from '../lib/cash-register-state.js';
+import { settleTableSession } from '../lib/table-session.js';
 import { requireKitchen } from '../middleware/auth.js';
 import { settleMemberPoints, settleMemberStamp } from './orders.js';
 
@@ -457,6 +458,17 @@ router.post('/transaction', requireKitchen, async (req, res) => {
 
   branch.transactions.push(transaction);
   await saveMultiRegisterState(state);
+
+  const paidTable = String(input.tableNumber || '').trim();
+  if (paidTable) {
+    await settleTableSession({
+      storeId,
+      tableNumber: paidTable,
+      actor: 'STAFF',
+      paymentRef: transaction.id,
+    }).catch(() => undefined);
+  }
+
   res.status(201).json({ success: true, transaction });
 });
 

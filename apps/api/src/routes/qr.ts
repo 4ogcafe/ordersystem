@@ -10,6 +10,10 @@ import { config } from '../config.js';
 import { AppError } from '../lib/errors.js';
 import { prisma } from '../lib/prisma.js';
 import { requireStaff } from '../middleware/auth.js';
+import {
+  getOrCreateTableSession,
+  isTableLockedForToken,
+} from '../lib/table-session.js';
 import { getStoredStores } from './stores.js';
 
 const router = express.Router();
@@ -153,20 +157,7 @@ async function findQrRow(opts: {
     );
     return again[0] || null;
   }
-  // /table/1 style links: table only — prefer musashisakai, else any active match
-  if (tableNumber) {
-    await ensureStoreTableQrCodes();
-    const preferred = await prisma.$queryRawUnsafe<TableQrRow[]>(
-      "SELECT * FROM TableQrCode WHERE tableNumber = ? AND storeId = 'musashisakai' AND isActive = 1 LIMIT 1",
-      tableNumber,
-    );
-    if (preferred[0]) return preferred[0];
-    const any = await prisma.$queryRawUnsafe<TableQrRow[]>(
-      'SELECT * FROM TableQrCode WHERE tableNumber = ? AND isActive = 1 ORDER BY storeId ASC LIMIT 1',
-      tableNumber,
-    );
-    return any[0] || null;
-  }
+  // Table-only links are ambiguous across branches — require storeId (対象店舗).
   return null;
 }
 
@@ -221,6 +212,8 @@ const validateSchema = z.object({
   store: z.string().optional(),
   tableNumber: z.string().optional(),
   table: z.string().optional(),
+  /** Resume an existing owner session after refresh (optional). */
+  sessionToken: z.string().optional(),
 });
 
 router.post('/validate', async (req, res) => {
@@ -234,10 +227,20 @@ router.post('/validate', async (req, res) => {
   if (!qrCode && !tableNumber) {
     throw new AppError(400, 'QR_REQUIRED', 'QRコードをスキャンしてください。');
   }
+  // Require store+table (or a resolvable QR code) — never silently bind the wrong branch.
+  if (!qrCode && tableNumber && !storeId) {
+    throw new AppError(400, 'STORE_REQUIRED', '店舗情報がないQRです。正しいお席のQRコードをスキャンしてください。');
+  }
 
   const row = await findQrRow({ qrCode, storeId, tableNumber });
   if (!row) {
     throw new AppError(404, 'INVALID_QR', '無効なQRコードです。お席のQRコードをご確認ください。');
+  }
+  if (storeId && row.storeId && storeId !== row.storeId) {
+    throw new AppError(403, 'STORE_MISMATCH', 'QRの店舗と選択店舗が一致しません。正しいお席のQRをご利用ください。');
+  }
+  if (tableNumber && String(row.tableNumber) !== String(tableNumber)) {
+    throw new AppError(403, 'TABLE_MISMATCH', 'QRのお席番号が一致しません。正しいお席のQRをご利用ください。');
   }
   if (!row.isActive) {
     throw new AppError(403, 'QR_DISABLED', 'このお席のQRコードは現在無効化されています。店員にお声がけください。');
@@ -255,17 +258,76 @@ router.post('/validate', async (req, res) => {
     /* optional column */
   }
 
-  const { sessionToken, expiresAt } = issueQrSession(row);
-  setQrCookie(res, sessionToken);
-
   const stores = await getStoredStores().catch(() => []);
   const store = stores.find((s) => s.id === row.storeId) || {
     id: row.storeId,
     name: row.storeId,
   };
 
+  const existingToken = (input.sessionToken || readQrToken(req) || '').trim();
+  const tableSession = await getOrCreateTableSession(row.storeId, String(row.tableNumber));
+  const lock = isTableLockedForToken(tableSession, existingToken || null);
+
+  if (lock.locked) {
+    clearQrCookie(res);
+    res.status(409).json({
+      valid: false,
+      tableLocked: true,
+      canOrder: false,
+      lockStatus: lock.status,
+      storeId: row.storeId,
+      tableNumber: row.tableNumber,
+      qrCode: row.qrCode,
+      store,
+      restaurantName: 'Adarsha (アダルサ)',
+      error: {
+        code: 'TABLE_LOCKED',
+        message:
+          'このお席では現在、未会計の注文が進行中です。新しいご注文はお受けできません。お困りの際は店員にお声がけください。',
+      },
+    });
+    return;
+  }
+
+  // Owner refresh: reuse the same token so order history / lock ownership stays intact.
+  let sessionToken = existingToken;
+  let expiresAt = Math.floor(Date.now() / 1000) + QR_SESSION_TTL;
+  if (lock.isOwner && existingToken) {
+    try {
+      const payload = jwt.verify(existingToken, config.jwtSecret, { algorithms: ['HS256'] }) as {
+        typ?: string;
+        storeId?: string;
+        tableNumber?: string;
+        exp?: number;
+      };
+      if (
+        payload.typ === 'qr_session' &&
+        String(payload.storeId || '') === row.storeId &&
+        String(payload.tableNumber || '') === String(row.tableNumber)
+      ) {
+        expiresAt = payload.exp || expiresAt;
+      } else {
+        sessionToken = '';
+      }
+    } catch {
+      sessionToken = '';
+    }
+  } else {
+    sessionToken = '';
+  }
+
+  if (!sessionToken) {
+    const issued = issueQrSession(row);
+    sessionToken = issued.sessionToken;
+    expiresAt = issued.expiresAt;
+  }
+  setQrCookie(res, sessionToken);
+
   res.json({
     valid: true,
+    canOrder: true,
+    tableLocked: false,
+    lockStatus: lock.status,
     sessionToken,
     storeId: row.storeId,
     tableNumber: row.tableNumber,

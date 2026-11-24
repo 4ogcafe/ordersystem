@@ -34,7 +34,15 @@ import { CustomizeModal, type BuyNowState, type OptionGroup, type OrderableItem 
 import { useOrderQuote, type Savings } from '../components/order/useOrderQuote';
 import DineInOrderExperience from '../components/order/DineInOrderExperience';
 import QrFulfillmentChoiceModal from '../components/order/QrFulfillmentChoiceModal';
-import { checkServerQrSession, clearQrSession, getStoredQrSession, validateQrCodeApi, type QrSession } from '../lib/qr-session';
+import {
+  checkServerQrSession,
+  clearQrSession,
+  getStoredQrSession,
+  validateQrCodeDetailed,
+  type QrSession,
+  type QrValidateFailure,
+} from '../lib/qr-session';
+import BrandMark from '../components/BrandMark';
 import SafeImage from '../components/SafeImage';
 import StoreReviewLinks from '../components/StoreReviewLinks';
 
@@ -205,6 +213,7 @@ export default function Order() {
   const { tableNum, qrCode: routeQrCode } = useParams<{ tableNum?: string; qrCode?: string }>();
   const [qrSession, setQrSession] = useState<QrSession | null>(() => getStoredQrSession());
   const [isValidatingQr, setIsValidatingQr] = useState<boolean>(false);
+  const [qrFailure, setQrFailure] = useState<QrValidateFailure | null>(null);
 
   const queryQr = searchParams.get('qr') || routeQrCode || '';
   const queryTable = searchParams.get('table') || tableNum || '';
@@ -306,6 +315,7 @@ export default function Order() {
         (!queryStore || existing.storeId === queryStore) &&
         (!queryTable || String(existing.tableNumber) === String(queryTable))
       ) {
+        setQrFailure(null);
         setQrSession(existing);
         setTableNumber(existing.tableNumber);
         if (existing.storeId) {
@@ -317,6 +327,7 @@ export default function Order() {
       }
 
       setIsValidatingQr(true);
+      setQrFailure(null);
       const decodedQr = (() => {
         if (!queryQr) return undefined;
         try {
@@ -325,14 +336,16 @@ export default function Order() {
           return queryQr;
         }
       })();
-      // /table/:n and /dine-in/:n often omit ?store= — fall back to selected/saved store
-      validateQrCodeApi({
+      // 対象店舗 + プレビュー座席 from the printed QR — require store when table is present
+      validateQrCodeDetailed({
         qrCode: decodedQr,
-        storeId: queryStore || selectedStoreId || undefined,
+        storeId: queryStore || undefined,
         tableNumber: queryTable || undefined,
-      }).then(session => {
-        if (session && session.valid) {
+      }).then(result => {
+        if (result.ok && result.session.valid) {
+          const session = result.session;
           lastQrValidateKey.current = `${session.qrCode || queryQr}|${session.storeId || queryStore}|${session.tableNumber || queryTable}`;
+          setQrFailure(null);
           setQrSession(session);
           setTableNumber(session.tableNumber);
           // 対象店舗 QR → lock branch + table (do not let GPS / prior pick override)
@@ -404,24 +417,28 @@ export default function Order() {
         } else {
           clearQrSession();
           setQrSession(null);
-          setTableNumber('');
-          setFulfillment('PICKUP');
-          toast.error('無効または期限切れのお席QRコードです。通常のテイクアウト注文をご利用いただけます。', {
-            id: 'qr-invalid',
-            duration: 5000,
-          });
-          setSearchParams(p => {
-            p.delete('qr');
-            p.delete('table');
-            p.delete('store');
-            p.set('fulfillment', 'PICKUP');
-            return p;
-          }, { replace: true });
+          setTableNumber(result.ok ? '' : (result.failure.tableNumber || queryTable || ''));
+          setQrFailure(result.ok ? null : result.failure);
+          if (!result.ok && result.failure.tableLocked) {
+            setFulfillment('DINE_IN');
+          } else {
+            setFulfillment('PICKUP');
+          }
+          if (!result.ok && !result.failure.tableLocked) {
+            toast.error(result.failure.message || '無効または期限切れのお席QRコードです。', {
+              id: 'qr-invalid',
+              duration: 5000,
+            });
+          }
         }
       }).catch(() => {
         clearQrSession();
         setQrSession(null);
         setTableNumber('');
+        setQrFailure({
+          code: 'NETWORK',
+          message: 'お席QRの確認に失敗しました。通信環境をご確認のうえ、もう一度スキャンしてください。',
+        });
         setFulfillment('PICKUP');
         toast.error('お席QRの確認に失敗しました。通信環境をご確認のうえ、もう一度スキャンしてください。', {
           id: 'qr-network',
@@ -1056,12 +1073,69 @@ export default function Order() {
 
   if (isValidatingQr) {
     return (
-      <main style={{ minHeight: '80vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, background: 'linear-gradient(180deg,#fff7ed 0%,#fff 55%)' }}>
-        <div style={{ width: 48, height: 48, border: '4px solid #fed7aa', borderTopColor: '#ea580c', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      <main className="dio-gate-screen" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, background: '#faf8f5' }}>
+        <div style={{ width: 48, height: 48, border: '4px solid #fed7aa', borderTopColor: '#b82e1f', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
         <p style={{ fontWeight: 800, color: '#9a3412', fontSize: '1.05rem', margin: 0 }}>お席のQRコードを確認しています…</p>
         <p style={{ fontWeight: 500, color: '#9a3412', fontSize: '0.85rem', margin: 0, opacity: 0.85 }}>
+          {queryStore ? `${queryStore} · ` : ''}
           {queryTable ? `テーブル ${queryTable}` : '店内注文の準備中'}
         </p>
+      </main>
+    );
+  }
+
+  if (qrFailure?.tableLocked) {
+    const lockedStore =
+      qrFailure.store?.name ||
+      stores.find(s => s.id === qrFailure.storeId)?.name ||
+      qrFailure.storeId ||
+      '';
+    return (
+      <main className="dio-gate-screen" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, background: '#faf8f5' }}>
+        <BrandMark size={64} alt="Adarsha" />
+        <h1 style={{ margin: '20px 0 8px', fontSize: '1.35rem', color: '#7c2d12', fontWeight: 900 }}>ご注文受付中のお席です</h1>
+        <p style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: '#b82e1f' }}>
+          {lockedStore ? `${lockedStore} · ` : ''}
+          テーブル {qrFailure.tableNumber || queryTable || '—'} 番席
+        </p>
+        <p style={{ margin: '16px 0 0', maxWidth: 340, textAlign: 'center', lineHeight: 1.55, color: '#4b5563', fontSize: '0.9rem' }}>
+          {qrFailure.message}
+        </p>
+        <p style={{ margin: '12px 0 0', fontSize: '0.82rem', color: '#6b7280' }}>
+          お会計完了後、次のお客様がご利用いただけます。
+        </p>
+        <a
+          href={`tel:${selectedStore.phone || '0422-36-2210'}`}
+          style={{ marginTop: 24, display: 'inline-flex', alignItems: 'center', gap: 8, background: '#b82e1f', color: '#fff', fontWeight: 800, padding: '12px 20px', borderRadius: 999, textDecoration: 'none' }}
+        >
+          <Phone size={16} /> 店員に電話する
+        </a>
+      </main>
+    );
+  }
+
+  if (qrFailure && (queryQr || queryTable || queryStore) && !isQrActive) {
+    return (
+      <main className="dio-gate-screen" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, background: '#faf8f5' }}>
+        <BrandMark size={64} alt="Adarsha" />
+        <h1 style={{ margin: '20px 0 8px', fontSize: '1.35rem', color: '#7c2d12', fontWeight: 900 }}>お席QRを確認できません</h1>
+        <p style={{ margin: '12px 0 0', maxWidth: 340, textAlign: 'center', lineHeight: 1.55, color: '#4b5563', fontSize: '0.9rem' }}>
+          {qrFailure.message}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setQrFailure(null);
+            lastQrValidateKey.current = '';
+            window.location.reload();
+          }}
+          style={{ marginTop: 20, border: 'none', background: '#b82e1f', color: '#fff', fontWeight: 800, padding: '12px 20px', borderRadius: 999, cursor: 'pointer' }}
+        >
+          もう一度読み取る
+        </button>
+        <Link to="/order" style={{ marginTop: 14, color: '#9a3412', fontWeight: 700, fontSize: '0.88rem' }}>
+          通常のテイクアウト注文へ
+        </Link>
       </main>
     );
   }
