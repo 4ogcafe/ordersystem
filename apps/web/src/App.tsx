@@ -54,8 +54,17 @@ function AppContent() {
     location.pathname.startsWith('/table') ||
     location.pathname.startsWith('/dine-in') ||
     location.pathname.startsWith('/qr');
+  const hasTableContext =
+    Boolean(searchParams.get('table') || searchParams.get('store')) ||
+    Boolean(location.pathname.match(/^\/(table|dine-in)\/[^/]+/));
+  const isOrderHost =
+    typeof window !== 'undefined' &&
+    /^(order\.)?adarsha\.jp$/i.test(window.location.hostname) &&
+    window.location.hostname.startsWith('order.');
   const isTableApp =
     isQrUrl ||
+    isOrderHost ||
+    (isOrderSurface && hasTableContext) ||
     (isDineIn &&
       isOrderSurface &&
       searchParams.get('fulfillment')?.toUpperCase() !== 'PICKUP');

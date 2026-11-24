@@ -1,12 +1,29 @@
 import { getStaffToken, getCustomerToken, clearStaffSession } from './auth-storage';
 
-// Empty in development: Vite proxies /api and /uploads to the API (see vite.config.ts).
-// In production set VITE_API_URL if the API is served from another origin.
-const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+/**
+ * Empty in development: Vite proxies /api and /uploads to the API (see vite.config.ts).
+ * On order.adarsha.jp (and other app subdomains) there is no PHP API — use the main site.
+ */
+function resolveApiBase(): string {
+  const fromEnv = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+  if (fromEnv) return fromEnv;
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname.toLowerCase();
+    if (
+      host === 'order.adarsha.jp' ||
+      (host.endsWith('.adarsha.jp') && host !== 'adarsha.jp' && host !== 'www.adarsha.jp')
+    ) {
+      return 'https://adarsha.jp';
+    }
+  }
+  return '';
+}
+
+const API_BASE = resolveApiBase();
 
 // Any host in front of /uploads/ is this app's own file, including older copies of the site.
 const UPLOAD_ORIGIN_REGEX = /^https?:\/\/[^/]+(?=\/uploads\/)/;
-const DOMAIN_STRIP_REGEX = /^https?:\/\/(adarsha\.jp|www\.adarsha\.jp|localhost(:\d+)?|127\.0\.0\.1(:\d+)?)/i;
+const DOMAIN_STRIP_REGEX = /^https?:\/\/((?:[\w-]+\.)?adarsha\.jp|localhost(:\d+)?|127\.0\.0\.1(:\d+)?)/i;
 const LOCAL_IMAGE = '';
 const PUBLIC_CACHE_MS = 60_000;
 
@@ -123,6 +140,13 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
 }
 
 const publicCache = new Map<string, { expires: number; promise: Promise<unknown> }>();
+
+/** Drop cached public GETs (e.g. after a failed dine-in menu load). */
+export function clearPublicCache(prefix = '/api/v1/menu'): void {
+  for (const key of publicCache.keys()) {
+    if (key.startsWith(prefix)) publicCache.delete(key);
+  }
+}
 
 /** Public GET shared by every component on the page, so e.g. settings is fetched once, not per component. */
 export function getPublic<T>(path: string): Promise<T> {

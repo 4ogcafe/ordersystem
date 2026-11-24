@@ -4,10 +4,10 @@ import {
   Search, Plus, ShoppingCart, History,
   ChefHat, X, ChevronDown, ChevronUp, Bell, Heart,
   Receipt, RotateCcw, User, LogIn, LogOut,
-  CheckCircle2, Sparkles, ShoppingBag, UtensilsCrossed, Phone, QrCode
+  CheckCircle2, Sparkles, ShoppingBag, Phone, QrCode
 } from 'lucide-react';
 import type { Fulfillment } from './fulfillment';
-import { apiFetch, assetUrl, errorMessage, getPublic } from '../../lib/api';
+import { apiFetch, assetUrl, clearPublicCache, errorMessage, getPublic } from '../../lib/api';
 import { yen } from '../../lib/format';
 import { type StoreLocation } from '../../lib/stores';
 import { useCustomer } from '../../lib/customer-context';
@@ -250,6 +250,8 @@ export default function DineInOrderExperience({
   // QR Scan Preloader states
   const [loadingMenu, setLoadingMenu] = useState<boolean>(true);
   const [fadeOutPreloader, setFadeOutPreloader] = useState<boolean>(false);
+  const [menuLoadError, setMenuLoadError] = useState<string>('');
+  const [menuReloadKey, setMenuReloadKey] = useState(0);
 
   // Scroll to top floating button state
   const [showScrollTop, setShowScrollTop] = useState<boolean>(false);
@@ -541,54 +543,71 @@ export default function DineInOrderExperience({
   // Load menu items & categories (dynamically for Dine-In vs Takeout with QR Scan Preloader)
   useEffect(() => {
     const fQuery = isTakeout ? 'TAKEOUT' : 'DINE_IN';
+    clearPublicCache('/api/v1/menu');
     setLoadingMenu(true);
     setFadeOutPreloader(false);
+    setMenuLoadError('');
     let isCancelled = false;
 
-    Promise.all([
-      getPublic<QuickMenuItem[]>(`/api/v1/menu/items?fulfillment=${fQuery}`),
-      getPublic<QuickCategory[]>(`/api/v1/menu/categories?fulfillment=${fQuery}`),
-    ])
-      .then(([items, cats]) => {
+    const normalizeItems = (items: QuickMenuItem[]) =>
+      items
+        .filter(it => it.isActive !== false && it.isOrderable !== false && !it.isSoldOut)
+        .sort((a, b) => {
+          const ca = a.category?.nameEn || a.categoryId || '';
+          const cb = b.category?.nameEn || b.categoryId || '';
+          if (ca !== cb) return ca.localeCompare(cb);
+          return (a.nameEn || '').localeCompare(b.nameEn || '');
+        });
+
+    const finishLoading = () => {
+      setFadeOutPreloader(true);
+      setTimeout(() => {
+        if (!isCancelled) setLoadingMenu(false);
+      }, 350);
+    };
+
+    (async () => {
+      try {
+        let items = await getPublic<QuickMenuItem[]>(`/api/v1/menu/items?fulfillment=${fQuery}`);
+        let cats = await getPublic<QuickCategory[]>(`/api/v1/menu/categories?fulfillment=${fQuery}`);
+
+        // Fallback: if fulfillment filter returns nothing (or request shaped oddly), load full catalog
+        if (!Array.isArray(items) || items.length === 0) {
+          items = await getPublic<QuickMenuItem[]>('/api/v1/menu/items');
+        }
+        if (!Array.isArray(cats) || cats.length === 0) {
+          cats = await getPublic<QuickCategory[]>('/api/v1/menu/categories');
+        }
+
         if (isCancelled) return;
-        if (Array.isArray(items)) {
-          setMenuItems(
-            items
-              .filter(it => it.isActive !== false && it.isOrderable !== false && !it.isSoldOut)
-              .sort((a, b) => {
-                const ca = a.category?.nameEn || a.categoryId || '';
-                const cb = b.category?.nameEn || b.categoryId || '';
-                if (ca !== cb) return ca.localeCompare(cb);
-                return (a.nameEn || '').localeCompare(b.nameEn || '');
-              }),
+        setMenuItems(Array.isArray(items) ? normalizeItems(items) : []);
+        setCategories(Array.isArray(cats) ? cats : []);
+        if (!Array.isArray(items) || normalizeItems(items).length === 0) {
+          setMenuLoadError(
+            lang === 'ja'
+              ? 'メニューを読み込めませんでした。通信環境をご確認のうえ、再読み込みしてください。'
+              : 'Could not load the menu. Check your connection and try again.',
           );
         }
-        if (Array.isArray(cats)) {
-          setCategories(cats);
-        }
-        // Smooth preloader transition
         setTimeout(() => {
-          if (!isCancelled) {
-            setFadeOutPreloader(true);
-            setTimeout(() => {
-              if (!isCancelled) setLoadingMenu(false);
-            }, 350);
-          }
-        }, 350);
-      })
-      .catch(() => {
-        if (!isCancelled) {
-          setFadeOutPreloader(true);
-          setTimeout(() => {
-            if (!isCancelled) setLoadingMenu(false);
-          }, 350);
-        }
-      });
+          if (!isCancelled) finishLoading();
+        }, 280);
+      } catch {
+        if (isCancelled) return;
+        setMenuItems([]);
+        setMenuLoadError(
+          lang === 'ja'
+            ? 'メニューの取得に失敗しました。再読み込みしてください。'
+            : 'Failed to load the menu. Please retry.',
+        );
+        finishLoading();
+      }
+    })();
 
     return () => {
       isCancelled = true;
     };
-  }, [isTakeout]);
+  }, [isTakeout, menuReloadKey]);
 
   const knownReadyRef = useRef<Set<string>>(new Set());
 
@@ -841,12 +860,14 @@ export default function DineInOrderExperience({
   // Active category display title
   const activeCategoryTitle = useMemo(() => {
     if (selectedCategoryId === 'all') {
-      return lang === 'ja' ? '店内メニュー' : 'Dine-In Menu';
+      return isTakeout
+        ? (lang === 'ja' ? 'お持ち帰りメニュー' : 'Takeout Menu')
+        : (lang === 'ja' ? '店内メニュー' : 'Dine-In Menu');
     }
     const cat = categories.find(c => c.id === selectedCategoryId);
     if (!cat) return lang === 'ja' ? 'おすすめ料理' : 'Featured Dishes';
     return lang === 'ja' ? (cat.nameJa || cat.nameEn) : cat.nameEn;
-  }, [selectedCategoryId, categories, lang]);
+  }, [selectedCategoryId, categories, lang, isTakeout]);
 
   // Add item to tray
   const addToTray = (newItem: TrayItem) => {
@@ -1082,89 +1103,32 @@ export default function DineInOrderExperience({
         />
       )}
 
-      {/* ── TOP HEADER (Logo, Brand & Branch, Flag Pill) ── */}
+      {/* ── TOP HEADER: brand + table + actions (single composition) ── */}
       <header className="dio-header">
         <div className="dio-header-inner">
           <div className="dio-header-left">
-            <div className="dio-header-logo-wrap" aria-hidden={false}>
-              <BrandMark className="dio-header-logo" size={48} alt="Adarsha (アダルサ)" />
+            <div className="dio-header-logo-wrap">
+              <BrandMark className="dio-header-logo" size={44} alt="Adarsha (アダルサ)" />
             </div>
-
             <div className="dio-header-brand-wrap">
-              <div className="dio-header-kicker">
-                {lang === 'ja' ? '本格インド料理' : 'Authentic Indian Cuisine'}
-              </div>
               <div className="dio-header-title-lines">
                 <span className="dio-header-brand">{lang === 'ja' ? 'アダルサ' : 'Adarsha'}</span>
                 <span className="dio-header-branch">{branchDisplayName}</span>
               </div>
-              <div className="dio-header-pills-row">
-                {isTakeout ? (
-                  <>
-                    <button
-                      type="button"
-                      className="dio-table-pill"
-                      style={{
-                        background: '#fff7ed',
-                        borderColor: '#fed7aa',
-                        color: '#c2410c',
-                      }}
-                      onClick={() => {
-                        if (onOpenChoiceModal) onOpenChoiceModal();
-                      }}
-                      title={lang === 'ja' ? 'お持ち帰り（店頭受取）' : 'Takeout / To Go'}
-                    >
-                      <span>{lang === 'ja' ? '🛍️ お持帰り' : '🛍️ Takeout'}</span>
-                      <ChevronDown size={11} />
-                    </button>
-
-                    {(onOpenChoiceModal || onSwitchToDineIn) && (
-                      <button
-                        type="button"
-                        className="dio-switch-pill"
-                        onClick={() => {
-                          if (onSwitchToDineIn) onSwitchToDineIn();
-                          else if (onOpenChoiceModal) onOpenChoiceModal();
-                        }}
-                        title={lang === 'ja' ? '店内飲食（お席でご注文）に切り替え' : 'Switch to Dine-In'}
-                      >
-                        <UtensilsCrossed size={11} />
-                        <span>{lang === 'ja' ? (tableNumber ? `席${tableNumber}へ` : '店内切替') : 'Dine-In'}</span>
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      className="dio-table-pill"
-                      onClick={() => {
-                        if (onOpenChoiceModal) onOpenChoiceModal();
-                      }}
-                      title={lang === 'ja' ? '注文方法の変更（お席番号はQRで固定）' : 'Change order type (table locked to QR)'}
-                    >
-                      <QrCode size={11} />
-                      <span>{lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`}</span>
-                      {(onOpenChoiceModal || onSwitchToTakeout) && <ChevronDown size={11} />}
-                    </button>
-
-                    {(onOpenChoiceModal || onSwitchToTakeout) && (
-                      <button
-                        type="button"
-                        className="dio-switch-pill"
-                        onClick={() => {
-                          if (onOpenChoiceModal) onOpenChoiceModal();
-                          else if (onSwitchToTakeout) onSwitchToTakeout();
-                        }}
-                        title={lang === 'ja' ? 'テイクアウト（お持ち帰り）に切り替え' : 'Switch to Takeout'}
-                      >
-                        <ShoppingBag size={11} />
-                        <span>{lang === 'ja' ? '持帰切替' : 'To Go'}</span>
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
+              <button
+                type="button"
+                className={`dio-table-pill ${isTakeout ? 'is-takeout' : ''}`}
+                onClick={() => onOpenChoiceModal?.()}
+                title={lang === 'ja' ? '注文方法を変更' : 'Change order type'}
+              >
+                {isTakeout ? <ShoppingBag size={12} /> : <QrCode size={12} />}
+                <span>
+                  {isTakeout
+                    ? (lang === 'ja' ? 'お持ち帰り' : 'Takeout')
+                    : (lang === 'ja' ? `お席 ${tableNumber}` : `Table ${tableNumber}`)}
+                </span>
+                {onOpenChoiceModal && <ChevronDown size={12} />}
+              </button>
             </div>
           </div>
 
@@ -1173,42 +1137,21 @@ export default function DineInOrderExperience({
               type="button"
               className={`dio-user-pill ${customer ? 'is-logged-in' : ''}`}
               onClick={() => setShowAuthModal(true)}
-              title={customer ? (lang === 'ja' ? `${customer.name}様 会員情報` : `${customer.name} Member Info`) : (lang === 'ja' ? '会員ログイン・新規登録（任意）' : 'Member Login (Optional)')}
+              aria-label={customer ? (lang === 'ja' ? '会員情報' : 'Member') : (lang === 'ja' ? 'ログイン' : 'Login')}
             >
-              <User size={14} />
-              <span>{customer ? (customer.name.length > 5 ? customer.name.slice(0, 5) + '…' : customer.name) : (lang === 'ja' ? 'ログイン' : 'Login')}</span>
+              <User size={15} />
               {customer && customer.points > 0 && (
-                <span className="dio-user-pill-pts">{customer.points}pt</span>
+                <span className="dio-user-pill-pts">{customer.points}</span>
               )}
             </button>
-
             <button
               type="button"
               className="dio-flag-pill"
               onClick={toggleLang}
-              title={lang === 'ja' ? 'Switch to English' : '日本語に切り替え'}
+              aria-label={lang === 'ja' ? 'Switch to English' : '日本語に切り替え'}
             >
-              <span>{lang === 'ja' ? '🇯🇵 日本語' : '🇬🇧 EN'}</span>
-              <ChevronDown size={13} color="#4b5563" />
+              {lang === 'ja' ? 'JP' : 'EN'}
             </button>
-          </div>
-        </div>
-
-        <div className="dio-store-strip">
-          <div className="dio-store-strip-inner">
-            <span className="dio-store-strip-badge">
-              {isTakeout
-                ? (lang === 'ja' ? 'テイクアウト' : 'Takeout')
-                : (lang === 'ja' ? 'お席から注文' : 'Table order')}
-            </span>
-            {selectedStore.address && (
-              <span className="dio-store-strip-text" title={selectedStore.address}>
-                {selectedStore.address}
-              </span>
-            )}
-            {selectedStore.hours && (
-              <span className="dio-store-strip-hours">{selectedStore.hours}</span>
-            )}
           </div>
         </div>
       </header>
@@ -1331,57 +1274,54 @@ export default function DineInOrderExperience({
         </div>
       </div>
 
-      {/* ── SECTION HEADER (Indian Dinner) ── */}
+      {/* ── SECTION HEADER ── */}
       <div className="dio-section-header-wrap">
-        <h2 className="dio-section-title">{activeCategoryTitle}</h2>
-        <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#9a3412', fontWeight: 600 }}>
-          {lang === 'ja'
-            ? `${filteredItems.length}品 · カテゴリから選べます`
-            : `${filteredItems.length} dishes · browse by category`}
-        </p>
-        {!isTakeout && (
-          <div
-            style={{
-              marginTop: 10,
-              padding: '10px 12px',
-              borderRadius: 12,
-              background: timingStatus.isLunchOpenNow || timingStatus.isDinnerOpenNow ? '#fff7ed' : '#fffbeb',
-              border: '1px solid #fed7aa',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-            }}
-          >
-            <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#9a3412' }}>
-              {lang === 'ja'
-                ? timingStatus.isLunchOpenNow
-                  ? `☀️ ランチ時間帯 · ランチセット受付中（${timingStatus.lunchHoursLabel}）`
-                  : timingStatus.isDinnerOpenNow
-                    ? `🌙 ディナー時間帯 · ディナーセット受付中（${timingStatus.dinnerHoursLabel}）`
-                    : `⏰ セットメニュー受付時間外（現在 ${timingStatus.nowHhmm}）`
-                : timingStatus.isLunchOpenNow
-                  ? `☀️ Lunch hours · Lunch sets available (${timingStatus.lunchHoursLabel})`
-                  : timingStatus.isDinnerOpenNow
-                    ? `🌙 Dinner hours · Dinner sets available (${timingStatus.dinnerHoursLabel})`
-                    : `⏰ Set menus unavailable now (${timingStatus.nowHhmm})`}
-            </div>
-            <div style={{ fontSize: '0.72rem', color: '#78716c', fontWeight: 600 }}>
-              {lang === 'ja'
-                ? `ランチセット ${timingStatus.lunchHoursLabel} ／ ディナーセット ${timingStatus.dinnerHoursLabel} · アラカルトは営業中いつでもご注文可`
-                : `Lunch sets ${timingStatus.lunchHoursLabel} · Dinner sets ${timingStatus.dinnerHoursLabel} · Ala carte anytime while open`}
-            </div>
-          </div>
+        <div className="dio-section-heading-row">
+          <h2 className="dio-section-title">{activeCategoryTitle}</h2>
+          <span className="dio-section-count">
+            {lang === 'ja' ? `${filteredItems.length}品` : `${filteredItems.length}`}
+          </span>
+        </div>
+        {!isTakeout && (timingStatus.isLunchOpenNow || timingStatus.isDinnerOpenNow) && (
+          <p className="dio-section-timing">
+            {timingStatus.isLunchOpenNow
+              ? (lang === 'ja' ? `ランチセット受付中 · ${timingStatus.lunchHoursLabel}` : `Lunch sets open · ${timingStatus.lunchHoursLabel}`)
+              : (lang === 'ja' ? `ディナーセット受付中 · ${timingStatus.dinnerHoursLabel}` : `Dinner sets open · ${timingStatus.dinnerHoursLabel}`)}
+          </p>
         )}
         <div className="dio-section-divider" />
       </div>
 
-      {/* ── HORIZONTAL MENU ITEM CARDS (Exact match to screenshot) ── */}
+      {/* ── MENU ITEM CARDS ── */}
       <div className="dio-menu-list">
         {filteredItems.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--dio-gray)' }}>
-            <p style={{ fontSize: '1rem', fontWeight: 700 }}>
-              {lang === 'en' ? 'No dishes found' : '該当する料理が見つかりませんでした'}
+          <div className="dio-empty-state" role="status">
+            <ChefHat size={36} strokeWidth={1.5} aria-hidden />
+            <p className="dio-empty-title">
+              {menuLoadError
+                ? (lang === 'ja' ? 'メニューを表示できません' : 'Menu unavailable')
+                : searchQuery.trim()
+                  ? (lang === 'ja' ? '検索に一致する料理がありません' : 'No dishes match your search')
+                  : (lang === 'ja' ? '表示できる料理がありません' : 'No dishes to show')}
             </p>
+            <p className="dio-empty-sub">
+              {menuLoadError ||
+                (lang === 'ja'
+                  ? 'カテゴリを「全メニュー」にするか、検索をクリアしてお試しください。'
+                  : 'Try All Dishes, or clear the search.')}
+            </p>
+            <button
+              type="button"
+              className="dio-empty-retry"
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedCategoryId('all');
+                setMenuReloadKey(k => k + 1);
+              }}
+            >
+              <RotateCcw size={16} />
+              {lang === 'ja' ? 'メニューを再読み込み' : 'Reload menu'}
+            </button>
           </div>
         ) : (
           filteredItems.map(item => {

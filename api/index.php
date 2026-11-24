@@ -24,7 +24,14 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, post-chec
 header('Pragma: no-cache');
 header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-$allowedOrigins = ['https://adarsha.jp', 'https://www.adarsha.jp', 'http://localhost:5173', 'http://localhost:4000', 'http://localhost:3000'];
+$allowedOrigins = [
+    'https://adarsha.jp',
+    'https://www.adarsha.jp',
+    'https://order.adarsha.jp',
+    'http://localhost:5173',
+    'http://localhost:4000',
+    'http://localhost:3000',
+];
 
 $isAllowedOrigin = false;
 if ($origin !== '') {
@@ -32,8 +39,9 @@ if ($origin !== '') {
         $isAllowedOrigin = true;
     } else {
         $parsed = parse_url($origin);
-        $host = $parsed['host'] ?? '';
-        if ($host === 'adarsha.jp' || (strlen($host) > 12 && substr($host, -12) === '.adarsha.jp')) {
+        $host = strtolower((string)($parsed['host'] ?? ''));
+        // Any first-party subdomain (order., kitchen., staging., …)
+        if ($host === 'adarsha.jp' || preg_match('/(^|\.)adarsha\.jp$/', $host)) {
             $isAllowedOrigin = true;
         }
     }
@@ -47,7 +55,7 @@ if ($isAllowedOrigin) {
     header('Access-Control-Allow-Origin: https://adarsha.jp');
 }
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-QR-Session');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
