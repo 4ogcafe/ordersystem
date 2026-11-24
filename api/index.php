@@ -1836,10 +1836,11 @@ if (
         exit;
     }
 
-    // Shared media host: one /uploads file for every branch + domain.
-    $sharedMedia = 'https://order.adarsha.jp/uploads/' . rawurlencode($reqFile);
-    header('Location: ' . $sharedMedia, true, 302);
-    header('Cache-Control: public, max-age=300');
+    // This host's own uploads only — never redirect to another domain.
+    http_response_code(404);
+    header('Content-Type: text/plain; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo 'Image not found';
     exit;
 }
 

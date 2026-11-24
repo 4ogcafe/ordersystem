@@ -2,7 +2,7 @@ import { getStaffToken, getCustomerToken, clearStaffSession } from './auth-stora
 
 /**
  * Empty in development: Vite proxies /api and /uploads to the API (see vite.config.ts).
- * On order.adarsha.jp (and other app subdomains) there is no PHP API — use the main site.
+ * On order.adarsha.jp the SPA still needs the main API for JSON — media stays same-origin.
  */
 function resolveApiBase(): string {
   const fromEnv = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
@@ -19,31 +19,7 @@ function resolveApiBase(): string {
   return '';
 }
 
-/**
- * Single shared media store. Live food/logo files currently sit on order.adarsha.jp/uploads
- * (adarsha.jp/uploads is empty on Hostinger). One file path serves every branch + both domains.
- */
-const CANONICAL_MEDIA_ORIGIN = 'https://order.adarsha.jp';
-
-function resolveMediaBase(): string {
-  const fromEnv = (
-    import.meta.env.VITE_MEDIA_URL ||
-    import.meta.env.VITE_UPLOADS_URL ||
-    ''
-  ).replace(/\/$/, '');
-  if (fromEnv) return fromEnv;
-  if (typeof window !== 'undefined') {
-    const host = window.location.hostname.toLowerCase();
-    // Same-origin when the browser is already on the host that has the files.
-    if (host === 'order.adarsha.jp') return '';
-    // Local Vite / Node already proxies /uploads.
-    if (host === 'localhost' || host === '127.0.0.1') return '';
-  }
-  return CANONICAL_MEDIA_ORIGIN;
-}
-
 const API_BASE = resolveApiBase();
-const MEDIA_BASE = resolveMediaBase();
 
 // Any host in front of /uploads/ is this app's own file, including older copies of the site.
 const UPLOAD_ORIGIN_REGEX = /^https?:\/\/[^/]+(?=\/uploads\/)/;
@@ -51,14 +27,9 @@ const DOMAIN_STRIP_REGEX = /^https?:\/\/((?:[\w-]+\.)?adarsha\.jp|localhost(:\d+
 const LOCAL_IMAGE = '';
 const PUBLIC_CACHE_MS = 60_000;
 
-function withMediaBase(path: string): string {
-  if (!path.startsWith('/')) return path;
-  return `${MEDIA_BASE}${path}`;
-}
-
 /**
- * Normalizes any image URL (relative, absolute localhost, or missing leading slashes)
- * so it works on adarsha.jp, order.adarsha.jp, and every branch — one shared /uploads file.
+ * Normalizes image URLs to same-origin paths.
+ * adarsha.jp and order.adarsha.jp each keep their own /uploads — never cross-host.
  */
 export function assetUrl(url: string | null | undefined): string {
   if (!url) return '';
@@ -69,63 +40,49 @@ export function assetUrl(url: string | null | undefined): string {
   if (/bg-hero-img/i.test(trimmed) || /unsplash\.com/i.test(trimmed)) return LOCAL_IMAGE;
   if (/^(data:|blob:)/i.test(trimmed)) return trimmed;
 
-  // Strip this site's own origin so we can re-point to the canonical media host.
+  // Strip any adarsha host so the current domain serves its own copy of the file.
   let path = trimmed.replace(UPLOAD_ORIGIN_REGEX, '').replace(DOMAIN_STRIP_REGEX, '');
 
-  // Fix missing leading slash for uploads
   if (/^uploads\//i.test(path)) {
     path = `/${path}`;
   } else if (/^\/?public\/uploads\//i.test(path)) {
     path = path.replace(/^\/?public/, '');
   }
 
-  // Map carousel slide images to clean versioned banners
   if (path.includes('hero-slide-1') || path.includes('1793707743') || path.includes('0d3ca7b4cb55a2c2') || path.includes('1791677310137')) {
-    return withMediaBase('/uploads/hero-slide-1-special-set-v2.webp');
+    return `/uploads/hero-slide-1-special-set-v2.webp`;
   }
   if (path.includes('hero-slide-2') || path.includes('1793707859') || path.includes('11e753d772ddb0d5') || path.includes('1791677360469')) {
-    return withMediaBase('/uploads/hero-slide-2-garlic-naan-v2.webp');
+    return `/uploads/hero-slide-2-garlic-naan-v2.webp`;
   }
   if (path.includes('hero-slide-3') || path.includes('1793707977') || path.includes('52b4ff533e02d77d') || path.includes('1791677400636')) {
-    return withMediaBase('/uploads/hero-slide-3-green-salad-v2.webp');
+    return `/uploads/hero-slide-3-green-salad-v2.webp`;
   }
 
   const bare = path.replace(/^\//, '');
 
-  // Brand / site logos under shared /uploads/
   if (/^(adarsha-log|logo-white|new-logo|site-logo|web-logo)[^/]*\.(webp|png|jpg|svg)$/i.test(bare)) {
-    return withMediaBase(`/uploads/${bare}`);
+    return `/uploads/${bare}`;
   }
 
   if (path.startsWith('/uploads/')) {
-    return withMediaBase(path);
+    return path;
   }
 
-  // Known upload filename without directory prefix
   if (/^\d{10,14}-[a-zA-Z0-9_-]+\.(jpg|jpeg|png|webp|gif|svg)$/i.test(bare)) {
-    return withMediaBase(`/uploads/${bare}`);
+    return `/uploads/${bare}`;
   }
 
-  // Other root-relative site images — prefer shared uploads
   if (/^\/[\w.-]+\.(webp|png|jpe?g|gif|svg)$/i.test(path) && !path.includes('/', 1)) {
-    return withMediaBase(`/uploads/${bare}`);
+    return `/uploads/${bare}`;
   }
 
-  // Relative path without leading slash
   if (!/^https?:\/\//i.test(path) && !path.startsWith('/')) {
-    if (/^uploads\//i.test(path)) return withMediaBase(`/${path}`);
     return `/${path}`;
   }
 
   return path;
 }
-
-/** Absolute uploads URL helpers (admin / meta tags). */
-export function mediaUrl(path: string): string {
-  return assetUrl(path.startsWith('/') ? path : `/${path}`);
-}
-
-export const MEDIA_ORIGIN = MEDIA_BASE || (typeof window !== 'undefined' ? window.location.origin : CANONICAL_MEDIA_ORIGIN);
 
 /** Canonical logo paths (also imported via BrandMark for hashed Vite assets). */
 export const SITE_LOGO_URL = '/brand/adarsha-logo.webp';
@@ -144,7 +101,6 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  // Attach verified QR session token if available for dine-in authorization
   try {
     if (typeof window !== 'undefined' && !headers.has('X-QR-Session')) {
       const rawQr = sessionStorage.getItem('adarsha_qr_session');
@@ -185,7 +141,6 @@ export function clearPublicCache(prefix = '/api/v1/menu'): void {
 
 /** Public GET shared by every component on the page, so e.g. settings is fetched once, not per component. */
 export function getPublic<T>(path: string): Promise<T> {
-  // Order on/off must show up on the next page load. A shared 60s cache kept the old buttons.
   const fresh = path.startsWith('/api/v1/orders/slots');
   const cached = publicCache.get(path);
   if (!fresh && cached && cached.expires > Date.now()) return cached.promise as Promise<T>;

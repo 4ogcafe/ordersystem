@@ -11,9 +11,6 @@ const LOGO_CANDIDATES = [
   logoSvg,
   '/brand/adarsha-logo.webp',
   '/brand/adarsha-stamp-logo.svg',
-  // Shared media host (same file for every branch / domain)
-  'https://order.adarsha.jp/uploads/adarsha-log.webp',
-  'https://order.adarsha.jp/uploads/site-logo-01.webp',
   '/uploads/adarsha-log.webp',
   '/uploads/site-logo-01.webp',
 ] as const;
